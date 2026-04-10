@@ -19,6 +19,7 @@ type RegisteredProvider = {
 };
 
 type EventHandler = (event: unknown, ctx: ExtensionContext) => unknown;
+type MessageRenderer = (...args: unknown[]) => unknown;
 
 export type ExtensionApiMock = {
 	api: ExtensionAPI;
@@ -26,6 +27,7 @@ export type ExtensionApiMock = {
 	commands: Map<string, RegisteredCommand>;
 	providers: Map<string, RegisteredProvider>;
 	handlers: Map<string, EventHandler[]>;
+	messageRenderers: Map<string, MessageRenderer>;
 	sentMessages: unknown[];
 	userMessages: Array<{ message: string; options?: unknown }>;
 	appendedEntries: Array<{ type: string; data: unknown }>;
@@ -33,6 +35,7 @@ export type ExtensionApiMock = {
 	getCommand(name: string): RegisteredCommand;
 	getProvider(name: string): RegisteredProvider;
 	getHandlers(name: string): EventHandler[];
+	getMessageRenderer(name: string): MessageRenderer;
 	setSessionName(name: string): void;
 	getSessionName(): string;
 };
@@ -42,6 +45,7 @@ export function createExtensionApiMock(initialSessionName = ""): ExtensionApiMoc
 	const commands = new Map<string, RegisteredCommand>();
 	const providers = new Map<string, RegisteredProvider>();
 	const handlers = new Map<string, EventHandler[]>();
+	const messageRenderers = new Map<string, MessageRenderer>();
 	const sentMessages: unknown[] = [];
 	const userMessages: Array<{ message: string; options?: unknown }> = [];
 	const appendedEntries: Array<{ type: string; data: unknown }> = [];
@@ -56,6 +60,9 @@ export function createExtensionApiMock(initialSessionName = ""): ExtensionApiMoc
 		},
 		registerProvider(name: string, provider: RegisteredProvider) {
 			providers.set(name, provider);
+		},
+		registerMessageRenderer(name: string, renderer: MessageRenderer) {
+			messageRenderers.set(name, renderer);
 		},
 		on(name: string, handler: EventHandler) {
 			handlers.set(name, [...(handlers.get(name) ?? []), handler]);
@@ -83,6 +90,7 @@ export function createExtensionApiMock(initialSessionName = ""): ExtensionApiMoc
 		commands,
 		providers,
 		handlers,
+		messageRenderers,
 		sentMessages,
 		userMessages,
 		appendedEntries,
@@ -109,6 +117,13 @@ export function createExtensionApiMock(initialSessionName = ""): ExtensionApiMoc
 		},
 		getHandlers(name: string) {
 			return handlers.get(name) ?? [];
+		},
+		getMessageRenderer(name: string) {
+			const renderer = messageRenderers.get(name);
+			if (!renderer) {
+				throw new Error(`Message renderer not registered: ${name}`);
+			}
+			return renderer;
 		},
 		setSessionName(name: string) {
 			sessionName = name;

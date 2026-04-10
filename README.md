@@ -14,6 +14,7 @@ packages/
   generative-ui/
   idle-screensaver/
   todo-write/
+  until/
 ```
 
 ## Workspace
@@ -47,4 +48,5 @@ pi install npm:@ryan_nookpi/pi-extension-delayed-action
 pi install npm:@ryan_nookpi/pi-extension-generative-ui
 pi install npm:@ryan_nookpi/pi-extension-idle-screensaver
 pi install npm:@ryan_nookpi/pi-extension-todo-write
+pi install npm:@ryan_nookpi/pi-extension-until
 ```

@@ -26,7 +26,8 @@
 		"publish:delayed-action": "pnpm run verify && pnpm --filter @ryan_nookpi/pi-extension-delayed-action publish --access public --no-git-checks",
 		"publish:generative-ui": "pnpm run verify && pnpm --filter @ryan_nookpi/pi-extension-generative-ui publish --access public --no-git-checks",
 		"publish:idle-screensaver": "pnpm run verify && pnpm --filter @ryan_nookpi/pi-extension-idle-screensaver publish --access public --no-git-checks",
-		"publish:todo-write": "pnpm run verify && pnpm --filter @ryan_nookpi/pi-extension-todo-write publish --access public --no-git-checks"
+		"publish:todo-write": "pnpm run verify && pnpm --filter @ryan_nookpi/pi-extension-todo-write publish --access public --no-git-checks",
+		"publish:until": "pnpm run verify && pnpm --filter @ryan_nookpi/pi-extension-until publish --access public --no-git-checks"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.11",
