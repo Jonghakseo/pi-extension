@@ -5,7 +5,6 @@ Codex fast mode extension for pi.
 ## Install
 
 ```bash
-pi install /Users/creatrip/Documents/pi-extension/packages/codex-fast-mode
 pi install npm:@ryan_nookpi/pi-extension-codex-fast-mode
 ```
 

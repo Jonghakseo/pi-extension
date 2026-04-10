@@ -5,7 +5,6 @@ Independent pi package for the `todo_write` extension.
 ## Install
 
 ```bash
-pi install /Users/creatrip/Documents/pi-extension/packages/todo-write
 pi install npm:@ryan_nookpi/pi-extension-todo-write
 ```
 

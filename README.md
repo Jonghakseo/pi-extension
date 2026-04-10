@@ -20,21 +20,6 @@ packages/
 
 This repository uses pnpm workspaces for local management and npm-compatible package manifests for publishing.
 
-## Local install examples
-
-From the cloned repository root:
-
-```bash
-pi install ./packages/ask-user-question
-pi install ./packages/auto-name
-pi install ./packages/clipboard
-pi install ./packages/codex-fast-mode
-pi install ./packages/delayed-action
-pi install ./packages/generative-ui
-pi install ./packages/idle-screensaver
-pi install ./packages/todo-write
-```
-
 ## Install from npm
 
 ```bash
