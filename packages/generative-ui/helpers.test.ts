@@ -10,6 +10,12 @@ describe("generative-ui helpers", () => {
 		expect(guidelines.length).toBeGreaterThan(1000);
 	});
 
+	it("skips unknown modules and deduplicates repeated guideline sections", () => {
+		const diagramOnly = getGuidelines(["diagram", "diagram", "unknown"]);
+		expect(diagramOnly.match(/## Diagram types/g)).toHaveLength(1);
+		expect(diagramOnly.endsWith("\n")).toBe(true);
+	});
+
 	it("builds shell and wrapped html documents", () => {
 		expect(shellHTML()).toContain("morphdom");
 		expect(wrapHTML("<div>hello</div>")).toContain("<body><div>hello</div>");

@@ -89,4 +89,93 @@ describe("codex fast mode", () => {
 			service_tier: "priority",
 		});
 	});
+
+	it("handles help, status, off, and completion filtering", async () => {
+		vi.mocked(readFileSync).mockReturnValue('{"enabled":false}');
+		const apiMock = createExtensionApiMock();
+		codexFastMode(apiMock.api);
+
+		const command = apiMock.getCommand("codex-fast");
+		const notify = vi.fn();
+		const ctx = { hasUI: true, ui: { notify } } as unknown as ExtensionContext;
+
+		expect(command.getArgumentCompletions?.("st")).toEqual([{ value: "status", label: "status" }]);
+		expect(command.getArgumentCompletions?.("zzz")).toBeNull();
+
+		await command.handler("", ctx);
+		await command.handler("bogus", ctx);
+		await command.handler("status", ctx);
+		await command.handler("off", ctx);
+		await command.handler("on", { hasUI: false } as unknown as ExtensionContext);
+		await command.handler("status", { hasUI: false } as unknown as ExtensionContext);
+		await command.handler("bogus", { hasUI: false } as unknown as ExtensionContext);
+
+		expect(notify).toHaveBeenCalledWith("Usage: /codex-fast [on|off|status]", "info");
+		expect(notify).toHaveBeenCalledWith(
+			`Codex Fast Mode: OFF (always force text.verbosity=low; inject service_tier=priority when ON for openai-codex/${SUPPORTED_MODEL_ID})`,
+			"info",
+		);
+		expect(notify).toHaveBeenCalledWith(
+			`Codex Fast Mode disabled (text.verbosity=low still applies for openai-codex/${SUPPORTED_MODEL_ID})`,
+			"info",
+		);
+	});
+
+	it("shows the enabled status message when persisted state is on", async () => {
+		vi.mocked(readFileSync).mockReturnValue('{"enabled":true}');
+		const apiMock = createExtensionApiMock();
+		codexFastMode(apiMock.api);
+
+		const notify = vi.fn();
+		await apiMock.getCommand("codex-fast").handler("status", {
+			hasUI: true,
+			ui: { notify },
+		} as unknown as ExtensionContext);
+
+		expect(notify).toHaveBeenCalledWith(
+			`Codex Fast Mode: ON (always force text.verbosity=low; inject service_tier=priority when ON for openai-codex/${SUPPORTED_MODEL_ID})`,
+			"info",
+		);
+	});
+
+	it("passes through unsupported payload shapes and models", async () => {
+		vi.mocked(readFileSync).mockReturnValue('{"enabled":false}');
+		vi.mocked(streamSimpleOpenAICodexResponses).mockResolvedValue("stream-result" as never);
+		const apiMock = createExtensionApiMock();
+		codexFastMode(apiMock.api);
+
+		const provider = apiMock.getProvider("openai-codex");
+		await provider.streamSimple({ provider: "openai-codex", id: SUPPORTED_MODEL_ID }, { messages: [] }, {});
+		const handler = vi.mocked(streamSimpleOpenAICodexResponses).mock.calls[0]?.[2]?.onPayload;
+		if (typeof handler !== "function") throw new Error("onPayload handler missing");
+		const onPayload = handler as unknown as (payload: unknown, model: unknown) => Promise<unknown>;
+
+		await expect(onPayload("raw", { provider: "openai-codex", id: SUPPORTED_MODEL_ID })).resolves.toBe("raw");
+		await expect(onPayload({ text: {} }, { provider: "other", id: SUPPORTED_MODEL_ID })).resolves.toEqual({ text: {} });
+		await expect(onPayload({ text: {} }, { provider: "openai-codex", id: "other-model" })).resolves.toEqual({
+			text: {},
+		});
+		await expect(onPayload({ text: {} }, { provider: "openai-codex", id: SUPPORTED_MODEL_ID })).resolves.toEqual({
+			text: { verbosity: "low" },
+		});
+		await expect(onPayload({ text: "plain" }, { provider: "openai-codex", id: SUPPORTED_MODEL_ID })).resolves.toEqual({
+			text: { verbosity: "low" },
+		});
+		vi.mocked(streamSimpleOpenAICodexResponses).mockReset();
+		await provider.streamSimple(
+			{ provider: "openai-codex", id: SUPPORTED_MODEL_ID },
+			{ messages: [] },
+			{
+				onPayload: async () => null,
+			},
+		);
+		const nullHandler = vi.mocked(streamSimpleOpenAICodexResponses).mock.calls[0]?.[2]?.onPayload;
+		if (typeof nullHandler !== "function") throw new Error("onPayload handler missing");
+		const onPayloadWithNull = nullHandler as unknown as (payload: unknown, model: unknown) => Promise<unknown>;
+		await expect(
+			onPayloadWithNull({ text: {} }, { provider: "openai-codex", id: SUPPORTED_MODEL_ID }),
+		).resolves.toEqual({
+			text: { verbosity: "low" },
+		});
+	});
 });

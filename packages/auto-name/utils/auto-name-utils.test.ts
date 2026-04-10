@@ -5,6 +5,7 @@ import {
 	extractSessionFilePath,
 	formatNameStatus,
 	isSubagentSessionPath,
+	isSuccessfulResult,
 	MAX_MESSAGE_LENGTH,
 	MAX_NAME_LENGTH,
 	MAX_STATUS_CHARS,
@@ -24,6 +25,8 @@ describe("auto-name utils", () => {
 		};
 		expect(extractSessionFilePath(sessionManager)).toBe("/tmp/example.json");
 		expect(extractSessionFilePath({ getSessionFile: () => undefined })).toBeUndefined();
+		expect(extractSessionFilePath({ getSessionFile: "nope" })).toBeUndefined();
+		expect(extractSessionFilePath(null)).toBeUndefined();
 		expect(
 			extractSessionFilePath({
 				getSessionFile: () => {
@@ -53,5 +56,11 @@ describe("auto-name utils", () => {
 			{ type: "text", text: "suffix" },
 		]);
 		expect(result).toBe(`${"a".repeat(MAX_NAME_LENGTH)}`);
+	});
+
+	it("accepts only fully stopped model results", () => {
+		expect(isSuccessfulResult("stop")).toBe(true);
+		expect(isSuccessfulResult("length")).toBe(false);
+		expect(isSuccessfulResult(undefined)).toBe(false);
 	});
 });

@@ -1,5 +1,5 @@
 import { completeSimple } from "@mariozechner/pi-ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateShortLabel, type ShortLabelContext } from "./short-label.ts";
 
 vi.mock("@mariozechner/pi-ai", () => ({
@@ -14,7 +14,21 @@ describe("generateShortLabel", () => {
 		vi.mocked(completeSimple).mockReset();
 	});
 
-	it("returns an empty string when model auth is unavailable", async () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("returns an empty string when model information or auth is unavailable", async () => {
+		expect(
+			await generateShortLabel(
+				{},
+				{
+					systemPrompt: "system",
+					prompt: "prompt",
+				},
+			),
+		).toBe("");
+
 		const label = await generateShortLabel(
 			{
 				model,
@@ -78,5 +92,64 @@ describe("generateShortLabel", () => {
 		);
 
 		expect(label).toBe("");
+	});
+
+	it("falls back to the default text extractor and handles provider errors", async () => {
+		vi.mocked(completeSimple)
+			.mockResolvedValueOnce({
+				stopReason: "stop",
+				content: [
+					{ type: "image", text: "ignored" },
+					{ type: "text", text: " label " },
+				],
+			} as CompleteSimpleResult)
+			.mockRejectedValueOnce(new Error("network"));
+
+		const ctx = {
+			model,
+			modelRegistry: {
+				getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "secret", headers: { foo: "bar" } }),
+			},
+		};
+
+		const label = await generateShortLabel(ctx, {
+			systemPrompt: "system",
+			prompt: "prompt",
+			maxTokens: 10,
+		});
+		const failed = await generateShortLabel(ctx, {
+			systemPrompt: "system",
+			prompt: "prompt",
+		});
+
+		expect(label).toBe("label");
+		expect(failed).toBe("");
+	});
+
+	it("aborts when the timeout elapses", async () => {
+		vi.useFakeTimers();
+		vi.mocked(completeSimple).mockImplementation(
+			async (_model, _context, options) =>
+				new Promise((_, reject) => {
+					options?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+				}),
+		);
+
+		const promise = generateShortLabel(
+			{
+				model,
+				modelRegistry: {
+					getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "secret" }),
+				},
+			},
+			{
+				systemPrompt: "system",
+				prompt: "prompt",
+				timeoutMs: 5,
+			},
+		);
+
+		await vi.advanceTimersByTimeAsync(5);
+		await expect(promise).resolves.toBe("");
 	});
 });

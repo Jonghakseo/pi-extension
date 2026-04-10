@@ -1,0 +1,9 @@
+pre-commit:
+  commands:
+    strict:
+      run: pnpm run precommit:strict
+
+pre-push:
+  commands:
+    strict:
+      run: pnpm run prepush:strict

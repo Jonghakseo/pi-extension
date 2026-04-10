@@ -43,11 +43,8 @@ export default function autoSessionName(pi: ExtensionAPI) {
 		if (!ctx.hasUI) return;
 		const cwdBasename = path.basename(process.cwd());
 		const name = pi.getSessionName();
-		if (name) {
-			ctx.ui.setTitle(`π - ${name} - ${cwdBasename}`);
-		} else {
-			ctx.ui.setTitle(`π - ${cwdBasename}`);
-		}
+		if (!name) return;
+		ctx.ui.setTitle(`π - ${name} - ${cwdBasename}`);
 	};
 
 	const updateStatus = (ctx: ExtensionContext) => {
