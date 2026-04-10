@@ -1,0 +1,24 @@
+{
+  "name": "@jonghakseo/pi-extension-delayed-action",
+  "version": "0.1.0",
+  "description": "Pi extension for scheduling delayed follow-up actions.",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

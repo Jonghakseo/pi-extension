@@ -1,0 +1,33 @@
+{
+  "name": "@jonghakseo/pi-extension-generative-ui",
+  "version": "0.1.0",
+  "description": "Generative UI widget extension for pi.",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "index.ts",
+    "README.md",
+    "guidelines.ts",
+    "html-utils.ts",
+    "svg-styles.ts"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "dependencies": {
+    "glimpseui": "^0.6.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

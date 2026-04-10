@@ -1,0 +1,14 @@
+{
+  "name": "pi-extension-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Monorepo for standalone pi extensions published as separate npm packages.",
+  "packageManager": "pnpm@10.24.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "list": "pnpm -r --depth -1 list --json",
+    "check": "node scripts/check-workspace.mjs"
+  }
+}

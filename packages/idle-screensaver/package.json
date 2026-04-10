@@ -1,0 +1,25 @@
+{
+  "name": "@jonghakseo/pi-extension-idle-screensaver",
+  "version": "0.1.0",
+  "description": "Standalone Pi extension package for the idle screensaver overlay.",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

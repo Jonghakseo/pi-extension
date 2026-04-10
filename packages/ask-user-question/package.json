@@ -1,0 +1,26 @@
+{
+  "name": "@jonghakseo/pi-extension-ask-user-question",
+  "version": "0.1.0",
+  "description": "AskUserQuestion tool extension for pi.",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

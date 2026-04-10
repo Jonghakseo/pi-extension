@@ -1,0 +1,25 @@
+{
+  "name": "@jonghakseo/pi-extension-clipboard",
+  "version": "0.1.0",
+  "description": "Clipboard copy tool extension for pi using OSC52 escape sequences.",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
