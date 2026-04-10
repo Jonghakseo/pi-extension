@@ -35,17 +35,13 @@ pi install /Users/creatrip/Documents/pi-extension/packages/todo-write
 
 ## npm publish flow
 
-Publish each package from its own directory:
+Use the workspace scripts from repo root:
 
 ```bash
-cd packages/ask-user-question && npm publish
-cd packages/auto-name && npm publish
-cd packages/clipboard && npm publish
-cd packages/codex-fast-mode && npm publish
-cd packages/delayed-action && npm publish
-cd packages/generative-ui && npm publish
-cd packages/idle-screensaver && npm publish
-cd packages/todo-write && npm publish
+pnpm run publish:dry-run
+pnpm run publish:all
+pnpm run publish:ask-user-question
+pnpm run publish:generative-ui
 ```
 
 After publish, users can install with:

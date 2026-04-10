@@ -9,6 +9,16 @@
   ],
   "scripts": {
     "list": "pnpm -r --depth -1 list --json",
-    "check": "node scripts/check-workspace.mjs"
+    "check": "node scripts/check-workspace.mjs",
+    "publish:dry-run": "pnpm run check && pnpm -r --filter './packages/*' publish --dry-run --access public --no-git-checks",
+    "publish:all": "pnpm run check && pnpm -r --filter './packages/*' publish --access public --no-git-checks",
+    "publish:ask-user-question": "pnpm --filter @jonghakseo/pi-extension-ask-user-question publish --access public --no-git-checks",
+    "publish:auto-name": "pnpm --filter @jonghakseo/pi-extension-auto-name publish --access public --no-git-checks",
+    "publish:clipboard": "pnpm --filter @jonghakseo/pi-extension-clipboard publish --access public --no-git-checks",
+    "publish:codex-fast-mode": "pnpm --filter @jonghakseo/pi-extension-codex-fast-mode publish --access public --no-git-checks",
+    "publish:delayed-action": "pnpm --filter @jonghakseo/pi-extension-delayed-action publish --access public --no-git-checks",
+    "publish:generative-ui": "pnpm --filter @jonghakseo/pi-extension-generative-ui publish --access public --no-git-checks",
+    "publish:idle-screensaver": "pnpm --filter @jonghakseo/pi-extension-idle-screensaver publish --access public --no-git-checks",
+    "publish:todo-write": "pnpm --filter @jonghakseo/pi-extension-todo-write publish --access public --no-git-checks"
   }
 }
