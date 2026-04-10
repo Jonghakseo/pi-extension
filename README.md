@@ -22,15 +22,17 @@ This repository uses pnpm workspaces for local management and npm-compatible pac
 
 ## Local install examples
 
+From the cloned repository root:
+
 ```bash
-pi install /Users/creatrip/Documents/pi-extension/packages/ask-user-question
-pi install /Users/creatrip/Documents/pi-extension/packages/auto-name
-pi install /Users/creatrip/Documents/pi-extension/packages/clipboard
-pi install /Users/creatrip/Documents/pi-extension/packages/codex-fast-mode
-pi install /Users/creatrip/Documents/pi-extension/packages/delayed-action
-pi install /Users/creatrip/Documents/pi-extension/packages/generative-ui
-pi install /Users/creatrip/Documents/pi-extension/packages/idle-screensaver
-pi install /Users/creatrip/Documents/pi-extension/packages/todo-write
+pi install ./packages/ask-user-question
+pi install ./packages/auto-name
+pi install ./packages/clipboard
+pi install ./packages/codex-fast-mode
+pi install ./packages/delayed-action
+pi install ./packages/generative-ui
+pi install ./packages/idle-screensaver
+pi install ./packages/todo-write
 ```
 
 ## npm publish flow
