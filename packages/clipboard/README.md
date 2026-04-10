@@ -5,7 +5,6 @@ Clipboard copy tool for pi using OSC52 escape sequences.
 ## Install
 
 ```bash
-pi install /Users/creatrip/Documents/pi-extension/packages/clipboard
 pi install npm:@ryan_nookpi/pi-extension-clipboard
 ```
 
