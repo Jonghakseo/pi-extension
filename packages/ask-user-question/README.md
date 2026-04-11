@@ -1,8 +1,13 @@
 # @ryan_nookpi/pi-extension-ask-user-question
 
-This extension lets pi ask the user questions and wait for an answer during a task.
+Interactive multi-question form tool for pi.
 
-It is useful when the request is ambiguous, when the user needs to choose between options, or when you need input before continuing.
+After installation, pi can use the `ask_user_question` tool to collect structured input from the user with:
+
+- `radio` questions for single choice
+- `checkbox` questions for multiple choice
+- `text` questions for free-form answers
+- optional `Other...` inputs for custom answers
 
 ## Install
 
@@ -10,17 +15,29 @@ It is useful when the request is ambiguous, when the user needs to choose betwee
 pi install npm:@ryan_nookpi/pi-extension-ask-user-question
 ```
 
-## Great for
+## Example
 
-- clarifying vague requirements before implementation
-- letting the user choose between options
-- collecting multiple selections from a checklist
-- asking for missing information in the middle of a task
-
-## Example prompts
-
-- "Ask which design option they want."
-- "Show deployment choices and let the user pick one."
-- "Ask the user to select multiple items from a checklist."
-
-After installation, pi can use the `AskUserQuestion` tool for interactive decision-making.
+```json
+{
+  "title": "Deployment settings",
+  "description": "Need a few decisions before continuing.",
+  "questions": [
+    {
+      "id": "env",
+      "type": "radio",
+      "prompt": "Which environment should I use?",
+      "options": [
+        { "value": "staging", "label": "Staging" },
+        { "value": "prod", "label": "Production" }
+      ]
+    },
+    {
+      "id": "notes",
+      "type": "text",
+      "prompt": "Anything else I should know?",
+      "required": false,
+      "placeholder": "Optional notes"
+    }
+  ]
+}
+```
