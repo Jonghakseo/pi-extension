@@ -12,6 +12,7 @@ export default defineConfig({
 			reportsDirectory: "coverage",
 			reporter: ["text", "html"],
 			include: [
+				"packages/ask-user-question/**/*.ts",
 				"packages/auto-name/utils/**/*.ts",
 				"packages/clipboard/index.ts",
 				"packages/codex-fast-mode/index.ts",
