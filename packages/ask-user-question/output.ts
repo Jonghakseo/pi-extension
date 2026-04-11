@@ -19,14 +19,14 @@ export function formatResultContent(result: FormResult): string {
 			const question = result.questions.find((candidate) => candidate.id === answer.id);
 			const label = question?.label || answer.id;
 			if (answer.type === "radio") {
-				const prefix = answer.wasCustom ? "(wrote) " : "";
+				const prefix = answer.wasCustom ? "(직접 입력) " : "";
 				return `${label}: ${prefix}${answer.value}`;
 			}
 			if (answer.type === "checkbox") {
 				const values = Array.isArray(answer.value) ? answer.value : [answer.value];
-				return values.length === 0 ? `${label}: (none selected)` : `${label}: ${values.join(", ")}`;
+				return values.length === 0 ? `${label}: (선택 없음)` : `${label}: ${values.join(", ")}`;
 			}
-			return `${label}: ${answer.value || "(empty)"}`;
+			return `${label}: ${answer.value || "(비어 있음)"}`;
 		})
 		.join("\n");
 }
@@ -37,7 +37,7 @@ export function buildRenderCallText(args: { questions?: Question[]; title?: stri
 	if (args.title) {
 		text += `${theme.fg("accent", args.title)} `;
 	}
-	text += theme.fg("muted", `${questions.length} question${questions.length !== 1 ? "s" : ""}`);
+	text += theme.fg("muted", `${questions.length}개 문항`);
 	const types = [...new Set(questions.map((question) => question.type))].join(", ");
 	if (types) {
 		text += theme.fg("dim", ` (${types})`);
@@ -56,7 +56,7 @@ export function buildRenderResultText(
 	}
 
 	if (details.cancelled) {
-		return theme.fg("warning", "Cancelled");
+		return theme.fg("warning", "취소됨");
 	}
 
 	return details.answers
@@ -64,15 +64,15 @@ export function buildRenderResultText(
 			const question = details.questions.find((candidate) => candidate.id === answer.id);
 			const label = question?.label || answer.id;
 			if (answer.type === "radio") {
-				const prefix = answer.wasCustom ? theme.fg("dim", "(wrote) ") : "";
+				const prefix = answer.wasCustom ? theme.fg("dim", "(직접 입력) ") : "";
 				return `${theme.fg("success", SYM.check)} ${theme.fg("accent", label)}: ${prefix}${answer.value}`;
 			}
 			if (answer.type === "checkbox") {
 				const values = Array.isArray(answer.value) ? answer.value : [answer.value];
-				const display = values.length ? values.join(", ") : theme.fg("dim", "(none)");
+				const display = values.length ? values.join(", ") : theme.fg("dim", "(선택 없음)");
 				return `${theme.fg("success", SYM.check)} ${theme.fg("accent", label)}: ${display}`;
 			}
-			return `${theme.fg("success", SYM.check)} ${theme.fg("accent", label)}: ${answer.value || theme.fg("dim", "(empty)")}`;
+			return `${theme.fg("success", SYM.check)} ${theme.fg("accent", label)}: ${answer.value || theme.fg("dim", "(비어 있음)")}`;
 		})
 		.join("\n");
 }

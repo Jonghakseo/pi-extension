@@ -18,23 +18,23 @@ type TodoState = {
 };
 
 const StatusEnum = StringEnum(["pending", "in_progress", "completed"] as const, {
-	description: "Task status",
+	description: "작업 상태",
 });
 
 const InputTask = Type.Object({
-	content: Type.String({ description: "Task description" }),
+	content: Type.String({ description: "작업 설명" }),
 	status: StatusEnum,
 	activeForm: Type.Optional(
 		Type.String({
-			description: "Present continuous form for display during execution (e.g., 'Running tests')",
+			description: "진행 중 표시용 현재진행형 문구 (예: '테스트 실행 중')",
 		}),
 	),
-	notes: Type.Optional(Type.String({ description: "Additional context or notes" })),
+	notes: Type.Optional(Type.String({ description: "추가 맥락 또는 메모" })),
 });
 
 const TodoWriteParams = Type.Object(
 	{
-		todos: Type.Array(InputTask, { description: "The updated todo list" }),
+		todos: Type.Array(InputTask, { description: "업데이트된 todo 목록" }),
 	},
 	{ additionalProperties: true },
 );
@@ -161,7 +161,7 @@ export function renderTodoWidgetLines(state: TodoState): string[] {
 		seenCompletedCount += 1;
 		if (seenCompletedCount <= hiddenCompletedCount) {
 			if (!insertedCompletedSummary) {
-				lines.push(`Completed +${hiddenCompletedCount}`);
+				lines.push(`완료 +${hiddenCompletedCount}`);
 				insertedCompletedSummary = true;
 			}
 			continue;
@@ -174,22 +174,22 @@ export function renderTodoWidgetLines(state: TodoState): string[] {
 }
 
 export function renderTodoWriteSummary(state: TodoState): string {
-	if (state.tasks.length === 0) return "Todo list cleared.";
+	if (state.tasks.length === 0) return "할 일 목록을 비웠습니다.";
 
 	const remainingTasks = state.tasks.filter((task) => task.status === "pending" || task.status === "in_progress");
 	const doneCount = state.tasks.filter((task) => task.status === "completed").length;
 
 	const lines: string[] = [];
 	if (remainingTasks.length === 0) {
-		lines.push("Remaining items: none.");
+		lines.push("남은 항목: 없음.");
 	} else {
-		lines.push(`Remaining items (${remainingTasks.length}):`);
+		lines.push(`남은 항목 (${remainingTasks.length}개):`);
 		for (const task of remainingTasks) {
 			lines.push(`  - ${task.id} ${task.content} [${task.status}]`);
 		}
 	}
 
-	lines.push(`Progress: ${doneCount}/${state.tasks.length} tasks complete`);
+	lines.push(`진행률: ${doneCount}/${state.tasks.length} 완료`);
 
 	for (const task of state.tasks) {
 		const marker = task.status === "completed" ? "✓" : task.status === "in_progress" ? "→" : "○";
@@ -205,17 +205,17 @@ function buildTodoTurnContext(state: TodoState): string | null {
 	const activeTask = state.tasks.find((task) => task.status === "in_progress");
 	const directive = activeTask
 		? [
-				`Active task: ${activeTask.id} ${activeTask.content}`,
-				"When this task becomes done, your next action must be todo_write before any other tool call or response.",
+				`현재 작업: ${activeTask.id} ${activeTask.content}`,
+				"이 작업이 끝났다면 다른 도구 호출이나 응답보다 먼저 todo_write로 상태를 갱신하세요.",
 			].join("\n")
 		: hasRemainingTasks(state)
-			? "There are remaining tasks but no active in_progress task. Before doing more work, call todo_write to select the next active task."
-			: "All todo items are complete.";
+			? "남은 작업이 있지만 현재 in_progress 상태의 항목이 없습니다. 계속 진행하기 전에 todo_write로 다음 활성 작업을 지정하세요."
+			: "모든 todo 항목이 완료되었습니다.";
 	return [
-		"[todo-reminder] internal todo_write state snapshot",
-		"Source: in-memory session state maintained by the todo_write tool.",
-		"Treat this as the latest authoritative todo status for the current turn.",
-		"Do not contradict this snapshot. If progress/status differs, update todo_write first.",
+		"[todo-reminder] 현재 todo_write 상태 스냅샷",
+		"출처: todo_write 도구가 유지하는 세션 메모리 상태입니다.",
+		"현재 턴에서는 이 내용을 가장 최신의 기준 상태로 간주하세요.",
+		"이 스냅샷과 모순되게 설명하지 말고, 상태가 달라졌다면 먼저 todo_write를 업데이트하세요.",
 		"",
 		summary,
 		"",
@@ -317,8 +317,8 @@ export function restoreTodoWriteState(ctx: Pick<ExtensionContext, "cwd" | "sessi
 export function buildPostCompactionTodoReminder(state: TodoState): string | null {
 	if (!hasRemainingTasks(state)) return null;
 	return [
-		"[todo-reminder] todo_write still has remaining items after compaction.",
-		"Please continue from the authoritative snapshot below.",
+		"[todo-reminder] compaction 이후에도 todo_write에 아직 남은 항목이 있습니다.",
+		"아래의 기준 스냅샷을 바탕으로 이어서 작업하세요.",
 		"",
 		renderTodoWriteSummary(state),
 	].join("\n");
@@ -452,34 +452,34 @@ async function syncTodoWidget(ctx: ExtensionContext, pi: Pick<ExtensionAPI, "app
 export default function todoWriteExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "todo_write",
-		label: "Todo Write",
-		description: `Use this tool to create and manage a structured task list for your current coding session. This helps you track progress, organize complex tasks, and show the user your overall progress.
+		label: "할 일 관리",
+		description: `현재 코딩 세션의 구조화된 작업 목록을 만들고 관리합니다. 진행 상황을 추적하고, 복잡한 요청을 단계로 나누고, 사용자에게 현재 무엇을 하고 있는지 보여줄 때 사용하세요.
 
-## When to Use
-- Complex multi-step tasks requiring 3+ distinct steps
-- User provides multiple tasks to be done
-- Non-trivial tasks requiring careful planning
+## 언제 사용할까
+- 3단계 이상의 복잡한 멀티스텝 작업
+- 사용자가 여러 작업을 한 번에 요청한 경우
+- 구현/디버깅 전에 계획 정리가 필요한 비단순 작업
 
-## When NOT to Use
-- Single, straightforward task — just do it directly
-- Trivial tasks completable in less than 3 steps
-- Purely conversational or informational requests
+## 언제 쓰지 말까
+- 단순한 한 가지 작업이면 바로 수행
+- 3단계 미만으로 끝나는 아주 간단한 작업
+- 순수 대화형/정보 제공성 응답만 필요한 경우
 
-## Rules
-- Write concise todo content in a style appropriate for the current task and user
-- Update task status in real-time as you work
-- Mark tasks complete IMMEDIATELY after finishing — don't batch completions
-- Exactly ONE task should be in_progress at any time
-- Complete current tasks before starting new ones
-- Remove tasks that are no longer relevant
-- ONLY mark completed when FULLY accomplished — if blocked, keep as in_progress
-- If requirements change mid-task, update the todo list before continuing
+## 규칙
+- 가능하면 todo 내용은 한글로 간결하게 작성
+- 작업하면서 상태를 실시간으로 갱신
+- 작업이 끝나면 즉시 completed로 변경하고 몰아서 처리하지 않기
+- in_progress 상태는 정확히 하나만 유지
+- 새 작업을 시작하기 전에 현재 작업을 정리
+- 더 이상 의미 없는 항목은 목록에서 제거
+- 완전히 끝난 일만 completed로 표시하고, 막혔으면 in_progress 유지
+- 요구사항이 바뀌면 계속 진행하기 전에 todo 목록부터 갱신
 
-## Task Fields
-- content: Imperative form (e.g., "Run tests")
+## 필드 설명
+- content: 명령형 작업 문구 (예: "테스트 실행")
 - status: pending | in_progress | completed
-- activeForm: (optional) Present continuous form for display (e.g., "Running tests")
-- notes: (optional) Additional context`,
+- activeForm: (선택) 진행 중 표시 문구 (예: "테스트 실행 중")
+- notes: (선택) 추가 맥락`,
 		parameters: TodoWriteParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const applied = applyTodoWrite(params.todos);
@@ -554,7 +554,7 @@ export default function todoWriteExtension(pi: ExtensionAPI): void {
 		if (!reminder) return;
 
 		if (ctx.hasUI) {
-			ctx.ui.notify("Todo reminder: remaining items still exist after compaction.", "info");
+			ctx.ui.notify("todo 알림: compaction 이후에도 남은 항목이 있습니다.", "info");
 		}
 
 		pi.sendMessage(

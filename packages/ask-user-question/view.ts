@@ -14,7 +14,7 @@ function createLineHelpers(width: number, theme: RenderFormInput["theme"]) {
 
 export function renderSubmitTab(input: RenderFormInput, add: (text: string) => void, maxWidth: number): void {
 	const { questions, answerState, theme } = input;
-	add(` ${theme.fg("accent", theme.bold("Review & Submit"))}`);
+	add(` ${theme.fg("accent", theme.bold("검토 및 제출"))}`);
 	add("");
 
 	for (const question of questions) {
@@ -22,10 +22,10 @@ export function renderSubmitTab(input: RenderFormInput, add: (text: string) => v
 		if (question.type === "radio") {
 			const answer = answerState.radioAnswers.get(question.id);
 			if (answer) {
-				const prefix = answer.wasCustom ? theme.fg("dim", "(wrote) ") : "";
+				const prefix = answer.wasCustom ? theme.fg("dim", "(직접 입력) ") : "";
 				add(` ${label} ${prefix}${answer.label}`);
 			} else {
-				add(` ${label} ${theme.fg("warning", "(unanswered)")}`);
+				add(` ${label} ${theme.fg("warning", "(미응답)")}`);
 			}
 			continue;
 		}
@@ -34,8 +34,8 @@ export function renderSubmitTab(input: RenderFormInput, add: (text: string) => v
 			const selected = answerState.checkAnswers.get(question.id) ?? new Set<string>();
 			const custom = answerState.checkCustom.get(question.id)?.trim();
 			const values = [...selected];
-			if (custom) values.push(`${theme.fg("dim", "(wrote)")} ${custom}`);
-			add(` ${label} ${values.length ? values.join(", ") : theme.fg("warning", "(unanswered)")}`);
+			if (custom) values.push(`${theme.fg("dim", "(직접 입력)")} ${custom}`);
+			add(` ${label} ${values.length ? values.join(", ") : theme.fg("warning", "(미응답)")}`);
 			continue;
 		}
 
@@ -43,23 +43,23 @@ export function renderSubmitTab(input: RenderFormInput, add: (text: string) => v
 		if (answer) {
 			add(` ${label} ${truncateToWidth(answer, maxWidth - visibleWidth(question.label) - 5)}`);
 		} else {
-			add(` ${label} ${theme.fg("warning", "(unanswered)")}`);
+			add(` ${label} ${theme.fg("warning", "(미응답)")}`);
 		}
 	}
 
 	add("");
 	if (allRequiredAnswered(answerState, questions)) {
-		add(` ${theme.fg("success", "Press Enter to submit")}`);
+		add(` ${theme.fg("success", "Enter로 제출")}`);
 	} else {
 		const missing = questions
 			.filter((question) => question.required && !isAnswered(answerState, question))
 			.map((question) => question.label)
 			.join(", ");
-		add(` ${theme.fg("warning", `Required: ${missing}`)}`);
+		add(` ${theme.fg("warning", `필수 응답: ${missing}`)}`);
 	}
 
 	add("");
-	add(theme.fg("dim", " Tab/←→ navigate questions • Enter submit • Esc cancel"));
+	add(theme.fg("dim", " Tab/←→ 질문 이동 • Enter 제출 • Esc 취소"));
 }
 
 export function renderTabBar(input: RenderFormInput, add: (text: string) => void): void {
@@ -76,7 +76,7 @@ export function renderTabBar(input: RenderFormInput, add: (text: string) => void
 	}
 
 	const submitActive = currentTab === questions.length;
-	const submitText = ` ${SYM.submit} Submit `;
+	const submitText = ` ${SYM.submit} 제출 `;
 	tabs.push(
 		submitActive
 			? theme.bg("selectedBg", theme.fg("text", submitText))
@@ -93,13 +93,13 @@ export function renderQuestion(input: RenderFormInput, add: (text: string) => vo
 
 	const typeTag =
 		question.type === "radio"
-			? input.theme.fg("dim", "[single-select]")
+			? input.theme.fg("dim", "[단일 선택]")
 			: question.type === "checkbox"
-				? input.theme.fg("dim", "[multi-select]")
-				: input.theme.fg("dim", "[text]");
+				? input.theme.fg("dim", "[복수 선택]")
+				: input.theme.fg("dim", "[텍스트]");
 
 	add(` ${input.theme.fg("text", input.theme.bold(question.prompt))} ${typeTag}`);
-	if (question.required) add(` ${input.theme.fg("warning", "*required")}`);
+	if (question.required) add(` ${input.theme.fg("warning", "*필수")}`);
 	add("");
 
 	if (question.type === "radio") {
@@ -119,7 +119,7 @@ export function renderQuestion(input: RenderFormInput, add: (text: string) => vo
 			const isSelected = selected?.wasCustom === true;
 			const bullet = isSelected ? input.theme.fg("accent", SYM.radioOn) : input.theme.fg("dim", SYM.radioOff);
 			const pointer = isCursor ? input.theme.fg("accent", SYM.pointer) : " ";
-			const label = isSelected ? `Other: ${selected.label}` : "Other...";
+			const label = isSelected ? `기타: ${selected.label}` : "기타...";
 			add(` ${pointer} ${bullet} ${input.theme.fg(isCursor ? "accent" : "muted", label)}`);
 		}
 	}
@@ -141,14 +141,14 @@ export function renderQuestion(input: RenderFormInput, add: (text: string) => vo
 			const custom = input.answerState.checkCustom.get(question.id)?.trim();
 			const box = custom ? input.theme.fg("accent", SYM.checkOn) : input.theme.fg("dim", SYM.checkOff);
 			const pointer = isCursor ? input.theme.fg("accent", SYM.pointer) : " ";
-			const label = custom ? `Other: ${custom}` : "Other...";
+			const label = custom ? `기타: ${custom}` : "기타...";
 			add(` ${pointer} ${box} ${input.theme.fg(isCursor ? "accent" : "muted", label)}`);
 		}
 	}
 
 	if (input.otherMode) {
 		add("");
-		add(` ${input.theme.fg("muted", "  Your answer:")}`);
+		add(` ${input.theme.fg("muted", "  직접 입력:")}`);
 		for (const line of input.editorLines) add(`   ${line}`);
 		return;
 	}
@@ -172,22 +172,22 @@ export function renderFooter(input: RenderFormInput, add: (text: string) => void
 	if (!question) return;
 	add("");
 	if (input.otherMode) {
-		add(input.theme.fg("dim", " Enter submit • Esc go back"));
+		add(input.theme.fg("dim", " Enter 제출 • Esc 돌아가기"));
 		return;
 	}
 	if (question.type === "text") {
-		const nav = input.questions.length > 1 ? "Tab/←→ navigate • " : "";
-		add(input.theme.fg("dim", ` ${nav}Enter submit • Esc cancel`));
+		const nav = input.questions.length > 1 ? "Tab/←→ 이동 • " : "";
+		add(input.theme.fg("dim", ` ${nav}Enter 제출 • Esc 취소`));
 		return;
 	}
 	if (question.type === "checkbox") {
-		const nav = input.questions.length > 1 ? "Tab/←→ navigate • " : "";
-		const enterAction = input.questions.length > 1 ? "next" : "submit";
-		add(input.theme.fg("dim", ` ↑↓ navigate • Space toggle • ${nav}Enter ${enterAction} • Esc cancel`));
+		const nav = input.questions.length > 1 ? "Tab/←→ 이동 • " : "";
+		const enterAction = input.questions.length > 1 ? "다음" : "제출";
+		add(input.theme.fg("dim", ` ↑↓ 이동 • Space 토글 • ${nav}Enter ${enterAction} • Esc 취소`));
 		return;
 	}
-	const nav = input.questions.length > 1 ? "Tab/←→ navigate • " : "";
-	add(input.theme.fg("dim", ` ↑↓ navigate • ${nav}Enter select • Esc cancel`));
+	const nav = input.questions.length > 1 ? "Tab/←→ 이동 • " : "";
+	add(input.theme.fg("dim", ` ↑↓ 이동 • ${nav}Enter 선택 • Esc 취소`));
 }
 
 export function renderForm(input: RenderFormInput): string[] {

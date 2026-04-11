@@ -112,7 +112,7 @@ describe("ask-user-question/controller", () => {
 		setup.controller.handleInput("\r");
 		expect(setup.controller.getState()).toMatchObject({ otherMode: true, otherQuestionId: "radio" });
 		expect(setup.editor.getText()).toBe("saved");
-		expect(setup.controller.render(80).join("\n")).toContain("Your answer:");
+		expect(setup.controller.render(80).join("\n")).toContain("직접 입력:");
 
 		setup.controller.handleInput("x");
 		setup.controller.handleInput("\t");

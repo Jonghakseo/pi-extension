@@ -2,7 +2,7 @@
 
 This extension automatically names a pi session based on the first user message.
 
-It makes sessions easier to recognize when you have many tasks open at once.
+It helps you quickly recognize what each session is about when many tasks are open at once.
 
 ## Install
 
@@ -25,4 +25,4 @@ pi install npm:@ryan_nookpi/pi-extension-auto-name
 
 ## Example
 
-If the first request is something like "Prepare a pre-release checklist", pi can automatically turn that into a short session title.
+If the first request is something like `Prepare a pre-release checklist`, pi can automatically turn that into a short session title.

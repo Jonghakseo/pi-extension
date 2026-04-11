@@ -65,13 +65,13 @@ export default function autoSessionName(pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (isSubagentSession(ctx)) return;
 
-		// Skip when a name already exists.
+		// name이 이미 있으면 스킵
 		if (pi.getSessionName()) return;
 
 		const text = event.prompt.trim();
 		if (!text) return;
 
-		// Fire-and-forget: detect and set the name asynchronously.
+		// Fire-and-forget: 비동기로 name 감지 후 설정
 		(async () => {
 			try {
 				const detected = await detectNameFromMessage(text, ctx);
@@ -80,7 +80,7 @@ export default function autoSessionName(pi: ExtensionAPI) {
 					updateStatus(ctx);
 				}
 			} catch {
-				// Ignore failures.
+				// 실패 시 무시
 			}
 		})();
 	});

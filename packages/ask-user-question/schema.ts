@@ -2,36 +2,35 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 
 export const OptionSchema = Type.Object({
-	value: Type.String({ description: "Value returned when selected" }),
-	label: Type.String({ description: "Display label" }),
-	description: Type.Optional(Type.String({ description: "Help text shown below the label" })),
+	value: Type.String({ description: "선택 시 반환할 값" }),
+	label: Type.String({ description: "화면에 표시할 라벨" }),
+	description: Type.Optional(Type.String({ description: "옵션 아래에 표시할 보조 설명" })),
 });
 
 export const QuestionSchema = Type.Object({
-	id: Type.String({ description: "Unique identifier for this question" }),
+	id: Type.String({ description: "질문 고유 식별자" }),
 	type: StringEnum(["radio", "checkbox", "text"] as const, {
-		description: "Question type: radio (single-select), checkbox (multi-select), or text (free input)",
+		description: "질문 유형: radio(단일 선택), checkbox(복수 선택), text(자유 입력)",
 	}),
-	prompt: Type.String({ description: "The question text to display" }),
-	label: Type.Optional(Type.String({ description: "Short label for tab bar (defaults to Q1, Q2...)" })),
-	options: Type.Optional(Type.Array(OptionSchema, { description: "Options for radio/checkbox types" })),
+	prompt: Type.String({ description: "사용자에게 표시할 질문 문구" }),
+	label: Type.Optional(Type.String({ description: "탭 바에 표시할 짧은 라벨(기본값: Q1, Q2...)" })),
+	options: Type.Optional(Type.Array(OptionSchema, { description: "radio/checkbox용 선택지 목록" })),
 	allowOther: Type.Optional(
-		Type.Boolean({ description: "Add an 'Other...' option with text input (default: true for radio/checkbox)" }),
+		Type.Boolean({ description: "'기타...' 직접 입력 옵션 추가 여부 (radio/checkbox 기본값: true)" }),
 	),
-	required: Type.Optional(Type.Boolean({ description: "Whether an answer is required (default: true)" })),
-	placeholder: Type.Optional(Type.String({ description: "Placeholder for text inputs" })),
+	required: Type.Optional(Type.Boolean({ description: "응답 필수 여부 (기본값: true)" })),
+	placeholder: Type.Optional(Type.String({ description: "text 입력 시 표시할 플레이스홀더" })),
 	default: Type.Optional(
 		Type.Union([Type.String(), Type.Array(Type.String())], {
-			description: "Default value(s). String for radio/text, string[] for checkbox",
+			description: "기본값. radio/text는 문자열, checkbox는 문자열 배열",
 		}),
 	),
 });
 
 export const AskUserQuestionParams = Type.Object({
-	title: Type.Optional(Type.String({ description: "Form title displayed at the top" })),
-	description: Type.Optional(Type.String({ description: "Brief context or instructions shown under the title" })),
+	title: Type.Optional(Type.String({ description: "폼 상단에 표시할 제목" })),
+	description: Type.Optional(Type.String({ description: "폼 상단에 표시할 안내 문구" })),
 	questions: Type.Array(QuestionSchema, {
-		description:
-			"One or more questions to ask. Use radio for single-select, checkbox for multi-select, text for free input",
+		description: "질문 목록. radio는 단일 선택, checkbox는 복수 선택, text는 자유 입력",
 	}),
 });

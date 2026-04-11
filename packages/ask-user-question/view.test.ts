@@ -52,10 +52,10 @@ describe("ask-user-question/view", () => {
 		const input = createInput({ currentTab: 2 });
 		const output = renderForm(input).join("\n");
 
-		expect(output).toContain("Review & Submit");
+		expect(output).toContain("검토 및 제출");
 		expect(output).toContain("Q1:");
-		expect(output).toContain("Required: Q1, Q2");
-		expect(output).toContain("Tab/←→ navigate questions • Enter submit • Esc cancel");
+		expect(output).toContain("필수 응답: Q1, Q2");
+		expect(output).toContain("Tab/←→ 질문 이동 • Enter 제출 • Esc 취소");
 	});
 
 	it("renders radio questions including descriptions and other-mode editor", () => {
@@ -80,12 +80,12 @@ describe("ask-user-question/view", () => {
 			}),
 		).join("\n");
 
-		expect(output).toContain("**Pick one** [single-select]");
+		expect(output).toContain("**Pick one** [단일 선택]");
 		expect(output).toContain("Alpha");
 		expect(output).toContain("first");
-		expect(output).toContain("Other: custom");
-		expect(output).toContain("Your answer:");
-		expect(output).toContain("Enter submit • Esc go back");
+		expect(output).toContain("기타: custom");
+		expect(output).toContain("직접 입력:");
+		expect(output).toContain("Enter 제출 • Esc 돌아가기");
 	});
 
 	it("renders checkbox and text questions with placeholders and text footer", () => {
@@ -110,17 +110,17 @@ describe("ask-user-question/view", () => {
 		const checkboxOutput = renderForm(createInput({ questions, answerState, editorLines: [], editorText: "" })).join(
 			"\n",
 		);
-		expect(checkboxOutput).toContain("**Pick many** [multi-select]");
-		expect(checkboxOutput).toContain("Other: custom option");
-		expect(checkboxOutput).toContain("Space toggle");
+		expect(checkboxOutput).toContain("**Pick many** [복수 선택]");
+		expect(checkboxOutput).toContain("기타: custom option");
+		expect(checkboxOutput).toContain("Space 토글");
 
 		const textOutput = renderForm(
 			createInput({ questions, answerState, currentTab: 1, editorLines: ["typed line"], editorText: "" }),
 		).join("\n");
-		expect(textOutput).toContain("**Explain** [text]");
+		expect(textOutput).toContain("**Explain** [텍스트]");
 		expect(textOutput).toContain("Type here");
 		expect(textOutput).toContain("typed line");
-		expect(textOutput).toContain("Tab/←→ navigate • Enter submit • Esc cancel");
+		expect(textOutput).toContain("Tab/←→ 이동 • Enter 제출 • Esc 취소");
 	});
 
 	it("renders answered submit states and optional question variants", () => {
@@ -152,27 +152,27 @@ describe("ask-user-question/view", () => {
 		answerState.textAnswers.set("text", "filled");
 
 		const submitOutput = renderForm(createInput({ questions, answerState, currentTab: 3 })).join("\n");
-		expect(submitOutput).toContain("Press Enter to submit");
+		expect(submitOutput).toContain("Enter로 제출");
 		expect(submitOutput).toContain("Alpha");
 		expect(submitOutput).toContain("b");
 		expect(submitOutput).toContain("filled");
 
 		const radioOutput = renderForm(createInput({ questions, answerState, currentTab: 0, cursorIdx: 0 })).join("\n");
 		expect(radioOutput).toContain("❯ ◉ Alpha");
-		expect(radioOutput).toContain("Enter select • Esc cancel");
-		expect(radioOutput).not.toContain("Other...");
+		expect(radioOutput).toContain("Enter 선택 • Esc 취소");
+		expect(radioOutput).not.toContain("기타...");
 
 		const checkboxOutput = renderForm(createInput({ questions, answerState, currentTab: 1, cursorIdx: 0 })).join("\n");
 		expect(checkboxOutput).toContain("☑ Beta");
 		expect(checkboxOutput).toContain("desc");
-		expect(checkboxOutput).toContain("Enter next");
+		expect(checkboxOutput).toContain("Enter 다음");
 
 		const textOutput = renderForm(
 			createInput({ questions, answerState, currentTab: 2, editorLines: ["filled"], editorText: "filled" }),
 		).join("\n");
 		expect(textOutput).toContain("filled");
-		expect(textOutput).toContain("Enter submit • Esc cancel");
-		expect(textOutput).not.toContain("*required");
+		expect(textOutput).toContain("Enter 제출 • Esc 취소");
+		expect(textOutput).not.toContain("*필수");
 	});
 
 	it("covers direct helper branches for invalid tabs and compact variants", () => {
@@ -198,7 +198,7 @@ describe("ask-user-question/view", () => {
 		submitInput.answerState.radioAnswers.set("radio", { value: "custom", label: "custom", wasCustom: true });
 		submitInput.answerState.checkCustom.set("check", "custom");
 		renderSubmitTab(submitInput, (text) => submitLines.push(text), 80);
-		expect(submitLines.join("\n")).toContain("(wrote) custom");
+		expect(submitLines.join("\n")).toContain("(직접 입력) custom");
 
 		const unansweredLines: string[] = [];
 		const unansweredInput = createInput({
@@ -207,7 +207,7 @@ describe("ask-user-question/view", () => {
 		});
 		unansweredInput.answerState.checkAnswers.delete("check");
 		renderSubmitTab(unansweredInput, (text) => unansweredLines.push(text), 80);
-		expect(unansweredLines.join("\n")).toContain("(unanswered)");
+		expect(unansweredLines.join("\n")).toContain("(미응답)");
 
 		const output = renderForm(createInput({ currentTab: 99 }));
 		expect(output.length).toBeGreaterThanOrEqual(2);
@@ -233,7 +233,7 @@ describe("ask-user-question/view", () => {
 			80,
 		);
 		expect(radioLines.join("\n")).toContain("❯ ◉ Alpha");
-		expect(radioLines.join("\n")).toContain("Other...");
+		expect(radioLines.join("\n")).toContain("기타...");
 		const radioSelectedLines: string[] = [];
 		renderQuestion(
 			createInput({
@@ -264,8 +264,8 @@ describe("ask-user-question/view", () => {
 			}),
 		).join("\n");
 		expect(checkboxOutput).toContain("☐ Alpha");
-		expect(checkboxOutput).toContain("Other...");
-		expect(checkboxOutput).toContain("Enter submit • Esc cancel");
+		expect(checkboxOutput).toContain("기타...");
+		expect(checkboxOutput).toContain("Enter 제출 • Esc 취소");
 		checkboxState.checkAnswers.set("check", new Set(["a"]));
 		const checkboxOtherCursor = renderForm(
 			createInput({
@@ -278,7 +278,7 @@ describe("ask-user-question/view", () => {
 			}),
 		).join("\n");
 		expect(checkboxOtherCursor).toContain("☑ Alpha");
-		expect(checkboxOtherCursor).toContain("❯ ☐ Other...");
+		expect(checkboxOtherCursor).toContain("❯ ☐ 기타...");
 		const checkboxLines: string[] = [];
 		renderQuestion(
 			createInput({
@@ -319,7 +319,7 @@ describe("ask-user-question/view", () => {
 				editorLines: [],
 			}),
 		).join("\n");
-		expect(radioFooterOutput).toContain("Enter select • Esc cancel");
+		expect(radioFooterOutput).toContain("Enter 선택 • Esc 취소");
 		const textOutput = renderForm(
 			createInput({
 				title: undefined,
@@ -330,8 +330,8 @@ describe("ask-user-question/view", () => {
 				editorText: "",
 			}),
 		).join("\n");
-		expect(textOutput).toContain("**Only** [text]");
-		expect(textOutput).toContain("Enter submit • Esc cancel");
-		expect(textOutput).not.toContain("*required");
+		expect(textOutput).toContain("**Only** [텍스트]");
+		expect(textOutput).toContain("Enter 제출 • Esc 취소");
+		expect(textOutput).not.toContain("*필수");
 	});
 });

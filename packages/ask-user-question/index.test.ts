@@ -21,7 +21,7 @@ describe("ask-user-question extension", () => {
 		expect(AskUserQuestionParams).toBeTruthy();
 		expect(errorResult("boom").content[0].text).toBe("boom");
 		expect(normalizeQuestions([{ id: "x", type: "text", prompt: "Q" }])[0].label).toBe("Q1");
-		expect(buildRenderCallText({ questions: [{ id: "x", type: "text", prompt: "Q" }] }, theme)).toContain("1 question");
+		expect(buildRenderCallText({ questions: [{ id: "x", type: "text", prompt: "Q" }] }, theme)).toContain("1개 문항");
 		expect(buildRenderResultText({ content: [{ type: "text", text: "plain" }] }, theme)).toBe("plain");
 	});
 
@@ -44,9 +44,9 @@ describe("ask-user-question extension", () => {
 		} as unknown as ExtensionContext);
 
 		expect(noUi).toMatchObject({
-			content: [{ type: "text", text: "Error: UI not available (running in non-interactive mode)" }],
+			content: [{ type: "text", text: "오류: UI를 사용할 수 없습니다. 현재 비대화형 모드에서 실행 중입니다." }],
 		});
-		expect(noQuestions).toMatchObject({ content: [{ type: "text", text: "Error: No questions provided" }] });
+		expect(noQuestions).toMatchObject({ content: [{ type: "text", text: "오류: 질문이 제공되지 않았습니다." }] });
 	});
 
 	it("returns cancelled and successful execution results", async () => {
@@ -103,7 +103,7 @@ describe("ask-user-question extension", () => {
 			} as unknown as ExtensionContext,
 		);
 
-		expect(cancelledResult).toMatchObject({ content: [{ type: "text", text: "User cancelled the form" }] });
+		expect(cancelledResult).toMatchObject({ content: [{ type: "text", text: "사용자가 입력 폼을 취소했습니다" }] });
 		expect(successResult).toMatchObject({ content: [{ type: "text", text: "Q1: hello\nQ2: a" }] });
 		expect(
 			tool.renderCall({ title: "Title", questions: [{ id: "x", type: "text", prompt: "Q" }] }, theme),

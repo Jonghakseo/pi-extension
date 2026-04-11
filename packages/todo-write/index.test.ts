@@ -28,7 +28,7 @@ describe("todo-write helpers", () => {
 		]);
 
 		expect(renderTodoWidgetLines(applied.state)).toEqual(["~~● Design", "→ Implementing", "○ Verify"]);
-		expect(renderTodoWriteSummary(applied.state)).toContain("Progress: 1/3 tasks complete");
+		expect(renderTodoWriteSummary(applied.state)).toContain("진행률: 1/3 완료");
 	});
 
 	it("hides fully completed widgets after the grace period", () => {
@@ -66,6 +66,6 @@ describe("todo-write helpers", () => {
 
 		const restored = restoreTodoWriteState(ctx);
 		expect(restored.tasks.map((task) => task.status)).toEqual(["completed", "in_progress"]);
-		expect(buildPostCompactionTodoReminder(restored)).toContain("todo_write still has remaining items");
+		expect(buildPostCompactionTodoReminder(restored)).toContain("todo_write에 아직 남은 항목이 있습니다");
 	});
 });

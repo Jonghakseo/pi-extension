@@ -40,7 +40,7 @@ describe("ask-user-question/output", () => {
 	});
 
 	it("formats successful result content", () => {
-		expect(formatResultContent(formResult)).toBe("One: (wrote) custom\nTwo: (none selected)\nThree: (empty)");
+		expect(formatResultContent(formResult)).toBe("One: (직접 입력) custom\nTwo: (선택 없음)\nThree: (비어 있음)");
 		expect(
 			formatResultContent({
 				...formResult,
@@ -62,8 +62,8 @@ describe("ask-user-question/output", () => {
 	it("builds render-call summaries", () => {
 		expect(
 			buildRenderCallText({ title: "Title", questions: [{ id: "x", type: "radio", prompt: "Q" }] }, theme),
-		).toContain("Title 1 question (radio)");
-		expect(buildRenderCallText({}, theme)).toContain("0 questions");
+		).toContain("Title 1개 문항 (radio)");
+		expect(buildRenderCallText({}, theme)).toContain("0개 문항");
 		expect(renderCall({ title: "Title", questions: [] }, theme)).toBeTruthy();
 	});
 
@@ -72,9 +72,9 @@ describe("ask-user-question/output", () => {
 		expect(buildRenderResultText({ content: [{ type: "text" }] }, theme)).toBe("");
 		expect(buildRenderResultText({ content: [{ type: "image", text: "ignored" }] }, theme)).toBe("");
 		expect(buildRenderResultText({}, theme)).toBe("");
-		expect(buildRenderResultText({ details: { ...formResult, cancelled: true } }, theme)).toBe("Cancelled");
+		expect(buildRenderResultText({ details: { ...formResult, cancelled: true } }, theme)).toBe("취소됨");
 		expect(buildRenderResultText({ details: formResult }, theme)).toBe(
-			"✓ One: (wrote) custom\n✓ Two: (none)\n✓ Three: (empty)",
+			"✓ One: (직접 입력) custom\n✓ Two: (선택 없음)\n✓ Three: (비어 있음)",
 		);
 		expect(
 			buildRenderResultText(

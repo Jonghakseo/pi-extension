@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-ask-user-question",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "AskUserQuestion tool extension for pi.",
 	"type": "module",
 	"keywords": [

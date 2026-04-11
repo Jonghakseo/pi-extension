@@ -12,7 +12,7 @@ import * as path from "node:path";
 export const SUBAGENT_SESSION_DIR = path.join(os.homedir(), ".pi", "agent", "sessions", "subagents");
 
 export const NAME_SYSTEM_PROMPT =
-	"Analyze the user's message and extract the session purpose as a single line within 20 characters. Output only the purpose text, with no explanation or extra text.";
+	"사용자 메시지를 분석해서 세션의 목적을 20자 이내 한 줄로 추출해. 오직 목적 텍스트만 출력하고, 설명이나 다른 텍스트는 절대 출력하지 마.";
 
 /** Max chars for the user message sent to the LLM. */
 export const MAX_MESSAGE_LENGTH = 500;
@@ -74,7 +74,7 @@ export function formatNameStatus(name: string): string {
  * Truncates to MAX_MESSAGE_LENGTH.
  */
 export function buildNameContext(userMessage: string): string {
-	return `User message: ${userMessage.slice(0, MAX_MESSAGE_LENGTH)}`;
+	return `사용자 메시지: ${userMessage.slice(0, MAX_MESSAGE_LENGTH)}`;
 }
 
 /**
