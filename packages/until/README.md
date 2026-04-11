@@ -1,17 +1,39 @@
 # @ryan_nookpi/pi-extension-until
 
-Standalone pi package for the `until` extension.
+조건이 만족될 때까지 pi가 주기적으로 같은 작업을 다시 실행하도록 만드는 익스텐션입니다.
 
-## Install
+예를 들어 PR 코멘트 확인, 배포 상태 점검, 외부 응답 대기처럼 "조금 뒤에 다시 확인"이 필요한 일을 자동으로 반복시킬 수 있습니다.
+
+## 설치
 
 ```bash
 pi install npm:@ryan_nookpi/pi-extension-until
 ```
 
-## What it provides
+## 이런 때 좋아요
 
-- `/until` command
-- `/untils` command
-- `/until-cancel` command
-- `until_report` tool
-- `./index.ts` entry
+- "5분마다 다시 확인해줘" 같은 요청을 자동화하고 싶을 때
+- 특정 조건이 만족될 때까지 반복 점검이 필요할 때
+- 사람이 직접 시간을 보며 다시 요청하기 번거로울 때
+
+## 사용 예시
+
+```text
+/until 5m PR 코멘트 확인해줘
+/until 1h 배포 상태 다시 점검해줘
+/until 10분 결제 오류율 정상화됐는지 봐줘
+```
+
+## 함께 쓰는 명령어
+
+```text
+/untils
+/until-cancel <id>
+/until-cancel all
+```
+
+## 참고
+
+- 각 반복 실행 뒤에는 `until_report`로 결과를 보고합니다.
+- 조건이 충족되면 반복이 자동으로 종료됩니다.
+- 너무 짧은 간격은 막혀 있으며, 최대 24시간 동안 유지됩니다.

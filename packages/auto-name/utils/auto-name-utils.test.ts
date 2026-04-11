@@ -46,7 +46,7 @@ describe("auto-name utils", () => {
 	it("builds the name context with truncation", () => {
 		const message = "m".repeat(MAX_MESSAGE_LENGTH + 25);
 		const context = buildNameContext(message);
-		expect(context).toBe(`사용자 메시지: ${message.slice(0, MAX_MESSAGE_LENGTH)}`);
+		expect(context).toBe(`User message: ${message.slice(0, MAX_MESSAGE_LENGTH)}`);
 	});
 
 	it("extracts text-only content and clips the result length", () => {

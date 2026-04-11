@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-delayed-action",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Pi extension for scheduling delayed follow-up actions.",
 	"type": "module",
 	"keywords": [

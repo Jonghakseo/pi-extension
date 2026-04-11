@@ -1,7 +1,7 @@
 {
 	"name": "pi-extension-monorepo",
 	"private": true,
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Monorepo for standalone pi extensions published as separate npm packages.",
 	"type": "module",
 	"packageManager": "pnpm@10.24.0",

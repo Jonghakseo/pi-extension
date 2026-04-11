@@ -26,7 +26,7 @@ const InputTask = Type.Object({
 	status: StatusEnum,
 	activeForm: Type.Optional(
 		Type.String({
-			description: "Present continuous form for display during execution (e.g., 'Running tests', '테스트 실행 중')",
+			description: "Present continuous form for display during execution (e.g., 'Running tests')",
 		}),
 	),
 	notes: Type.Optional(Type.String({ description: "Additional context or notes" })),
@@ -161,7 +161,7 @@ export function renderTodoWidgetLines(state: TodoState): string[] {
 		seenCompletedCount += 1;
 		if (seenCompletedCount <= hiddenCompletedCount) {
 			if (!insertedCompletedSummary) {
-				lines.push(`완료 +${hiddenCompletedCount}`);
+				lines.push(`Completed +${hiddenCompletedCount}`);
 				insertedCompletedSummary = true;
 			}
 			continue;
@@ -466,7 +466,7 @@ export default function todoWriteExtension(pi: ExtensionAPI): void {
 - Purely conversational or informational requests
 
 ## Rules
-- Write todo content in Korean when practical
+- Write concise todo content in a style appropriate for the current task and user
 - Update task status in real-time as you work
 - Mark tasks complete IMMEDIATELY after finishing — don't batch completions
 - Exactly ONE task should be in_progress at any time
@@ -476,9 +476,9 @@ export default function todoWriteExtension(pi: ExtensionAPI): void {
 - If requirements change mid-task, update the todo list before continuing
 
 ## Task Fields
-- content: Imperative form (e.g., "테스트 실행", "Run tests")
+- content: Imperative form (e.g., "Run tests")
 - status: pending | in_progress | completed
-- activeForm: (optional) Present continuous form for display (e.g., "테스트 실행 중", "Running tests")
+- activeForm: (optional) Present continuous form for display (e.g., "Running tests")
 - notes: (optional) Additional context`,
 		parameters: TodoWriteParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

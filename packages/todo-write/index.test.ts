@@ -22,17 +22,17 @@ describe("todo-write helpers", () => {
 
 	it("renders widget lines and summary", () => {
 		const applied = applyTodoWrite([
-			{ content: "설계", status: "completed" },
-			{ content: "구현", status: "in_progress", activeForm: "구현 중" },
-			{ content: "검증", status: "pending" },
+			{ content: "Design", status: "completed" },
+			{ content: "Implement", status: "in_progress", activeForm: "Implementing" },
+			{ content: "Verify", status: "pending" },
 		]);
 
-		expect(renderTodoWidgetLines(applied.state)).toEqual(["~~● 설계", "→ 구현 중", "○ 검증"]);
+		expect(renderTodoWidgetLines(applied.state)).toEqual(["~~● Design", "→ Implementing", "○ Verify"]);
 		expect(renderTodoWriteSummary(applied.state)).toContain("Progress: 1/3 tasks complete");
 	});
 
 	it("hides fully completed widgets after the grace period", () => {
-		const applied = applyTodoWrite([{ content: "완료", status: "completed" }]);
+		const applied = applyTodoWrite([{ content: "Done", status: "completed" }]);
 		const now = Date.now();
 		expect(getTodoWidgetVisibility(applied.state, { completedAt: now, completedTurn: 1 }, 1, now)).toMatchObject({
 			hidden: false,
