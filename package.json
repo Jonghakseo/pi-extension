@@ -29,6 +29,7 @@
 		"publish:ask-user-question": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-ask-user-question publish --access public --no-git-checks",
 		"publish:auto-name": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-auto-name publish --access public --no-git-checks",
 		"publish:clipboard": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-clipboard publish --access public --no-git-checks",
+		"publish:cc-system-prompt": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-cc-system-prompt publish --access public --no-git-checks",
 		"publish:codex-fast-mode": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-codex-fast-mode publish --access public --no-git-checks",
 		"publish:delayed-action": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-delayed-action publish --access public --no-git-checks",
 		"publish:generative-ui": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-generative-ui publish --access public --no-git-checks",
