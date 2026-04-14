@@ -8,6 +8,7 @@ Standalone pi extensions managed in one repository and published as separate npm
 packages/
   ask-user-question/
   auto-name/
+  cc-system-prompt/
   clipboard/
   codex-fast-mode/
   delayed-action/
@@ -76,6 +77,7 @@ Interactive/runtime-heavy extension entrypoints remain validated by the normal t
 ```bash
 pi install npm:@ryan_nookpi/pi-extension-ask-user-question
 pi install npm:@ryan_nookpi/pi-extension-auto-name
+pi install npm:@ryan_nookpi/pi-extension-cc-system-prompt
 pi install npm:@ryan_nookpi/pi-extension-clipboard
 pi install npm:@ryan_nookpi/pi-extension-codex-fast-mode
 pi install npm:@ryan_nookpi/pi-extension-delayed-action
