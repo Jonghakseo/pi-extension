@@ -2,6 +2,16 @@
 	"name": "@ryan_nookpi/pi-extension-generative-ui",
 	"version": "0.1.1",
 	"description": "Generative UI widget extension for pi.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/generative-ui"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/generative-ui#readme",
 	"type": "module",
 	"keywords": [
 		"pi-package"

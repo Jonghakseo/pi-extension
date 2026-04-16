@@ -9,11 +9,16 @@ packages/
   ask-user-question/
   auto-name/
   cc-system-prompt/
+  claude-hooks-bridge/
+  claude-mcp-bridge/
   clipboard/
   codex-fast-mode/
+  cross-agent/
   delayed-action/
   generative-ui/
   idle-screensaver/
+  memory-layer/
+  open-pr/
   todo-write/
   until/
 ```
@@ -78,11 +83,16 @@ Interactive/runtime-heavy extension entrypoints remain validated by the normal t
 pi install npm:@ryan_nookpi/pi-extension-ask-user-question
 pi install npm:@ryan_nookpi/pi-extension-auto-name
 pi install npm:@ryan_nookpi/pi-extension-cc-system-prompt
+pi install npm:@ryan_nookpi/pi-extension-claude-hooks-bridge
+pi install npm:@ryan_nookpi/pi-extension-claude-mcp-bridge
 pi install npm:@ryan_nookpi/pi-extension-clipboard
 pi install npm:@ryan_nookpi/pi-extension-codex-fast-mode
+pi install npm:@ryan_nookpi/pi-extension-cross-agent
 pi install npm:@ryan_nookpi/pi-extension-delayed-action
 pi install npm:@ryan_nookpi/pi-extension-generative-ui
 pi install npm:@ryan_nookpi/pi-extension-idle-screensaver
+pi install npm:@ryan_nookpi/pi-extension-memory-layer
+pi install npm:@ryan_nookpi/pi-extension-open-pr
 pi install npm:@ryan_nookpi/pi-extension-todo-write
 pi install npm:@ryan_nookpi/pi-extension-until
 ```

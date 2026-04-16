@@ -1,17 +1,17 @@
 {
-	"name": "@ryan_nookpi/pi-extension-idle-screensaver",
-	"version": "0.1.1",
-	"description": "Standalone Pi extension package for the idle screensaver overlay.",
+	"name": "@ryan_nookpi/pi-extension-cross-agent",
+	"version": "0.1.0",
+	"description": "Load commands from Claude, Gemini, and Codex agent directories into pi.",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/Jonghakseo/pi-extension.git",
-		"directory": "packages/idle-screensaver"
+		"directory": "packages/cross-agent"
 	},
 	"bugs": {
 		"url": "https://github.com/Jonghakseo/pi-extension/issues"
 	},
-	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/idle-screensaver#readme",
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/cross-agent#readme",
 	"type": "module",
 	"keywords": [
 		"pi-package"
@@ -26,8 +26,7 @@
 		]
 	},
 	"peerDependencies": {
-		"@mariozechner/pi-coding-agent": "*",
-		"@mariozechner/pi-tui": "*"
+		"@mariozechner/pi-coding-agent": "*"
 	},
 	"publishConfig": {
 		"access": "public"

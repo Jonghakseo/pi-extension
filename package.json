@@ -36,6 +36,11 @@
 		"publish:idle-screensaver": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-idle-screensaver publish --access public --no-git-checks",
 		"publish:todo-write": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-todo-write publish --access public --no-git-checks",
 		"publish:until": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-until publish --access public --no-git-checks",
+		"publish:claude-hooks-bridge": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-claude-hooks-bridge publish --access public --no-git-checks",
+		"publish:claude-mcp-bridge": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-claude-mcp-bridge publish --access public --no-git-checks",
+		"publish:cross-agent": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-cross-agent publish --access public --no-git-checks",
+		"publish:open-pr": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-open-pr publish --access public --no-git-checks",
+		"publish:memory-layer": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-memory-layer publish --access public --no-git-checks",
 		"prepare": "lefthook install --reset-hooks-path"
 	},
 	"devDependencies": {

@@ -2,6 +2,16 @@
 	"name": "@ryan_nookpi/pi-extension-until",
 	"version": "0.1.1",
 	"description": "Until loop extension for pi.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/until"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/until#readme",
 	"type": "module",
 	"keywords": [
 		"pi-package"

@@ -2,6 +2,16 @@
 	"name": "@ryan_nookpi/pi-extension-auto-name",
 	"version": "0.1.2",
 	"description": "Auto session name extension for pi.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/auto-name"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/auto-name#readme",
 	"type": "module",
 	"keywords": [
 		"pi-package"

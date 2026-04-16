@@ -2,6 +2,16 @@
 	"name": "@ryan_nookpi/pi-extension-codex-fast-mode",
 	"version": "0.1.1",
 	"description": "Codex fast mode extension for pi.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/codex-fast-mode"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/codex-fast-mode#readme",
 	"type": "module",
 	"keywords": [
 		"pi-package"

@@ -2,6 +2,16 @@
 	"name": "@ryan_nookpi/pi-extension-todo-write",
 	"version": "0.1.2",
 	"description": "Todo write tool extension for pi.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/todo-write"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/todo-write#readme",
 	"type": "module",
 	"keywords": [
 		"pi-package"
