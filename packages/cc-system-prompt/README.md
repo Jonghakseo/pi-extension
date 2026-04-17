@@ -1,8 +1,10 @@
 # @ryan_nookpi/pi-extension-cc-system-prompt
 
-This extension swaps pi's default system prompt with a Claude Code-style prompt when you use a Claude model.
+Use your **Claude Code subscription** (Max, Team, Enterprise) with pi.
 
-It also preserves pi's original system prompt by injecting it once as a persistent `<system-reminder>` message.
+Claude Code's API uses a dedicated system prompt to identify itself. This extension swaps pi's system prompt with that Claude Code-style prompt when you select a Claude model, so the API recognizes requests as coming from Claude Code and routes them through your subscription plan.
+
+Pi's original system prompt is preserved by injecting it once as a persistent `<system-reminder>` message.
 
 ## Install
 
@@ -24,5 +26,6 @@ pi install npm:@ryan_nookpi/pi-extension-cc-system-prompt
 
 ## Notes
 
-- This is experimental and prompt fidelity is approximate.
+- No additional API charges — requests are billed against your existing Claude Code subscription.
+- This relies on undocumented Anthropic internal behavior and may break at any time without notice.
 - Vendored prompt fragments come from `Piebald-AI/claude-code-system-prompts`.
