@@ -392,11 +392,15 @@ export async function getReviewWindowData(
 		.map(toBranchReviewFile)
 		.sort(compareReviewFiles);
 	const commits = reviewBase ? await listRangeCommits(pi, repoRoot, `${reviewBase.mergeBase}..HEAD`, 100) : [];
+	const fallbackCommits =
+		repositoryHasHead && files.length === 0 && commits.length === 0
+			? await listRangeCommits(pi, repoRoot, "HEAD", 20)
+			: commits;
 
 	return {
 		repoRoot,
 		files,
-		commits,
+		commits: fallbackCommits,
 		branchBaseRef: reviewBase?.baseRef ?? null,
 		branchMergeBaseSha: branchComparisonBase,
 	};
