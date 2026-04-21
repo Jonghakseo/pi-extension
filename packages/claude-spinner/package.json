@@ -1,0 +1,34 @@
+{
+	"name": "@ryan_nookpi/pi-extension-claude-spinner",
+	"version": "0.1.0",
+	"description": "Standalone Pi extension package for Claude-style spinner frames.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/claude-spinner"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/claude-spinner#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package"
+	],
+	"files": [
+		"index.ts",
+		"README.md"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "*"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
