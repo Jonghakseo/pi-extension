@@ -11,6 +11,7 @@ packages/
   cc-system-prompt/
   claude-hooks-bridge/
   claude-mcp-bridge/
+  claude-spinner/
   clipboard/
   codex-fast-mode/
   cross-agent/
@@ -86,6 +87,7 @@ pi install npm:@ryan_nookpi/pi-extension-auto-name
 pi install npm:@ryan_nookpi/pi-extension-cc-system-prompt
 pi install npm:@ryan_nookpi/pi-extension-claude-hooks-bridge
 pi install npm:@ryan_nookpi/pi-extension-claude-mcp-bridge
+pi install npm:@ryan_nookpi/pi-extension-claude-spinner
 pi install npm:@ryan_nookpi/pi-extension-clipboard
 pi install npm:@ryan_nookpi/pi-extension-codex-fast-mode
 pi install npm:@ryan_nookpi/pi-extension-cross-agent

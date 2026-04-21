@@ -38,6 +38,7 @@
 		"publish:until": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-until publish --access public --no-git-checks",
 		"publish:claude-hooks-bridge": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-claude-hooks-bridge publish --access public --no-git-checks",
 		"publish:claude-mcp-bridge": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-claude-mcp-bridge publish --access public --no-git-checks",
+		"publish:claude-spinner": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-claude-spinner publish --access public --no-git-checks",
 		"publish:cross-agent": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-cross-agent publish --access public --no-git-checks",
 		"publish:diff-review": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-diff-review publish --access public --no-git-checks",
 		"publish:open-pr": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-open-pr publish --access public --no-git-checks",
