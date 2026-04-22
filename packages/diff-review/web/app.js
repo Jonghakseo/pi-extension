@@ -90,7 +90,6 @@ let modifiedDecorations = [];
 let activeViewZones = [];
 let editorResizeObserver = null;
 let requestSequence = 0;
-let branchCardObserver = null;
 let branchScrollSyncScheduled = false;
 let branchScrollSuppressionUntil = 0;
 const branchCardEntries = new Map();
@@ -1432,11 +1431,11 @@ function clearBranchCardViewZones(entry) {
 
 function updateBranchCardHeight(entry) {
 	if (!entry.editor) return;
-	const originalHeight = entry.editor.getOriginalEditor().getContentHeight();
-	const modifiedHeight = entry.editor.getModifiedEditor().getContentHeight();
-	const nextHeight = Math.max(160, originalHeight, modifiedHeight);
+	const originalHeight = entry.editor.getOriginalEditor().getContentHeight?.() || 0;
+	const modifiedHeight = entry.editor.getModifiedEditor().getContentHeight?.() || 0;
+	// Floor of 240px keeps empty/short diffs legible; Monaco automaticLayout handles resizes.
+	const nextHeight = Math.ceil(Math.max(240, originalHeight, modifiedHeight));
 	entry.editorHostEl.style.height = `${nextHeight}px`;
-	entry.editor.layout({ width: entry.editorHostEl.clientWidth || 1, height: nextHeight });
 }
 
 function syncBranchCardViewZones(entry) {
@@ -1580,22 +1579,31 @@ function mountBranchCardTextEditor(entry) {
 	);
 	applyDiffEditorOptions(entry.editor, entry.file, "branch");
 	entry.editor.setModel({ original: entry.originalModel, modified: entry.modifiedModel });
+	const revealCover = () => {
+		if (entry.coverEl) entry.coverEl.dataset.active = "false";
+	};
 	entry.disposables = [
 		entry.editor.onDidUpdateDiff(() => {
 			updateBranchCardHeight(entry);
-			setTimeout(() => {
-				if (entry.coverEl) entry.coverEl.dataset.active = "false";
-			}, 40);
+			revealCover();
 		}),
 		entry.editor.getOriginalEditor().onDidContentSizeChange(() => updateBranchCardHeight(entry)),
 		entry.editor.getModifiedEditor().onDidContentSizeChange(() => updateBranchCardHeight(entry)),
 	];
 	createBranchGlyphHoverActions(entry.editor.getOriginalEditor(), "original", entry.file.id);
 	createBranchGlyphHoverActions(entry.editor.getModifiedEditor(), "modified", entry.file.id);
+	// Ensure initial height / reveal even if onDidUpdateDiff does not fire (identical models, etc.).
+	requestAnimationFrame(() => {
+		updateBranchCardHeight(entry);
+		requestAnimationFrame(() => {
+			updateBranchCardHeight(entry);
+			revealCover();
+		});
+	});
 	setTimeout(() => {
 		updateBranchCardHeight(entry);
-		if (entry.coverEl) entry.coverEl.dataset.active = "false";
-	}, 80);
+		revealCover();
+	}, 200);
 	syncBranchCardViewZones(entry);
 	updateBranchCardDecorations(entry);
 }
@@ -1655,22 +1663,6 @@ function ensureBranchCardLoaded(entry) {
 	entry.loaded = true;
 	ensureFileLoaded(entry.file.id, "branch");
 	renderBranchCardContent(entry);
-}
-
-function ensureBranchCardObserver() {
-	if (branchCardObserver || typeof IntersectionObserver === "undefined") return;
-	branchCardObserver = new IntersectionObserver(
-		(entries) => {
-			for (const item of entries) {
-				if (!item.isIntersecting) continue;
-				const fileId = item.target.getAttribute("data-file-id");
-				const entry = branchCardEntries.get(fileId);
-				if (!entry) continue;
-				ensureBranchCardLoaded(entry);
-			}
-		},
-		{ root: branchStreamEl, rootMargin: "800px 0px" },
-	);
 }
 
 function updateBranchActiveFileUI() {
@@ -1814,15 +1806,17 @@ function renderBranchStream() {
 	const signature = files.map((file) => file.id).join("|");
 	if (branchStreamSignature !== signature) {
 		disposeAllBranchCardEntries();
-		if (branchCardObserver) branchCardObserver.disconnect();
 		branchStreamEl.innerHTML = "";
-		ensureBranchCardObserver();
 		files.forEach((file) => {
 			const entry = createBranchCard(file);
 			branchStreamEl.appendChild(entry.rootEl);
-			branchCardObserver?.observe(entry.rootEl);
 		});
 		branchStreamSignature = signature;
+		// Eager-mount every card. File counts in review are typically bounded and the
+		// GitHub-style "all diffs visible" UX depends on every card being ready.
+		for (const entry of branchCardEntries.values()) {
+			ensureBranchCardLoaded(entry);
+		}
 	}
 	for (const entry of branchCardEntries.values()) {
 		entry.file = files.find((file) => file.id === entry.file.id) ?? entry.file;
