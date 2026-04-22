@@ -4,6 +4,8 @@ export type ChangeStatus = "modified" | "added" | "deleted" | "renamed";
 
 export type ReviewFileKind = "text" | "binary" | "image";
 
+export type ReviewCommitKind = "commit" | "working-tree";
+
 export interface ReviewFileComparison {
 	status: ChangeStatus;
 	oldPath: string | null;
@@ -34,6 +36,7 @@ export interface ReviewCommitInfo {
 	subject: string;
 	authorName: string;
 	authorDate: string;
+	kind: ReviewCommitKind;
 }
 
 export interface ReviewFileContents {
@@ -57,6 +60,7 @@ export interface DiffReviewComment {
 	commitSha?: string | null;
 	/** Short commit identifier to render in the prompt (e.g. first 7 chars of SHA). */
 	commitShort?: string | null;
+	commitKind?: ReviewCommitKind | null;
 	side: CommentSide;
 	startLine: number | null;
 	endLine: number | null;
@@ -87,17 +91,24 @@ export interface ReviewRequestCommitPayload {
 	sha: string;
 }
 
+export interface ReviewRequestReviewDataPayload {
+	type: "request-review-data";
+	requestId: string;
+}
+
 export type ReviewWindowMessage =
 	| ReviewSubmitPayload
 	| ReviewCancelPayload
 	| ReviewRequestFilePayload
-	| ReviewRequestCommitPayload;
+	| ReviewRequestCommitPayload
+	| ReviewRequestReviewDataPayload;
 
 export interface ReviewFileDataMessage {
 	type: "file-data";
 	requestId: string;
 	fileId: string;
 	scope: ReviewScope;
+	commitSha?: string | null;
 	originalContent: string;
 	modifiedContent: string;
 	kind: ReviewFileKind;
@@ -113,6 +124,7 @@ export interface ReviewFileErrorMessage {
 	requestId: string;
 	fileId: string;
 	scope: ReviewScope;
+	commitSha?: string | null;
 	message: string;
 }
 
@@ -130,11 +142,22 @@ export interface ReviewCommitErrorMessage {
 	message: string;
 }
 
+export interface ReviewReviewDataMessage {
+	type: "review-data";
+	requestId: string;
+	files: ReviewFile[];
+	commits: ReviewCommitInfo[];
+	branchBaseRef: string | null;
+	branchMergeBaseSha: string | null;
+	repositoryHasHead: boolean;
+}
+
 export type ReviewHostMessage =
 	| ReviewFileDataMessage
 	| ReviewFileErrorMessage
 	| ReviewCommitDataMessage
-	| ReviewCommitErrorMessage;
+	| ReviewCommitErrorMessage
+	| ReviewReviewDataMessage;
 
 export interface ReviewWindowData {
 	repoRoot: string;
@@ -142,4 +165,5 @@ export interface ReviewWindowData {
 	commits: ReviewCommitInfo[];
 	branchBaseRef: string | null;
 	branchMergeBaseSha: string | null;
+	repositoryHasHead: boolean;
 }
