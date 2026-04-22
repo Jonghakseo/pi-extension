@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { getCommitFiles, getReviewWindowData, loadReviewFileContents } from "./git.js";
+import { getCommitFiles, getReviewWindowData, isWorkingTreeCommitSha, loadReviewFileContents } from "./git.js";
 import { composeReviewPrompt } from "./prompt.js";
 import { openQuietGlimpse, type QuietGlimpseWindow } from "./quiet-glimpse.js";
 import type {
@@ -9,6 +9,7 @@ import type {
 	ReviewHostMessage,
 	ReviewRequestCommitPayload,
 	ReviewRequestFilePayload,
+	ReviewRequestReviewDataPayload,
 	ReviewSubmitPayload,
 	ReviewWindowMessage,
 } from "./types.js";
@@ -28,6 +29,10 @@ function isRequestFilePayload(value: ReviewWindowMessage): value is ReviewReques
 
 function isRequestCommitPayload(value: ReviewWindowMessage): value is ReviewRequestCommitPayload {
 	return value.type === "request-commit";
+}
+
+function isRequestReviewDataPayload(value: ReviewWindowMessage): value is ReviewRequestReviewDataPayload {
+	return value.type === "request-review-data";
 }
 
 function escapeForInlineScript(value: string): string {
@@ -66,13 +71,14 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		try {
-			const { repoRoot, files, commits, branchBaseRef, branchMergeBaseSha } = await getReviewWindowData(pi, ctx.cwd);
-			if (files.length === 0 && commits.length === 0) {
+			let reviewData = await getReviewWindowData(pi, ctx.cwd);
+			const { repoRoot } = reviewData;
+			if (reviewData.files.length === 0 && reviewData.commits.length === 0) {
 				ctx.ui.notify("No reviewable files found.", "info");
 				return;
 			}
 
-			const html = buildReviewHtml({ repoRoot, files, commits, branchBaseRef, branchMergeBaseSha });
+			const html = buildReviewHtml(reviewData);
 			const window = await openQuietGlimpse(html, {
 				width: 1680,
 				height: 1020,
@@ -80,7 +86,7 @@ export default function (pi: ExtensionAPI) {
 			});
 			activeWindow = window;
 
-			const fileMap = new Map(files.map((file) => [file.id, file]));
+			const fileMap = new Map(reviewData.files.map((file) => [file.id, file]));
 			const commitFileCache = new Map<string, Promise<ReviewFile[]>>();
 			const contentCache = new Map<string, Promise<ReviewFileContents>>();
 
@@ -91,6 +97,15 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			const loadCommitFiles = (sha: string): Promise<ReviewFile[]> => {
+				if (isWorkingTreeCommitSha(sha)) {
+					const pending = getCommitFiles(pi, repoRoot, sha);
+					pending
+						.then((commitFiles) => {
+							for (const cf of commitFiles) fileMap.set(cf.id, cf);
+						})
+						.catch(() => {});
+					return pending;
+				}
 				const cached = commitFileCache.get(sha);
 				if (cached != null) return cached;
 				const pending = getCommitFiles(pi, repoRoot, sha);
@@ -108,12 +123,17 @@ export default function (pi: ExtensionAPI) {
 				scope: ReviewRequestFilePayload["scope"],
 				commitSha: string | null,
 			): Promise<ReviewFileContents> => {
+				const skipCache = scope === "commits" && commitSha != null && isWorkingTreeCommitSha(commitSha);
 				const cacheKey = `${scope}:${commitSha ?? ""}:${file.id}`;
-				const cached = contentCache.get(cacheKey);
-				if (cached != null) return cached;
+				if (!skipCache) {
+					const cached = contentCache.get(cacheKey);
+					if (cached != null) return cached;
+				}
 
-				const pending = loadReviewFileContents(pi, repoRoot, file, scope, commitSha, branchMergeBaseSha);
-				contentCache.set(cacheKey, pending);
+				const pending = loadReviewFileContents(pi, repoRoot, file, scope, commitSha, reviewData.branchMergeBaseSha);
+				if (!skipCache) {
+					contentCache.set(cacheKey, pending);
+				}
 				return pending;
 			};
 
@@ -150,6 +170,7 @@ export default function (pi: ExtensionAPI) {
 								requestId: message.requestId,
 								fileId: message.fileId,
 								scope: message.scope,
+								commitSha: message.commitSha ?? null,
 								message: "Unknown file requested.",
 							});
 							return;
@@ -162,6 +183,7 @@ export default function (pi: ExtensionAPI) {
 								requestId: message.requestId,
 								fileId: message.fileId,
 								scope: message.scope,
+								commitSha: message.commitSha ?? null,
 								originalContent: contents.originalContent,
 								modifiedContent: contents.modifiedContent,
 								kind: contents.kind,
@@ -178,6 +200,7 @@ export default function (pi: ExtensionAPI) {
 								requestId: message.requestId,
 								fileId: message.fileId,
 								scope: message.scope,
+								commitSha: message.commitSha ?? null,
 								message: messageText,
 							});
 						}
@@ -203,6 +226,20 @@ export default function (pi: ExtensionAPI) {
 						}
 					};
 
+					const handleRequestReviewData = async (message: ReviewRequestReviewDataPayload): Promise<void> => {
+						reviewData = await getReviewWindowData(pi, repoRoot);
+						for (const file of reviewData.files) fileMap.set(file.id, file);
+						sendWindowMessage({
+							type: "review-data",
+							requestId: message.requestId,
+							files: reviewData.files,
+							commits: reviewData.commits,
+							branchBaseRef: reviewData.branchBaseRef,
+							branchMergeBaseSha: reviewData.branchMergeBaseSha,
+							repositoryHasHead: reviewData.repositoryHasHead,
+						});
+					};
+
 					const onMessage = (data: unknown): void => {
 						const message = data as ReviewWindowMessage;
 						if (isRequestFilePayload(message)) {
@@ -211,6 +248,10 @@ export default function (pi: ExtensionAPI) {
 						}
 						if (isRequestCommitPayload(message)) {
 							void handleRequestCommit(message);
+							return;
+						}
+						if (isRequestReviewDataPayload(message)) {
+							void handleRequestReviewData(message);
 							return;
 						}
 						if (isSubmitPayload(message) || isCancelPayload(message)) {

@@ -17,6 +17,7 @@ const state = {
 	commitFilesBySha: {}, // sha -> ReviewFile[]
 	commitRequestIds: {}, // sha -> requestId (in-flight)
 	commitErrors: {}, // sha -> error message
+	reviewDataRequestId: null,
 	comments: [],
 	overallComment: "",
 	hideUnchanged: true,
@@ -29,6 +30,7 @@ const state = {
 	fileContents: {},
 	fileErrors: {},
 	pendingRequestIds: {},
+	lastWorkingTreeLoadAt: null,
 };
 
 const sidebarEl = document.getElementById("sidebar");
@@ -48,6 +50,7 @@ const currentFileLabelEl = document.getElementById("current-file-label");
 const modeHintEl = document.getElementById("mode-hint");
 const fileCommentsContainer = document.getElementById("file-comments-container");
 const editorContainerEl = document.getElementById("editor-container");
+const refreshWorkingTreeButton = document.getElementById("refresh-working-tree-button");
 const submitButton = document.getElementById("submit-button");
 const cancelButton = document.getElementById("cancel-button");
 const overallCommentButton = document.getElementById("overall-comment-button");
@@ -119,19 +122,52 @@ function scopeLabel(scope) {
 	}
 }
 
+function commitInfoBySha(sha) {
+	if (!sha) return null;
+	return reviewData.commits.find((c) => c.sha === sha) ?? null;
+}
+
 function selectedCommitInfo() {
-	if (!state.selectedCommitSha) return null;
-	return reviewData.commits.find((c) => c.sha === state.selectedCommitSha) ?? null;
+	return commitInfoBySha(state.selectedCommitSha);
+}
+
+function selectedCommitKind() {
+	return selectedCommitInfo()?.kind ?? "commit";
+}
+
+function hasRepositoryHead() {
+	return reviewData.repositoryHasHead === true;
+}
+
+function workingTreeOriginalLabel() {
+	return hasRepositoryHead() ? "HEAD" : "Empty tree";
+}
+
+function workingTreeRangeLabel() {
+	return hasRepositoryHead() ? "HEAD → working tree" : "Empty tree → working tree";
+}
+
+function isWorkingTreeCommit(sha) {
+	return commitInfoBySha(sha)?.kind === "working-tree";
+}
+
+function isSelectedWorkingTreeCommit() {
+	return state.currentScope === "commits" && isWorkingTreeCommit(state.selectedCommitSha);
 }
 
 function scopeHint(scope) {
 	const baseRefLabel = reviewData.branchBaseRef || "the selected base";
 	switch (scope) {
 		case "branch":
-			return `Review committed branch changes against ${baseRefLabel}. Hover or click line numbers in the gutter to add an inline comment.`;
+			return `Review current branch changes against ${baseRefLabel}. This view can include uncommitted working tree edits. Hover or click line numbers in the gutter to add an inline comment.`;
 		case "commits": {
 			const info = selectedCommitInfo();
 			if (!info) return "Pick a branch commit from the list to review its diff.";
+			if (info.kind === "working-tree") {
+				return hasRepositoryHead()
+					? "Review uncommitted working tree changes against HEAD. This is a live view — outside edits will not appear here until you refresh."
+					: "Review uncommitted working tree changes against the empty tree in this new repository. This is a live view — outside edits will not appear here until you refresh.";
+			}
 			return `Review commit ${info.shortSha} — ${info.subject}`;
 		}
 		default:
@@ -187,7 +223,7 @@ function annotateCommentWithCommit(comment) {
 	if (comment.scope !== "commits") return comment;
 	const info = selectedCommitInfo();
 	if (!info) return comment;
-	return { ...comment, commitSha: info.sha, commitShort: info.shortSha };
+	return { ...comment, commitSha: info.sha, commitShort: info.shortSha, commitKind: info.kind };
 }
 
 function activeFileList() {
@@ -273,7 +309,15 @@ function hideBinaryPreview() {
 }
 
 function previewSideLabel(file, side) {
-	if (state.currentScope === "commits") return side === "original" ? "Parent" : "Commit";
+	if (state.currentScope === "commits") {
+		return selectedCommitKind() === "working-tree"
+			? side === "original"
+				? workingTreeOriginalLabel()
+				: "Working tree"
+			: side === "original"
+				? "Parent"
+				: "Commit";
+	}
 	if (state.currentScope === "branch") {
 		if (side === "original") return reviewData.branchBaseRef ? `Base (${reviewData.branchBaseRef})` : "Base";
 		return file.hasWorkingTreeFile ? "Working tree" : "HEAD";
@@ -476,16 +520,16 @@ function buildTree(files) {
 	return collapseTreeNode(root, true);
 }
 
-function cacheKey(scope, fileId) {
+function cacheKey(scope, fileId, commitSha = null) {
 	if (scope === "commits") {
-		return `commits:${state.selectedCommitSha ?? ""}:${fileId}`;
+		return `commits:${commitSha ?? state.selectedCommitSha ?? ""}:${fileId}`;
 	}
 	return `${scope}:${fileId}`;
 }
 
-function scrollKey(scope, fileId) {
+function scrollKey(scope, fileId, commitSha = null) {
 	if (scope === "commits") {
-		return `commits:${state.selectedCommitSha ?? ""}:${fileId}`;
+		return `commits:${commitSha ?? state.selectedCommitSha ?? ""}:${fileId}`;
 	}
 	return `${scope}:${fileId}`;
 }
@@ -536,8 +580,8 @@ function restoreScrollState(scrollState) {
 	modifiedEditor.setScrollLeft(scrollState.modifiedLeft);
 }
 
-function getRequestState(fileId, scope = state.currentScope) {
-	const key = cacheKey(scope, fileId);
+function getRequestState(fileId, scope = state.currentScope, commitSha = null) {
+	const key = cacheKey(scope, fileId, commitSha);
 	return {
 		contents: state.fileContents[key],
 		error: state.fileErrors[key],
@@ -545,37 +589,123 @@ function getRequestState(fileId, scope = state.currentScope) {
 	};
 }
 
-function ensureFileLoaded(fileId, scope = state.currentScope) {
+function ensureFileLoaded(fileId, scope = state.currentScope, commitSha = null, options = {}) {
 	if (!fileId) return;
-	const key = cacheKey(scope, fileId);
-	if (state.fileContents[key] != null) return;
-	if (state.fileErrors[key] != null) return;
-	if (state.pendingRequestIds[key] != null) return;
+	const forceRefresh = options.forceRefresh === true;
+	const resolvedCommitSha = scope === "commits" ? (commitSha ?? state.selectedCommitSha ?? null) : null;
+	const key = cacheKey(scope, fileId, resolvedCommitSha);
+	if (!forceRefresh) {
+		if (state.fileContents[key] != null) return;
+		if (state.fileErrors[key] != null) return;
+		if (state.pendingRequestIds[key] != null) return;
+	}
 
 	const requestId = `request:${Date.now()}:${++requestSequence}`;
 	state.pendingRequestIds[key] = requestId;
 	renderTree();
 	if (window.glimpse?.send) {
 		const payload = { type: "request-file", requestId, fileId, scope };
-		if (scope === "commits" && state.selectedCommitSha) {
-			payload.commitSha = state.selectedCommitSha;
+		if (scope === "commits" && resolvedCommitSha) {
+			payload.commitSha = resolvedCommitSha;
 		}
 		window.glimpse.send(payload);
 	}
 }
 
-function ensureCommitFilesLoaded(sha) {
+function ensureCommitFilesLoaded(sha, options = {}) {
 	if (!sha) return;
-	if (state.commitFilesBySha[sha] != null) return;
-	if (state.commitErrors[sha] != null) return;
+	const forceRefresh = options.forceRefresh === true;
+	if (!forceRefresh) {
+		if (state.commitFilesBySha[sha] != null) return;
+		if (state.commitErrors[sha] != null) return;
+	}
 	if (state.commitRequestIds[sha] != null) return;
 
+	if (forceRefresh) {
+		delete state.commitErrors[sha];
+	}
 	const requestId = `commit-request:${Date.now()}:${++requestSequence}`;
 	state.commitRequestIds[sha] = requestId;
 	if (window.glimpse?.send) {
 		window.glimpse.send({ type: "request-commit", requestId, sha });
 	}
 	renderCommitList();
+}
+
+function formatWorkingTreeLoadLabel(timestamp) {
+	if (!timestamp) return "Not loaded yet";
+	const date = new Date(timestamp);
+	if (Number.isNaN(date.getTime())) return "Not loaded yet";
+	return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
+function updateWorkingTreeRefreshButton() {
+	if (!refreshWorkingTreeButton) return;
+	if (state.currentScope !== "commits") {
+		refreshWorkingTreeButton.style.display = "none";
+		refreshWorkingTreeButton.disabled = true;
+		return;
+	}
+	const sha = state.selectedCommitSha;
+	const commitLoading = sha ? state.commitRequestIds[sha] != null : false;
+	const reviewDataLoading = state.reviewDataRequestId != null;
+	const loading = commitLoading || reviewDataLoading;
+	refreshWorkingTreeButton.style.display = "inline-flex";
+	refreshWorkingTreeButton.disabled = loading;
+	refreshWorkingTreeButton.textContent = loading
+		? "Refreshing…"
+		: isSelectedWorkingTreeCommit()
+			? "Refresh live diff"
+			: "Refresh commits view";
+	refreshWorkingTreeButton.title = isSelectedWorkingTreeCommit()
+		? `Live working tree. Outside edits will not appear until you refresh. Last loaded ${formatWorkingTreeLoadLabel(state.lastWorkingTreeLoadAt)}.`
+		: "Refresh the commits list to detect new or cleared uncommitted changes.";
+}
+
+function clearCommitScopedState(sha) {
+	const prefix = `commits:${sha}:`;
+	for (const key of Object.keys(state.fileContents)) {
+		if (key.startsWith(prefix)) delete state.fileContents[key];
+	}
+	for (const key of Object.keys(state.fileErrors)) {
+		if (key.startsWith(prefix)) delete state.fileErrors[key];
+	}
+}
+
+function clearWorkingTreeReviewArtifacts(sha) {
+	state.comments = state.comments.filter((comment) => !(comment.scope === "commits" && comment.commitSha === sha));
+	const previousFiles = state.commitFilesBySha[sha] ?? [];
+	for (const file of previousFiles) {
+		delete state.reviewedFiles[file.id];
+		delete state.scrollPositions[scrollKey("commits", file.id, sha)];
+	}
+}
+
+function requestLatestReviewData() {
+	if (!window.glimpse?.send) return;
+	if (state.reviewDataRequestId != null) return;
+	const requestId = `review-data-request:${Date.now()}:${++requestSequence}`;
+	state.reviewDataRequestId = requestId;
+	updateWorkingTreeRefreshButton();
+	window.glimpse.send({ type: "request-review-data", requestId });
+}
+
+function refreshCommitsView() {
+	if (state.currentScope !== "commits") return;
+	const previousSelectedSha = state.selectedCommitSha;
+	if (previousSelectedSha && isWorkingTreeCommit(previousSelectedSha)) {
+		clearWorkingTreeReviewArtifacts(previousSelectedSha);
+		clearCommitScopedState(previousSelectedSha);
+		delete state.commitFilesBySha[previousSelectedSha];
+		delete state.commitErrors[previousSelectedSha];
+	}
+	renderTree();
+	if (diffEditor && monacoApi) {
+		mountFile({ preserveScroll: true });
+	} else {
+		renderFileComments();
+	}
+	requestLatestReviewData();
 }
 
 function openFile(fileId) {
@@ -740,7 +870,8 @@ function renderCommitList() {
 	if (!commitListEl) return;
 	commitListEl.innerHTML = "";
 	if (reviewData.commits.length === 0) {
-		commitListEl.innerHTML = '<div class="px-3 py-2 text-[11px] text-review-muted">No branch commits.</div>';
+		commitListEl.innerHTML = '<div class="px-3 py-2 text-[11px] text-review-muted">No commits to review.</div>';
+		updateWorkingTreeRefreshButton();
 		return;
 	}
 	for (const commit of reviewData.commits) {
@@ -750,22 +881,27 @@ function renderCommitList() {
 		row.dataset.selected = commit.sha === state.selectedCommitSha ? "true" : "false";
 		const loading = state.commitRequestIds[commit.sha] != null && state.commitFilesBySha[commit.sha] == null;
 		const errored = state.commitErrors[commit.sha] != null;
-		const date = commit.authorDate ? new Date(commit.authorDate) : null;
+		const isWorkingTreeCommit = commit.kind === "working-tree";
+		const date = !isWorkingTreeCommit && commit.authorDate ? new Date(commit.authorDate) : null;
 		const dateLabel =
 			date && !Number.isNaN(date.getTime())
 				? date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 				: "";
+		const metaLabel = isWorkingTreeCommit
+			? `Live · ${workingTreeRangeLabel()}`
+			: `${commit.authorName || ""}${dateLabel ? ` · ${dateLabel}` : ""}`;
 		row.innerHTML = `
       <span class="commit-row-sha">${escapeHtml(commit.shortSha)}</span>
       <span class="commit-row-body">
         <span class="commit-row-subject">${escapeHtml(commit.subject)}</span>
-        <span class="commit-row-meta">${escapeHtml(commit.authorName || "")}${dateLabel ? ` · ${escapeHtml(dateLabel)}` : ""}</span>
+        <span class="commit-row-meta">${escapeHtml(metaLabel)}</span>
       </span>
       <span class="commit-row-status">${loading ? "…" : errored ? "!" : ""}</span>
     `;
 		row.addEventListener("click", () => selectCommit(commit.sha));
 		commitListEl.appendChild(row);
 	}
+	updateWorkingTreeRefreshButton();
 }
 
 function selectCommit(sha) {
@@ -799,6 +935,7 @@ function updateToggleButtons() {
 		: "Show changed areas only";
 	toggleUnchangedButton.style.display = !usesBinaryPreview && activeFileShowsDiff() ? "inline-flex" : "none";
 	updateScopeButtons();
+	updateWorkingTreeRefreshButton();
 	modeHintEl.textContent = currentModeHint();
 	submitButton.disabled = false;
 	updateFileHeaderMeta(file);
@@ -852,7 +989,8 @@ function renderTree() {
 	sidebarTitleEl.textContent = scopeLabel(state.currentScope);
 	const comments = state.comments.length;
 	const filteredSuffix = state.fileFilter.trim() ? ` • ${visibleFiles.length} shown` : "";
-	summaryEl.textContent = `${scopedFiles.length} file(s) • ${comments} comment(s)${state.overallComment ? " • overall note" : ""}${filteredSuffix}`;
+	const liveSuffix = isSelectedWorkingTreeCommit() ? " • live working tree" : "";
+	summaryEl.textContent = `${scopedFiles.length} file(s) • ${comments} comment(s)${state.overallComment ? " • overall note" : ""}${filteredSuffix}${liveSuffix}`;
 	updateToggleButtons();
 	updateSidebarLayout();
 }
@@ -1483,30 +1621,62 @@ function createGlyphHoverActions(editor, side) {
 window.__reviewReceive = (message) => {
 	if (!message || typeof message !== "object") return;
 
+	if (message.type === "review-data") {
+		if (state.reviewDataRequestId !== message.requestId) return;
+		reviewData.files = Array.isArray(message.files) ? message.files : [];
+		reviewData.commits = Array.isArray(message.commits) ? message.commits : [];
+		reviewData.branchBaseRef = message.branchBaseRef ?? null;
+		reviewData.branchMergeBaseSha = message.branchMergeBaseSha ?? null;
+		reviewData.repositoryHasHead = message.repositoryHasHead === true;
+		state.reviewDataRequestId = null;
+		if (!reviewData.commits.some((commit) => commit.sha === state.selectedCommitSha)) {
+			state.selectedCommitSha = reviewData.commits[0]?.sha ?? null;
+		}
+		renderCommitList();
+		renderAll({ restoreFileScroll: false });
+		if (state.currentScope === "commits" && state.selectedCommitSha) {
+			ensureCommitFilesLoaded(state.selectedCommitSha, {
+				forceRefresh: isWorkingTreeCommit(state.selectedCommitSha),
+			});
+		}
+		return;
+	}
+
 	if (message.type === "commit-data") {
+		if (state.commitRequestIds[message.sha] !== message.requestId) return;
 		state.commitFilesBySha[message.sha] = Array.isArray(message.files) ? message.files : [];
 		delete state.commitErrors[message.sha];
 		delete state.commitRequestIds[message.sha];
+		if (isWorkingTreeCommit(message.sha)) {
+			state.lastWorkingTreeLoadAt = Date.now();
+		}
 		renderCommitList();
 		if (state.currentScope === "commits" && state.selectedCommitSha === message.sha) {
 			ensureActiveFileForScope();
 			renderAll({ restoreFileScroll: false });
 			const file = activeFile();
-			if (file) ensureFileLoaded(file.id, state.currentScope);
+			if (file) {
+				ensureFileLoaded(file.id, state.currentScope, message.sha, {
+					forceRefresh: isWorkingTreeCommit(message.sha),
+				});
+			}
 		}
 		return;
 	}
 
 	if (message.type === "commit-error") {
+		if (state.commitRequestIds[message.sha] !== message.requestId) return;
 		state.commitErrors[message.sha] = message.message || "Unknown error";
 		delete state.commitRequestIds[message.sha];
 		renderCommitList();
+		updateWorkingTreeRefreshButton();
 		return;
 	}
 
-	const key = cacheKey(message.scope, message.fileId);
+	const key = cacheKey(message.scope, message.fileId, message.commitSha ?? null);
 
 	if (message.type === "file-data") {
+		if (state.pendingRequestIds[key] !== message.requestId) return;
 		state.fileContents[key] = {
 			originalContent: message.originalContent,
 			modifiedContent: message.modifiedContent,
@@ -1527,6 +1697,7 @@ window.__reviewReceive = (message) => {
 	}
 
 	if (message.type === "file-error") {
+		if (state.pendingRequestIds[key] !== message.requestId) return;
 		state.fileErrors[key] = message.message || "Unknown error";
 		delete state.pendingRequestIds[key];
 		renderTree();
@@ -1652,6 +1823,12 @@ overallCommentButton.addEventListener("click", () => {
 fileCommentButton.addEventListener("click", () => {
 	showFileCommentPopover();
 });
+
+if (refreshWorkingTreeButton) {
+	refreshWorkingTreeButton.addEventListener("click", () => {
+		refreshCommitsView();
+	});
+}
 
 toggleUnchangedButton.addEventListener("click", () => {
 	state.hideUnchanged = !state.hideUnchanged;

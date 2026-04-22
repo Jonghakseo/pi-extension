@@ -5,7 +5,11 @@ function formatScopeLabel(comment: DiffReviewComment): string {
 		case "branch":
 			return "branch diff";
 		case "commits":
-			return comment.commitShort ? `commit ${comment.commitShort}` : "commit";
+			return comment.commitKind === "working-tree"
+				? "working tree changes"
+				: comment.commitShort
+					? `commit ${comment.commitShort}`
+					: "commit";
 		default:
 			return "all files";
 	}
