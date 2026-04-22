@@ -90,6 +90,15 @@ export default function (pi: ExtensionAPI) {
 			const commitFileCache = new Map<string, Promise<ReviewFile[]>>();
 			const contentCache = new Map<string, Promise<ReviewFileContents>>();
 
+			const clearRefreshableCaches = (): void => {
+				contentCache.clear();
+				for (const sha of commitFileCache.keys()) {
+					if (isWorkingTreeCommitSha(sha)) {
+						commitFileCache.delete(sha);
+					}
+				}
+			};
+
 			const sendWindowMessage = (message: ReviewHostMessage): void => {
 				if (activeWindow !== window) return;
 				const payload = escapeForInlineScript(JSON.stringify(message));
@@ -97,15 +106,6 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			const loadCommitFiles = (sha: string): Promise<ReviewFile[]> => {
-				if (isWorkingTreeCommitSha(sha)) {
-					const pending = getCommitFiles(pi, repoRoot, sha);
-					pending
-						.then((commitFiles) => {
-							for (const cf of commitFiles) fileMap.set(cf.id, cf);
-						})
-						.catch(() => {});
-					return pending;
-				}
 				const cached = commitFileCache.get(sha);
 				if (cached != null) return cached;
 				const pending = getCommitFiles(pi, repoRoot, sha);
@@ -123,17 +123,12 @@ export default function (pi: ExtensionAPI) {
 				scope: ReviewRequestFilePayload["scope"],
 				commitSha: string | null,
 			): Promise<ReviewFileContents> => {
-				const skipCache = scope === "commits" && commitSha != null && isWorkingTreeCommitSha(commitSha);
 				const cacheKey = `${scope}:${commitSha ?? ""}:${file.id}`;
-				if (!skipCache) {
-					const cached = contentCache.get(cacheKey);
-					if (cached != null) return cached;
-				}
+				const cached = contentCache.get(cacheKey);
+				if (cached != null) return cached;
 
 				const pending = loadReviewFileContents(pi, repoRoot, file, scope, commitSha, reviewData.branchMergeBaseSha);
-				if (!skipCache) {
-					contentCache.set(cacheKey, pending);
-				}
+				contentCache.set(cacheKey, pending);
 				return pending;
 			};
 
@@ -227,6 +222,7 @@ export default function (pi: ExtensionAPI) {
 					};
 
 					const handleRequestReviewData = async (message: ReviewRequestReviewDataPayload): Promise<void> => {
+						clearRefreshableCaches();
 						reviewData = await getReviewWindowData(pi, repoRoot);
 						for (const file of reviewData.files) fileMap.set(file.id, file);
 						sendWindowMessage({

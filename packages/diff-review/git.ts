@@ -22,6 +22,15 @@ interface ReviewBaseInfo {
 	baseRef: string;
 }
 
+interface WorkingTreeStatusInfo {
+	hasChanges: boolean;
+	hasReviewableChanges: boolean;
+	hasUntracked: boolean;
+	hasTrackedDeletions: boolean;
+	hasRenames: boolean;
+	untrackedPaths: string[];
+}
+
 const WORKING_TREE_COMMIT_SHA = "__pi_working_tree__";
 const WORKING_TREE_COMMIT_SHORT_SHA = "WT";
 const WORKING_TREE_COMMIT_SUBJECT = "Uncommitted changes";
@@ -156,6 +165,55 @@ function parseNameStatus(output: string): ChangedPath[] {
 		if (change != null) changes.push(change);
 	}
 	return changes;
+}
+
+function parseStatusPorcelainZ(output: string): WorkingTreeStatusInfo {
+	const info: WorkingTreeStatusInfo = {
+		hasChanges: false,
+		hasReviewableChanges: false,
+		hasUntracked: false,
+		hasTrackedDeletions: false,
+		hasRenames: false,
+		untrackedPaths: [],
+	};
+	const tokens = output.split("\0");
+
+	for (let index = 0; index < tokens.length; ) {
+		const token = tokens[index] ?? "";
+		if (token.length === 0) {
+			index += 1;
+			continue;
+		}
+
+		const code = token.slice(0, 2);
+		const path = token.slice(3);
+		const isRenameOrCopy = code.includes("R") || code.includes("C");
+		const isReviewablePath = code !== "!!" && path.length > 0 && isIncludedReviewPath(path);
+		if (code !== "!!") {
+			info.hasChanges = true;
+		}
+		if (isReviewablePath) {
+			info.hasReviewableChanges = true;
+		}
+		if (code === "??") {
+			if (isReviewablePath) {
+				info.hasUntracked = true;
+				info.untrackedPaths.push(path);
+			}
+		} else if (isReviewablePath) {
+			if (code.includes("D")) info.hasTrackedDeletions = true;
+			if (isRenameOrCopy) info.hasRenames = true;
+		}
+
+		index += isRenameOrCopy ? 2 : 1;
+	}
+
+	return info;
+}
+
+async function getWorkingTreeStatusInfo(pi: ExtensionAPI, repoRoot: string): Promise<WorkingTreeStatusInfo> {
+	const output = await runGitAllowFailure(pi, repoRoot, ["status", "--porcelain=1", "--untracked-files=all", "-z"]);
+	return parseStatusPorcelainZ(output);
 }
 
 function toDisplayPath(change: ChangedPath): string {
@@ -343,6 +401,48 @@ async function loadBinarySideFromRevision(
 	return { exists: true, previewUrl: mimeType ? bufferToDataUrl(bytes, mimeType) : null };
 }
 
+function mergeChangedPaths(...groups: ChangedPath[][]): ChangedPath[] {
+	const merged = new Map<string, ChangedPath>();
+	for (const group of groups) {
+		for (const change of group) {
+			const key = change.newPath ?? change.oldPath ?? "";
+			if (key.length === 0) continue;
+			merged.set(key, change);
+		}
+	}
+	return [...merged.values()];
+}
+
+function toUntrackedChangedPaths(paths: string[]): ChangedPath[] {
+	return paths.map((path) => ({ status: "added", oldPath: null, newPath: path }) satisfies ChangedPath);
+}
+
+function shouldNormalizeBranchChanges(
+	trackedChanges: ChangedPath[],
+	workingTreeStatus: WorkingTreeStatusInfo,
+): boolean {
+	if (workingTreeStatus.hasRenames) return true;
+	if (!workingTreeStatus.hasUntracked) return false;
+	return trackedChanges.some((change) => change.status === "deleted");
+}
+
+async function getTrackedBranchReviewChanges(
+	pi: ExtensionAPI,
+	repoRoot: string,
+	branchComparisonBase: string,
+): Promise<ChangedPath[]> {
+	return parseNameStatus(
+		await runGitAllowFailure(pi, repoRoot, [
+			"diff",
+			"--find-renames",
+			"-M",
+			"--name-status",
+			branchComparisonBase,
+			"--",
+		]),
+	);
+}
+
 async function getWorkingTreeSnapshotChanges(
 	pi: ExtensionAPI,
 	repoRoot: string,
@@ -373,9 +473,14 @@ async function getBranchReviewChanges(
 	pi: ExtensionAPI,
 	repoRoot: string,
 	branchComparisonBase: string | null,
+	workingTreeStatus: WorkingTreeStatusInfo,
 ): Promise<ChangedPath[]> {
 	if (!branchComparisonBase) return [];
-	return getWorkingTreeSnapshotChanges(pi, repoRoot, branchComparisonBase);
+	const trackedChanges = await getTrackedBranchReviewChanges(pi, repoRoot, branchComparisonBase);
+	if (shouldNormalizeBranchChanges(trackedChanges, workingTreeStatus)) {
+		return getWorkingTreeSnapshotChanges(pi, repoRoot, branchComparisonBase);
+	}
+	return mergeChangedPaths(trackedChanges, toUntrackedChangedPaths(workingTreeStatus.untrackedPaths));
 }
 
 async function getWorkingTreeReviewChanges(
@@ -415,21 +520,18 @@ export async function getReviewWindowData(
 	const repositoryHasHead = await hasHead(pi, repoRoot);
 	const reviewBase = repositoryHasHead ? await findReviewBase(pi, repoRoot) : null;
 	const branchComparisonBase = reviewBase?.mergeBase ?? (repositoryHasHead ? "HEAD" : null);
+	const workingTreeStatus = await getWorkingTreeStatusInfo(pi, repoRoot);
 	const branchChanges = repositoryHasHead
-		? await getBranchReviewChanges(pi, repoRoot, branchComparisonBase)
+		? await getBranchReviewChanges(pi, repoRoot, branchComparisonBase, workingTreeStatus)
 		: await getWorkingTreeReviewChanges(pi, repoRoot, false);
 	const files = branchChanges
 		.filter((change) => isIncludedReviewPath(change.newPath ?? change.oldPath ?? ""))
 		.map(toBranchReviewFile)
 		.sort(compareReviewFiles);
 	const commits = reviewBase ? await listRangeCommits(pi, repoRoot, `${reviewBase.mergeBase}..HEAD`, 100) : [];
-	const workingTreeChanges = await getWorkingTreeReviewChanges(pi, repoRoot, repositoryHasHead);
-	const filteredWorkingTreeChanges = workingTreeChanges.filter((change) =>
-		isIncludedReviewPath(change.newPath ?? change.oldPath ?? ""),
-	);
-	const workingTreeCommit = filteredWorkingTreeChanges.length > 0 ? [createWorkingTreeCommitInfo()] : [];
+	const workingTreeCommit = workingTreeStatus.hasReviewableChanges ? [createWorkingTreeCommitInfo()] : [];
 	const fallbackCommits =
-		repositoryHasHead && files.length === 0 && commits.length === 0 && filteredWorkingTreeChanges.length === 0
+		repositoryHasHead && files.length === 0 && commits.length === 0 && !workingTreeStatus.hasReviewableChanges
 			? await listRangeCommits(pi, repoRoot, "HEAD", 20)
 			: commits;
 
@@ -721,3 +823,8 @@ export async function loadReviewFileContents(
 		modifiedPreviewUrl: null,
 	};
 }
+
+export const __testing = {
+	parseStatusPorcelainZ,
+	shouldNormalizeBranchChanges,
+};

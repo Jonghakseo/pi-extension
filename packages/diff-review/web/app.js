@@ -662,14 +662,31 @@ function updateWorkingTreeRefreshButton() {
 		: "Refresh the commits list to detect new or cleared uncommitted changes.";
 }
 
-function clearCommitScopedState(sha) {
-	const prefix = `commits:${sha}:`;
+function clearFileRequestStateByPrefixes(prefixes) {
+	const matchesPrefix = (key) => prefixes.some((prefix) => key.startsWith(prefix));
 	for (const key of Object.keys(state.fileContents)) {
-		if (key.startsWith(prefix)) delete state.fileContents[key];
+		if (matchesPrefix(key)) delete state.fileContents[key];
 	}
 	for (const key of Object.keys(state.fileErrors)) {
-		if (key.startsWith(prefix)) delete state.fileErrors[key];
+		if (matchesPrefix(key)) delete state.fileErrors[key];
 	}
+	for (const key of Object.keys(state.pendingRequestIds)) {
+		if (matchesPrefix(key)) delete state.pendingRequestIds[key];
+	}
+}
+
+function clearCommitScopedState(sha) {
+	clearFileRequestStateByPrefixes([`commits:${sha}:`]);
+}
+
+function clearRefreshableFileState() {
+	const prefixes = ["branch:", "all:"];
+	for (const commit of reviewData.commits) {
+		if (commit.kind === "working-tree") {
+			prefixes.push(`commits:${commit.sha}:`);
+		}
+	}
+	clearFileRequestStateByPrefixes(prefixes);
 }
 
 function clearWorkingTreeReviewArtifacts(sha) {
@@ -678,6 +695,17 @@ function clearWorkingTreeReviewArtifacts(sha) {
 	for (const file of previousFiles) {
 		delete state.reviewedFiles[file.id];
 		delete state.scrollPositions[scrollKey("commits", file.id, sha)];
+	}
+}
+
+function clearWorkingTreeCommitState() {
+	for (const commit of reviewData.commits) {
+		if (commit.kind !== "working-tree") continue;
+		clearWorkingTreeReviewArtifacts(commit.sha);
+		clearCommitScopedState(commit.sha);
+		delete state.commitFilesBySha[commit.sha];
+		delete state.commitErrors[commit.sha];
+		delete state.commitRequestIds[commit.sha];
 	}
 }
 
@@ -692,13 +720,9 @@ function requestLatestReviewData() {
 
 function refreshCommitsView() {
 	if (state.currentScope !== "commits") return;
-	const previousSelectedSha = state.selectedCommitSha;
-	if (previousSelectedSha && isWorkingTreeCommit(previousSelectedSha)) {
-		clearWorkingTreeReviewArtifacts(previousSelectedSha);
-		clearCommitScopedState(previousSelectedSha);
-		delete state.commitFilesBySha[previousSelectedSha];
-		delete state.commitErrors[previousSelectedSha];
-	}
+	clearRefreshableFileState();
+	clearWorkingTreeCommitState();
+	state.lastWorkingTreeLoadAt = null;
 	renderTree();
 	if (diffEditor && monacoApi) {
 		mountFile({ preserveScroll: true });
