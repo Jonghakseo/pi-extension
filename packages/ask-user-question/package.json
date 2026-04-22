@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-ask-user-question",
-	"version": "0.2.2",
+	"version": "0.3.0",
 	"description": "AskUserQuestion tool extension for pi.",
 	"license": "MIT",
 	"repository": {

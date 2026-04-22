@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
+import { coerceAskUserQuestionParams } from "./coerce.ts";
 import { runAskUserQuestionForm } from "./form-ui.ts";
 import {
 	buildRenderCallText,
@@ -44,7 +45,14 @@ function buildSuccessResponse(result: FormResult) {
 }
 
 export type { AskUserQuestionParamsInput, FormResult, Question };
-export { AskUserQuestionParams, buildRenderCallText, buildRenderResultText, errorResult, normalizeQuestions };
+export {
+	AskUserQuestionParams,
+	buildRenderCallText,
+	buildRenderResultText,
+	coerceAskUserQuestionParams,
+	errorResult,
+	normalizeQuestions,
+};
 
 export default function askUserQuestion(pi: ExtensionAPI) {
 	pi.registerTool({
@@ -59,12 +67,12 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				return errorResult("오류: UI를 사용할 수 없습니다. 현재 비대화형 모드에서 실행 중입니다.");
 			}
 
-			const params = rawParams as AskUserQuestionParamsInput;
+			const params = coerceAskUserQuestionParams(rawParams);
 			if (!params.questions.length) {
 				return errorResult("오류: 질문이 제공되지 않았습니다.");
 			}
 
-			const questions = normalizeQuestions(params.questions as Question[]);
+			const questions = normalizeQuestions(params.questions);
 			const result = await runAskUserQuestionForm(
 				ctx,
 				{ title: params.title, description: params.description },
@@ -73,10 +81,8 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 			return result.cancelled ? buildCancelledResponse(result) : buildSuccessResponse(result);
 		},
 		renderCall(args, theme) {
-			return renderCall(
-				{ questions: args.questions as Question[] | undefined, title: args.title as string | undefined },
-				theme,
-			);
+			const coerced = coerceAskUserQuestionParams(args);
+			return renderCall({ questions: coerced.questions, title: coerced.title }, theme);
 		},
 		renderResult(result, _options, theme) {
 			return renderResult(result as { content?: Array<{ type: string; text?: string }>; details?: FormResult }, theme);

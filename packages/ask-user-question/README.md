@@ -88,3 +88,21 @@ pi install npm:@ryan_nookpi/pi-extension-ask-user-question
 ## 반환 형태
 
 응답은 각 질문의 `id` 기준으로 정리되어 반환됩니다. 취소 시에는 `cancelled: true`가 내려오고, 완료 시에는 질문별 답변 목록이 포함됩니다.
+
+## 허용되는 느슨한 입력 형태
+
+위 스키마가 권장 형식이지만, 다음과 같은 변형 입력도 자동으로 정규화해서 처리합니다.
+
+- `questions`를 JSON 문자열로 직렬화해 전달: `{ "questions": "[ ... ]" }`
+- 질문 프롬프트를 `prompt` 대신 `question` 필드로 전달
+- `options`를 `{ value, label }` 객체가 아닌 문자열 배열로 전달 (동일 값으로 승격)
+- `options`를 JSON 문자열로 직렬화해 전달
+- `id` 생략 시 순서대로 `q1`, `q2`, ...로 자동 부여
+
+예:
+
+```json
+{
+  "questions": "[{\"type\": \"radio\", \"question\": \"extension 이름\", \"options\": [\"claude-code-use\", \"pi-claude-code-use\"], \"allowOther\": true}]"
+}
+```

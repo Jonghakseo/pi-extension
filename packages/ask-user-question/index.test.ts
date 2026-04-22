@@ -42,11 +42,65 @@ describe("ask-user-question extension", () => {
 			hasUI: true,
 			ui: { custom: vi.fn() },
 		} as unknown as ExtensionContext);
+		const invalidQuestions = await tool.execute(
+			"call-2b",
+			{ title: "Title", questions: "not-json" },
+			undefined,
+			undefined,
+			{ hasUI: true, ui: { custom: vi.fn() } } as unknown as ExtensionContext,
+		);
 
 		expect(noUi).toMatchObject({
 			content: [{ type: "text", text: "오류: UI를 사용할 수 없습니다. 현재 비대화형 모드에서 실행 중입니다." }],
 		});
 		expect(noQuestions).toMatchObject({ content: [{ type: "text", text: "오류: 질문이 제공되지 않았습니다." }] });
+		expect(invalidQuestions).toMatchObject({ content: [{ type: "text", text: "오류: 질문이 제공되지 않았습니다." }] });
+	});
+
+	it("JSON 문자열로 직렬화된 questions도 폼 실행 경로로 진입한다", async () => {
+		const apiMock = createExtensionApiMock();
+		askUserQuestionExtension(apiMock.api);
+		const tool = apiMock.getTool("ask_user_question");
+		if (!tool.execute) throw new Error("execute is missing");
+
+		const customMock = vi.fn(async () => ({
+			title: undefined,
+			questions: normalizeQuestions([
+				{
+					id: "q1",
+					type: "radio",
+					prompt: "extension 이름",
+					options: [
+						{ value: "claude-code-use", label: "claude-code-use" },
+						{ value: "pi-claude-code-use", label: "pi-claude-code-use" },
+					],
+				},
+			]),
+			answers: [{ id: "q1", type: "radio" as const, value: "claude-code-use", wasCustom: false }],
+			cancelled: false,
+		}));
+
+		const serializedResult = await tool.execute(
+			"call-json",
+			{
+				questions: JSON.stringify([
+					{
+						type: "radio",
+						question: "extension 이름",
+						options: ["claude-code-use", "pi-claude-code-use"],
+						allowOther: true,
+					},
+				]),
+			},
+			undefined,
+			undefined,
+			{ hasUI: true, ui: { custom: customMock } } as unknown as ExtensionContext,
+		);
+
+		expect(customMock).toHaveBeenCalledTimes(1);
+		expect(serializedResult).toMatchObject({
+			content: [{ type: "text", text: "Q1: claude-code-use" }],
+		});
 	});
 
 	it("returns cancelled and successful execution results", async () => {
