@@ -7,528 +7,649 @@
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 <style>
   :root {
-      --color-review-bg: #0d1117;
-      --color-review-inset: #010409;
-      --color-review-panel: #151b23;
-      --color-review-panel-hover: #1f242c;
-      --color-review-border: #3d444d;
-      --color-review-border-muted: #2f353d;
-      --color-review-text: #f0f6fc;
-      --color-review-muted: #9198a1;
-      --color-review-subtle: #6e7681;
-      --color-review-accent: #4493f8;
-      --color-review-accent-emphasis: #1f6feb;
-      --color-review-success: #3fb950;
-      --color-review-success-emphasis: #238636;
-      --color-review-danger: #f85149;
-      --color-review-attention: #d29922;
-    }
+        --color-review-bg: #0d1117;
+        --color-review-inset: #010409;
+        --color-review-panel: #151b23;
+        --color-review-panel-hover: #1f242c;
+        --color-review-border: #3d444d;
+        --color-review-border-muted: #2f353d;
+        --color-review-text: #f0f6fc;
+        --color-review-muted: #9198a1;
+        --color-review-subtle: #6e7681;
+        --color-review-accent: #4493f8;
+        --color-review-accent-emphasis: #1f6feb;
+        --color-review-success: #3fb950;
+        --color-review-success-emphasis: #238636;
+        --color-review-danger: #f85149;
+        --color-review-attention: #d29922;
+      }
 
-    .bg-review-bg { background-color: var(--color-review-bg); }
-    .bg-review-panel { background-color: var(--color-review-panel); }
-    .border-review-border { border-color: var(--color-review-border); }
-    .text-review-text { color: var(--color-review-text); }
-    .text-review-muted { color: var(--color-review-muted); }
-    .placeholder\:text-review-muted::placeholder { color: var(--color-review-muted); }
-    .focus\:border-review-accent:focus { border-color: var(--color-review-accent); }
-    .focus\:ring-review-accent:focus { --tw-ring-color: var(--color-review-accent); }
+      .bg-review-bg { background-color: var(--color-review-bg); }
+      .bg-review-panel { background-color: var(--color-review-panel); }
+      .border-review-border { border-color: var(--color-review-border); }
+      .text-review-text { color: var(--color-review-text); }
+      .text-review-muted { color: var(--color-review-muted); }
+      .placeholder\:text-review-muted::placeholder { color: var(--color-review-muted); }
+      .focus\:border-review-accent:focus { border-color: var(--color-review-accent); }
+      .focus\:ring-review-accent:focus { --tw-ring-color: var(--color-review-accent); }
 </style>
 <style>
   html, body {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-      }
+          width: 100%;
+          height: 100%;
+          overflow: hidden;
+        }
 
-      .scrollbar-thin::-webkit-scrollbar {
-        width: 10px;
-        height: 10px;
-      }
+        .scrollbar-thin::-webkit-scrollbar {
+          width: 10px;
+          height: 10px;
+        }
 
-      .scrollbar-thin::-webkit-scrollbar-thumb {
-        background: #3d444d;
-        border-radius: 999px;
-        border: 3px solid #151b23;
-      }
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+          background: #3d444d;
+          border-radius: 999px;
+          border: 3px solid #151b23;
+        }
 
-      .scrollbar-thin::-webkit-scrollbar-track {
-        background: transparent;
-      }
+        .scrollbar-thin::-webkit-scrollbar-track {
+          background: transparent;
+        }
 
-      .review-popover {
-        position: absolute;
-        width: min(420px, 92vw);
-        background: #151b23;
-        border: 1px solid #3d444d;
-        border-radius: 10px;
-        box-shadow: 0 8px 24px rgba(1, 4, 9, 0.6);
-        padding: 12px;
-        z-index: 100;
-        animation: reviewPopIn 120ms ease-out;
-      }
+        .review-popover {
+          position: absolute;
+          width: min(420px, 92vw);
+          background: #151b23;
+          border: 1px solid #3d444d;
+          border-radius: 10px;
+          box-shadow: 0 8px 24px rgba(1, 4, 9, 0.6);
+          padding: 12px;
+          z-index: 100;
+          animation: reviewPopIn 120ms ease-out;
+        }
 
-      @keyframes reviewPopIn {
-        from { opacity: 0; transform: translateY(-4px); }
-        to   { opacity: 1; transform: none; }
-      }
+        @keyframes reviewPopIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to   { opacity: 1; transform: none; }
+        }
 
-      .review-popover::before {
-        content: "";
-        position: absolute;
-        top: -6px;
-        width: 10px;
-        height: 10px;
-        background: #151b23;
-        border-top: 1px solid #3d444d;
-        border-left: 1px solid #3d444d;
-        transform: rotate(45deg);
-      }
+        .review-popover::before {
+          content: "";
+          position: absolute;
+          top: -6px;
+          width: 10px;
+          height: 10px;
+          background: #151b23;
+          border-top: 1px solid #3d444d;
+          border-left: 1px solid #3d444d;
+          transform: rotate(45deg);
+        }
 
-      .review-popover[data-arrow="right"]::before { right: 18px; }
-      .review-popover[data-arrow="left"]::before  { left: 18px; }
+        .review-popover[data-arrow="right"]::before { right: 18px; }
+        .review-popover[data-arrow="left"]::before  { left: 18px; }
 
-      .review-popover textarea {
-        min-height: 120px;
-        max-height: 40vh;
-      }
+        .review-popover textarea {
+          min-height: 120px;
+          max-height: 40vh;
+        }
 
-      /* Icon button — compact square toggle matching the GitHub Dark palette. */
-      .icon-button {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        padding: 0;
-        border-radius: 6px;
-        border: 1px solid #3d444d;
-        background: #151b23;
-        color: #9198a1;
-        cursor: pointer;
-        transition: background-color 120ms, color 120ms, border-color 120ms;
-        flex-shrink: 0;
-      }
+        /* Icon button — compact square toggle matching the GitHub Dark palette. */
+        .icon-button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          padding: 0;
+          border-radius: 6px;
+          border: 1px solid #3d444d;
+          background: #151b23;
+          color: #9198a1;
+          cursor: pointer;
+          transition: background-color 120ms, color 120ms, border-color 120ms;
+          flex-shrink: 0;
+        }
 
-      .icon-button:hover:not([disabled]) {
-        background: #1f242c;
-        color: #f0f6fc;
-      }
+        .icon-button:hover:not([disabled]) {
+          background: #1f242c;
+          color: #f0f6fc;
+        }
 
-      .icon-button[data-active="true"] {
-        background: rgba(35, 134, 54, 0.15);
-        border-color: rgba(63, 185, 80, 0.45);
-        color: #3fb950;
-      }
+        .icon-button[data-active="true"] {
+          background: rgba(35, 134, 54, 0.15);
+          border-color: rgba(63, 185, 80, 0.45);
+          color: #3fb950;
+        }
 
-      .icon-button[data-active="true"]:hover:not([disabled]) {
-        background: rgba(35, 134, 54, 0.25);
-        color: #3fb950;
-      }
+        .icon-button[data-active="true"]:hover:not([disabled]) {
+          background: rgba(35, 134, 54, 0.25);
+          color: #3fb950;
+        }
 
-      .icon-button[disabled] {
-        opacity: 0.4;
-        cursor: default;
-      }
+        .icon-button[disabled] {
+          opacity: 0.4;
+          cursor: default;
+        }
 
-      .icon-button svg {
-        width: 14px;
-        height: 14px;
-      }
+        .icon-button svg {
+          width: 14px;
+          height: 14px;
+        }
 
-      /* Added-only files in inline diff mode: suppress the original gutter/line-number column
-         that Monaco still paints alongside the modified line numbers. */
-      #editor-container[data-added-only="true"] .monaco-diff-editor .editor.original,
-      #editor-container[data-added-only="true"] .monaco-diff-editor .original-in-monaco {
-        visibility: hidden;
-        width: 0;
-        min-width: 0;
-      }
-      #editor-container[data-added-only="true"] .monaco-editor .line-numbers.original,
-      #editor-container[data-added-only="true"] .monaco-editor .margin-view-overlays .line-numbers[data-lineNumberType="original"] {
-        display: none;
-      }
+        /* Added-only files in inline diff mode: suppress the original gutter/line-number column
+           that Monaco still paints alongside the modified line numbers. */
+        #editor-container[data-added-only="true"] .monaco-diff-editor .editor.original,
+        #editor-container[data-added-only="true"] .monaco-diff-editor .original-in-monaco {
+          visibility: hidden;
+          width: 0;
+          min-width: 0;
+        }
+        #editor-container[data-added-only="true"] .monaco-editor .line-numbers.original,
+        #editor-container[data-added-only="true"] .monaco-editor .margin-view-overlays .line-numbers[data-lineNumberType="original"] {
+          display: none;
+        }
 
-      /* === GitHub-style sidebar === */
-      .gh-tree-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        width: 100%;
-        padding: 3px 8px 3px 8px;
-        text-align: left;
-        font-size: 13px;
-        color: #c9d1d9;
-        border-radius: 6px;
-        cursor: pointer;
-        line-height: 1.4;
-      }
-      .gh-tree-row:hover { background: #1f242c; color: #f0f6fc; }
-      .gh-tree-row[data-selected="true"] { background: rgba(56,139,253,0.15); color: #f0f6fc; }
-      .gh-tree-row .gh-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .gh-tree-row .gh-row-trail { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-      .gh-tree-row svg { flex-shrink: 0; }
-      .gh-dir-icon { color: #79c0ff; }
-      .gh-file-icon { color: #9198a1; }
+        /* === GitHub-style sidebar === */
+        .gh-tree-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          width: 100%;
+          padding: 3px 8px 3px 8px;
+          text-align: left;
+          font-size: 13px;
+          color: #c9d1d9;
+          border-radius: 6px;
+          cursor: pointer;
+          line-height: 1.4;
+        }
+        .gh-tree-row:hover { background: #1f242c; color: #f0f6fc; }
+        .gh-tree-row[data-selected="true"] { background: rgba(56,139,253,0.15); color: #f0f6fc; }
+        .gh-tree-row .gh-row-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .gh-tree-row .gh-row-trail { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+        .gh-tree-row svg { flex-shrink: 0; }
+        .gh-dir-icon { color: #79c0ff; }
+        .gh-file-icon { color: #9198a1; }
 
-      /* GitHub-style status square (A / M / D / R). */
-      .gh-status {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 16px;
-        height: 16px;
-        border-radius: 4px;
-        font-size: 9px;
-        font-weight: 700;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        line-height: 1;
-        flex-shrink: 0;
-      }
-      .gh-status-added    { background: rgba(46,160,67,0.35);  color: #3fb950; }
-      .gh-status-modified { background: rgba(210,153,34,0.30); color: #d29922; }
-      .gh-status-deleted  { background: rgba(248,81,73,0.30);  color: #f85149; }
-      .gh-status-renamed  { background: rgba(56,139,253,0.30); color: #58a6ff; }
+        /* GitHub-style status square (A / M / D / R). */
+        .gh-status {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 16px;
+          height: 16px;
+          border-radius: 4px;
+          font-size: 9px;
+          font-weight: 700;
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          line-height: 1;
+          flex-shrink: 0;
+        }
+        .gh-status-added    { background: rgba(46,160,67,0.35);  color: #3fb950; }
+        .gh-status-modified { background: rgba(210,153,34,0.30); color: #d29922; }
+        .gh-status-deleted  { background: rgba(248,81,73,0.30);  color: #f85149; }
+        .gh-status-renamed  { background: rgba(56,139,253,0.30); color: #58a6ff; }
 
-      .gh-comment-count {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 18px;
-        height: 16px;
-        padding: 0 4px;
-        border-radius: 9999px;
-        background: #1f242c;
-        color: #f0f6fc;
-        font-size: 10px;
-        font-weight: 600;
-        border: 1px solid #3d444d;
-      }
+        .gh-comment-count {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 18px;
+          height: 16px;
+          padding: 0 4px;
+          border-radius: 9999px;
+          background: #1f242c;
+          color: #f0f6fc;
+          font-size: 10px;
+          font-weight: 600;
+          border: 1px solid #3d444d;
+        }
 
-      /* === GitHub-style file header (main pane) === */
-      .gh-file-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-      }
-      .gh-file-path {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 13px;
-        font-weight: 600;
-        color: #f0f6fc;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .gh-file-path .gh-file-path-dir { color: #9198a1; font-weight: 400; }
+        /* === GitHub-style file header (main pane) === */
+        .gh-file-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+        }
+        .gh-file-path {
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 13px;
+          font-weight: 600;
+          color: #f0f6fc;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .gh-file-path .gh-file-path-dir { color: #9198a1; font-weight: 400; }
 
-      .gh-diff-stats {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 11px;
-        color: #9198a1;
-      }
-      .gh-diff-stats-plus  { color: #3fb950; }
-      .gh-diff-stats-minus { color: #f85149; }
+        .gh-diff-stats {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 11px;
+          color: #9198a1;
+        }
+        .gh-diff-stats-plus  { color: #3fb950; }
+        .gh-diff-stats-minus { color: #f85149; }
 
-      /* === GitHub-style Viewed checkbox (replaces the Reviewed icon toggle) === */
-      .gh-viewed {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 10px;
-        border-radius: 6px;
-        border: 1px solid #3d444d;
-        background: #151b23;
-        color: #c9d1d9;
-        font-size: 12px;
-        font-weight: 500;
-        cursor: pointer;
-        user-select: none;
-        transition: background-color 120ms, color 120ms, border-color 120ms;
-      }
-      .gh-viewed:hover:not([disabled]) { background: #1f242c; color: #f0f6fc; }
-      .gh-viewed[data-active="true"] {
-        background: rgba(35,134,54,0.15);
-        border-color: rgba(63,185,80,0.45);
-        color: #3fb950;
-      }
-      .gh-viewed .gh-viewed-box {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 14px;
-        height: 14px;
-        border-radius: 3px;
-        border: 1px solid #6e7681;
-        background: transparent;
-      }
-      .gh-viewed[data-active="true"] .gh-viewed-box {
-        border-color: #3fb950;
-        background: #238636;
-      }
-      .gh-viewed .gh-viewed-box svg { width: 10px; height: 10px; opacity: 0; color: #fff; }
-      .gh-viewed[data-active="true"] .gh-viewed-box svg { opacity: 1; }
+        /* === GitHub-style Viewed checkbox (replaces the Reviewed icon toggle) === */
+        .gh-viewed {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 10px;
+          border-radius: 6px;
+          border: 1px solid #3d444d;
+          background: #151b23;
+          color: #c9d1d9;
+          font-size: 12px;
+          font-weight: 500;
+          cursor: pointer;
+          user-select: none;
+          transition: background-color 120ms, color 120ms, border-color 120ms;
+        }
+        .gh-viewed:hover:not([disabled]) { background: #1f242c; color: #f0f6fc; }
+        .gh-viewed[data-active="true"] {
+          background: rgba(35,134,54,0.15);
+          border-color: rgba(63,185,80,0.45);
+          color: #3fb950;
+        }
+        .gh-viewed .gh-viewed-box {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 14px;
+          height: 14px;
+          border-radius: 3px;
+          border: 1px solid #6e7681;
+          background: transparent;
+        }
+        .gh-viewed[data-active="true"] .gh-viewed-box {
+          border-color: #3fb950;
+          background: #238636;
+        }
+        .gh-viewed .gh-viewed-box svg { width: 10px; height: 10px; opacity: 0; color: #fff; }
+        .gh-viewed[data-active="true"] .gh-viewed-box svg { opacity: 1; }
 
-      /* === Primary CTA (submit review) === */
-      .gh-primary-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        padding: 6px 12px;
-        border-radius: 6px;
-        border: 1px solid rgba(240,246,252,0.1);
-        background: #238636;
-        color: #ffffff;
-        font-size: 12px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: background-color 120ms;
-      }
-      .gh-primary-btn:hover:not([disabled]) { background: #2ea043; }
-      .gh-primary-btn[disabled] { opacity: 0.5; cursor: default; }
+        /* === Primary CTA (submit review) === */
+        .gh-primary-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 6px 12px;
+          border-radius: 6px;
+          border: 1px solid rgba(240,246,252,0.1);
+          background: #238636;
+          color: #ffffff;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background-color 120ms;
+        }
+        .gh-primary-btn:hover:not([disabled]) { background: #2ea043; }
+        .gh-primary-btn[disabled] { opacity: 0.5; cursor: default; }
 
-      /* === Commit picker rows === */
-      .commit-row {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        width: 100%;
-        padding: 6px 8px;
-        text-align: left;
-        border-radius: 6px;
-        cursor: pointer;
-        color: #c9d1d9;
-      }
-      .commit-row:hover { background: #1f242c; }
-      .commit-row[data-selected="true"] {
-        background: rgba(56,139,253,0.15);
-        color: #f0f6fc;
-      }
-      .commit-row-sha {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 10.5px;
-        color: #79c0ff;
-        padding-top: 2px;
-        flex-shrink: 0;
-      }
-      .commit-row-body { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-      .commit-row-subject {
-        font-size: 12.5px;
-        font-weight: 500;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .commit-row-meta {
-        font-size: 10.5px;
-        color: #9198a1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .commit-row-status {
-        font-size: 10px;
-        color: #9198a1;
-        padding-top: 2px;
-        flex-shrink: 0;
-      }
+        /* === Commit picker rows === */
+        .commit-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          width: 100%;
+          padding: 6px 8px;
+          text-align: left;
+          border-radius: 6px;
+          cursor: pointer;
+          color: #c9d1d9;
+        }
+        .commit-row:hover { background: #1f242c; }
+        .commit-row[data-selected="true"] {
+          background: rgba(56,139,253,0.15);
+          color: #f0f6fc;
+        }
+        .commit-row-sha {
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 10.5px;
+          color: #79c0ff;
+          padding-top: 2px;
+          flex-shrink: 0;
+        }
+        .commit-row-body { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+        .commit-row-subject {
+          font-size: 12.5px;
+          font-weight: 500;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .commit-row-meta {
+          font-size: 10.5px;
+          color: #9198a1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .commit-row-status {
+          font-size: 10px;
+          color: #9198a1;
+          padding-top: 2px;
+          flex-shrink: 0;
+        }
 
-      /* === GitHub-style Monaco diff backgrounds === */
-      .monaco-editor .line-insert,
-      .monaco-editor .char-insert {
-        background: rgba(46,160,67,0.18);
-      }
-      .monaco-editor .line-delete,
-      .monaco-editor .char-delete {
-        background: rgba(248,81,73,0.18);
-      }
+        /* === GitHub-style Monaco diff backgrounds === */
+        .monaco-editor .line-insert,
+        .monaco-editor .char-insert {
+          background: rgba(46,160,67,0.18);
+        }
+        .monaco-editor .line-delete,
+        .monaco-editor .char-delete {
+          background: rgba(248,81,73,0.18);
+        }
 
-      #editor-container {
-        height: 100%;
-        min-height: 0;
-        overflow: hidden;
-        position: relative; /* anchor for overlays */
-      }
+        #editor-container {
+          height: 100%;
+          min-height: 0;
+          overflow: hidden;
+          position: relative; /* anchor for overlays */
+        }
 
-      #editor-container > div,
-      #editor-container .monaco-diff-editor,
-      #editor-container .monaco-editor {
-        height: 100%;
-      }
+        #single-editor-host {
+          position: relative;
+          height: 100%;
+        }
 
-      #editor-container[data-preview-active="true"] .monaco-diff-editor,
-      #editor-container[data-preview-active="true"] .monaco-editor {
-        opacity: 0;
-        pointer-events: none;
-      }
+        #single-editor-host,
+        #single-editor-host > div {
+          height: 100%;
+        }
 
-      #binary-preview {
-        position: absolute;
-        inset: 0;
-        z-index: 4;
-        display: none;
-        overflow: auto;
-        background: #0d1117;
-        padding: 20px;
-      }
+        #single-editor-host .monaco-diff-editor,
+        #single-editor-host .monaco-editor {
+          height: 100%;
+        }
 
-      #binary-preview[data-active="true"] {
-        display: block;
-      }
+        #single-editor-host[data-preview-active="true"] .monaco-diff-editor,
+        #single-editor-host[data-preview-active="true"] .monaco-editor {
+          opacity: 0;
+          pointer-events: none;
+        }
 
-      .binary-preview-grid {
-        display: grid;
-        gap: 16px;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      }
+        #branch-stream {
+          display: none;
+          height: 100%;
+          overflow: auto;
+          padding: 16px;
+          gap: 16px;
+          flex-direction: column;
+          background: #0d1117;
+        }
 
-      .binary-preview-card {
-        border: 1px solid #3d444d;
-        border-radius: 10px;
-        background: #151b23;
-        overflow: hidden;
-      }
+        #branch-stream[data-active="true"] {
+          display: flex;
+        }
 
-      .binary-preview-card-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 10px 12px;
-        border-bottom: 1px solid #3d444d;
-        font-size: 12px;
-        color: #9198a1;
-      }
+        .branch-file-card {
+          border: 1px solid #3d444d;
+          border-radius: 10px;
+          background: #151b23;
+          overflow: hidden;
+          scroll-margin-top: 12px;
+          box-shadow: 0 1px 0 rgba(1, 4, 9, 0.12);
+        }
 
-      .binary-preview-card-body {
-        padding: 12px;
-      }
+        .branch-file-card[data-selected="true"] {
+          border-color: #4493f8;
+          box-shadow: 0 0 0 1px rgba(68, 147, 248, 0.28);
+        }
 
-      .binary-preview-image {
-        display: block;
-        width: 100%;
-        height: auto;
-        border-radius: 8px;
-        background: #010409;
-      }
+        .branch-file-card-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 10px 12px;
+          border-bottom: 1px solid #3d444d;
+          background: #0d1117;
+        }
 
-      .binary-preview-empty {
-        min-height: 180px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: 1px dashed #3d444d;
-        border-radius: 8px;
-        color: #9198a1;
-        background: #0d1117;
-        text-align: center;
-        padding: 16px;
-        font-size: 13px;
-      }
+        .branch-file-card-header-main {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          flex: 1 1 auto;
+        }
 
-      .binary-preview-note {
-        margin-top: 16px;
-        padding: 12px 14px;
-        border: 1px solid #3d444d;
-        border-radius: 10px;
-        background: #151b23;
-        color: #9198a1;
-        font-size: 13px;
-        line-height: 1.5;
-      }
+        .branch-file-card-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-shrink: 0;
+          color: #9198a1;
+          font-size: 11px;
+        }
 
-      .gh-kind-badge {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 32px;
-        padding: 1px 6px;
-        border-radius: 999px;
-        border: 1px solid #3d444d;
-        background: #0d1117;
-        color: #9198a1;
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-      }
+        .branch-file-card-body {
+          background: #0d1117;
+        }
 
-      /* Opaque cover painted on top of the diff editor during remount. Monaco keeps
-         rendering/computing underneath at full speed — unlike opacity:0 on the
-         container, Monaco is NOT affected by this overlay and reliably settles
-         hideUnchangedRegions before we unveil. Removing the cover is a single
-         discrete paint, so no sub-frame shift is observable. */
+        .branch-file-card-body[data-collapsed="true"] {
+          display: none;
+        }
 
-      #editor-cover {
-        position: absolute;
-        inset: 0;
-        background: #0d1117;
-        z-index: 5;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity 80ms linear;
-      }
+        .branch-file-comments {
+          display: none;
+          border-top: 1px solid #3d444d;
+          background: #151b23;
+          padding: 12px;
+        }
 
-      #editor-cover[data-active="true"] {
-        opacity: 1;
-        transition: none;
-      }
+        .branch-file-comments[data-active="true"] {
+          display: block;
+        }
+
+        .branch-file-editor-host {
+          position: relative;
+          min-height: 160px;
+          width: 100%;
+          background: #0d1117;
+        }
+
+        #branch-stream .monaco-diff-editor,
+        #branch-stream .monaco-editor {
+          position: absolute;
+          inset: 0;
+        }
+
+        .branch-file-cover {
+          position: absolute;
+          inset: 0;
+          background: #0d1117;
+          z-index: 5;
+          pointer-events: none;
+          opacity: 0;
+        }
+
+        .branch-file-cover[data-active="true"] {
+          opacity: 1;
+        }
+
+        .branch-file-placeholder {
+          min-height: 160px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #9198a1;
+          font-size: 13px;
+          padding: 24px;
+          text-align: center;
+          border-top: 1px solid rgba(61, 68, 77, 0.65);
+        }
+
+        #binary-preview {
+          position: absolute;
+          inset: 0;
+          z-index: 4;
+          display: none;
+          overflow: auto;
+          background: #0d1117;
+          padding: 20px;
+        }
+
+        #binary-preview[data-active="true"] {
+          display: block;
+        }
+
+        .binary-preview-grid {
+          display: grid;
+          gap: 16px;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        }
+
+        .binary-preview-card {
+          border: 1px solid #3d444d;
+          border-radius: 10px;
+          background: #151b23;
+          overflow: hidden;
+        }
+
+        .binary-preview-card-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 10px 12px;
+          border-bottom: 1px solid #3d444d;
+          font-size: 12px;
+          color: #9198a1;
+        }
+
+        .binary-preview-card-body {
+          padding: 12px;
+        }
+
+        .binary-preview-image {
+          display: block;
+          width: 100%;
+          height: auto;
+          border-radius: 8px;
+          background: #010409;
+        }
+
+        .binary-preview-empty {
+          min-height: 180px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px dashed #3d444d;
+          border-radius: 8px;
+          color: #9198a1;
+          background: #0d1117;
+          text-align: center;
+          padding: 16px;
+          font-size: 13px;
+        }
+
+        .binary-preview-note {
+          margin-top: 16px;
+          padding: 12px 14px;
+          border: 1px solid #3d444d;
+          border-radius: 10px;
+          background: #151b23;
+          color: #9198a1;
+          font-size: 13px;
+          line-height: 1.5;
+        }
+
+        .gh-kind-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 32px;
+          padding: 1px 6px;
+          border-radius: 999px;
+          border: 1px solid #3d444d;
+          background: #0d1117;
+          color: #9198a1;
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+        }
+
+        /* Opaque cover painted on top of the diff editor during remount. Monaco keeps
+           rendering/computing underneath at full speed — unlike opacity:0 on the
+           container, Monaco is NOT affected by this overlay and reliably settles
+           hideUnchangedRegions before we unveil. Removing the cover is a single
+           discrete paint, so no sub-frame shift is observable. */
+
+        #editor-cover {
+          position: absolute;
+          inset: 0;
+          background: #0d1117;
+          z-index: 5;
+          pointer-events: none;
+          opacity: 0;
+          transition: opacity 80ms linear;
+        }
+
+        #editor-cover[data-active="true"] {
+          opacity: 1;
+          transition: none;
+        }
 
 
-      .monaco-editor .view-zones {
-        z-index: 10;
-      }
+        .monaco-editor .view-zones {
+          z-index: 10;
+        }
 
-      .view-zone-container {
-        padding: 8px 16px 10px 16px;
-        border-top: 1px solid #3d444d;
-        border-bottom: 1px solid #3d444d;
-        background: #151b23;
-        overflow: visible;
-      }
+        .view-zone-container {
+          padding: 8px 16px 10px 16px;
+          border-top: 1px solid #3d444d;
+          border-bottom: 1px solid #3d444d;
+          background: #151b23;
+          overflow: visible;
+        }
 
-      .monaco-editor .review-comment-line-original {
-        background: rgba(210, 153, 34, 0.15);
-      }
+        .monaco-editor .review-comment-line-original {
+          background: rgba(210, 153, 34, 0.15);
+        }
 
-      .monaco-editor .review-comment-line-modified {
-        background: rgba(68, 147, 248, 0.15);
-      }
+        .monaco-editor .review-comment-line-modified {
+          background: rgba(68, 147, 248, 0.15);
+        }
 
-      .monaco-editor .review-comment-glyph-original,
-      .monaco-editor .review-comment-glyph-modified {
-        border-radius: 999px;
-        width: 8px;
-        height: 8px;
-        margin-left: 6px;
-        margin-top: 5px;
-        cursor: pointer;
-      }
+        .monaco-editor .review-comment-glyph-original,
+        .monaco-editor .review-comment-glyph-modified {
+          border-radius: 999px;
+          width: 8px;
+          height: 8px;
+          margin-left: 6px;
+          margin-top: 5px;
+          cursor: pointer;
+        }
 
-      .monaco-editor .review-comment-glyph-original {
-        background: #d29922;
-      }
+        .monaco-editor .review-comment-glyph-original {
+          background: #d29922;
+        }
 
-      .monaco-editor .review-comment-glyph-modified {
-        background: #4493f8;
-      }
+        .monaco-editor .review-comment-glyph-modified {
+          background: #4493f8;
+        }
 
-      .monaco-editor .review-glyph-plus {
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' width='16' height='16'%3E%3Cpath fill='%23f0f6fc' d='M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z'%3E%3C/path%3E%3C/svg%3E");
-        background-repeat: no-repeat;
-        background-position: center;
-        background-size: 12px;
-        background-color: #238636;
-        border-radius: 4px;
-        cursor: pointer;
-        margin-left: 2px;
-        margin-top: 2px;
-        width: 16px;
-        height: 16px;
-        box-shadow: 0 0 0 1px rgba(240, 246, 252, 0.08);
-      }
+        .monaco-editor .review-glyph-plus {
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' width='16' height='16'%3E%3Cpath fill='%23f0f6fc' d='M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z'%3E%3C/path%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: center;
+          background-size: 12px;
+          background-color: #238636;
+          border-radius: 4px;
+          cursor: pointer;
+          margin-left: 2px;
+          margin-top: 2px;
+          width: 16px;
+          height: 16px;
+          box-shadow: 0 0 0 1px rgba(240, 246, 252, 0.08);
+        }
 </style>
 </head>
 <body class="h-full overflow-hidden bg-review-bg text-review-text antialiased">
@@ -609,8 +730,11 @@
     </div>
     <div id="file-comments-container" class="hidden border-b border-review-border bg-[#0d1117] px-4 py-0"></div>
     <div id="editor-container" class="min-h-0 min-w-0 flex-1">
-      <div id="binary-preview" data-active="false"></div>
-      <div id="editor-cover" aria-hidden="true"></div>
+      <div id="single-editor-host">
+        <div id="binary-preview" data-active="false"></div>
+        <div id="editor-cover" aria-hidden="true"></div>
+      </div>
+      <div id="branch-stream" class="scrollbar-thin" data-active="false"></div>
     </div>
     </main>
   </div>

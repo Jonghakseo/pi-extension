@@ -24,6 +24,7 @@ const state = {
 	wrapLines: true,
 	collapsedDirs: {},
 	reviewedFiles: {},
+	collapsedFiles: {},
 	scrollPositions: {},
 	sidebarCollapsed: false,
 	fileFilter: "",
@@ -50,6 +51,8 @@ const currentFileLabelEl = document.getElementById("current-file-label");
 const modeHintEl = document.getElementById("mode-hint");
 const fileCommentsContainer = document.getElementById("file-comments-container");
 const editorContainerEl = document.getElementById("editor-container");
+const singleEditorHostEl = document.getElementById("single-editor-host");
+const branchStreamEl = document.getElementById("branch-stream");
 const refreshWorkingTreeButton = document.getElementById("refresh-working-tree-button");
 const submitButton = document.getElementById("submit-button");
 const cancelButton = document.getElementById("cancel-button");
@@ -60,6 +63,7 @@ const toggleUnchangedButton = document.getElementById("toggle-unchanged-button")
 const toggleWrapButton = document.getElementById("toggle-wrap-button");
 const fileStatusBadgeEl = document.getElementById("file-status-badge");
 const fileDiffStatsEl = document.getElementById("file-diff-stats");
+const fileCollapseButton = document.getElementById("file-collapse-button");
 const editorCoverEl = document.getElementById("editor-cover");
 const binaryPreviewEl = document.getElementById("binary-preview");
 
@@ -86,6 +90,11 @@ let modifiedDecorations = [];
 let activeViewZones = [];
 let editorResizeObserver = null;
 let requestSequence = 0;
+let branchCardObserver = null;
+let branchScrollSyncScheduled = false;
+let branchScrollSuppressionUntil = 0;
+const branchCardEntries = new Map();
+let branchStreamSignature = "";
 
 function escapeHtml(value) {
 	return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -269,30 +278,40 @@ function getScopeComparison(file, scope = state.currentScope) {
 	return null;
 }
 
-function activeComparison() {
-	return getScopeComparison(activeFile(), state.currentScope);
+function usesBranchStackedView() {
+	return state.currentScope === "branch";
 }
 
 function isAddedOnlyComparison(comparison) {
 	return comparison != null && comparison.status === "added";
 }
 
-function activeFileIsAddedOnly() {
-	return isAddedOnlyComparison(activeComparison());
+function fileIsAddedOnly(file, scope = state.currentScope) {
+	return isAddedOnlyComparison(getScopeComparison(file, scope));
 }
 
-function activeFileShowsDiff() {
-	const file = activeFile();
+function fileShowsDiff(file, scope = state.currentScope) {
 	if (file == null || file.kind !== "text") return false;
-	const comparison = activeComparison();
+	const comparison = getScopeComparison(file, scope);
 	if (comparison == null) return false;
 	if (isAddedOnlyComparison(comparison)) return false;
 	return true;
 }
 
-function activeFileUsesBinaryPreview() {
-	const file = activeFile();
+function fileUsesBinaryPreview(file) {
 	return file != null && file.kind !== "text";
+}
+
+function activeFileIsAddedOnly() {
+	return fileIsAddedOnly(activeFile(), state.currentScope);
+}
+
+function activeFileShowsDiff() {
+	return fileShowsDiff(activeFile(), state.currentScope);
+}
+
+function activeFileUsesBinaryPreview() {
+	return fileUsesBinaryPreview(activeFile());
 }
 
 function fileKindBadgeMarkup(file) {
@@ -302,8 +321,8 @@ function fileKindBadgeMarkup(file) {
 }
 
 function hideBinaryPreview() {
-	if (!editorContainerEl || !binaryPreviewEl) return;
-	editorContainerEl.dataset.previewActive = "false";
+	if (!singleEditorHostEl || !binaryPreviewEl) return;
+	singleEditorHostEl.dataset.previewActive = "false";
 	binaryPreviewEl.dataset.active = "false";
 	binaryPreviewEl.innerHTML = "";
 }
@@ -325,21 +344,16 @@ function previewSideLabel(file, side) {
 	return "Snapshot";
 }
 
-function renderBinaryPreview(file, contents) {
-	if (!editorContainerEl || !binaryPreviewEl) return;
-	editorContainerEl.dataset.previewActive = "true";
-	binaryPreviewEl.dataset.active = "true";
-	const requestState = getRequestState(file.id, state.currentScope);
-	if (requestState.error) {
-		binaryPreviewEl.innerHTML = `<div class="binary-preview-note">Failed to load ${escapeHtml(getScopeDisplayPath(file, state.currentScope))}<br><br>${escapeHtml(requestState.error)}</div>`;
-		return;
+function buildBinaryPreviewMarkup(file, contents, scope = state.currentScope, requestState = null) {
+	const resolvedState = requestState ?? getRequestState(file.id, scope);
+	if (resolvedState.error) {
+		return `<div class="binary-preview-note">Failed to load ${escapeHtml(getScopeDisplayPath(file, scope))}<br><br>${escapeHtml(resolvedState.error)}</div>`;
 	}
-	if (requestState.requestId != null && requestState.contents == null) {
-		binaryPreviewEl.innerHTML = `<div class="binary-preview-note">Loading preview for ${escapeHtml(getScopeDisplayPath(file, state.currentScope))}...</div>`;
-		return;
+	if (resolvedState.requestId != null && resolvedState.contents == null) {
+		return `<div class="binary-preview-note">Loading preview for ${escapeHtml(getScopeDisplayPath(file, scope))}...</div>`;
 	}
 
-	const showComparison = state.currentScope !== "all";
+	const showComparison = scope !== "all";
 	const cards = [];
 	const pushCard = (label, exists, previewUrl) => {
 		const body = exists
@@ -369,7 +383,14 @@ function renderBinaryPreview(file, contents) {
 		file.kind === "image"
 			? "Image files are rendered directly in the review pane."
 			: "Binary files do not have a text diff here. The review pane shows whether each side exists.";
-	binaryPreviewEl.innerHTML = `<div class="binary-preview-grid">${cards.join("")}</div><div class="binary-preview-note">${escapeHtml(note)}</div>`;
+	return `<div class="binary-preview-grid">${cards.join("")}</div><div class="binary-preview-note">${escapeHtml(note)}</div>`;
+}
+
+function renderBinaryPreview(file, contents) {
+	if (!editorContainerEl || !binaryPreviewEl) return;
+	singleEditorHostEl.dataset.previewActive = "true";
+	binaryPreviewEl.dataset.active = "true";
+	binaryPreviewEl.innerHTML = buildBinaryPreviewMarkup(file, contents, state.currentScope);
 }
 
 function getScopeFilePath(file) {
@@ -733,6 +754,13 @@ function refreshCommitsView() {
 }
 
 function openFile(fileId) {
+	if (usesBranchStackedView()) {
+		state.activeFileId = fileId;
+		updateBranchActiveFileUI();
+		scrollBranchCardIntoView(fileId);
+		ensureFileLoaded(fileId, state.currentScope);
+		return;
+	}
 	if (state.activeFileId === fileId) {
 		ensureFileLoaded(fileId, state.currentScope);
 		return;
@@ -958,6 +986,7 @@ function updateToggleButtons() {
 		? "Showing changed areas only — click to show full file"
 		: "Show changed areas only";
 	toggleUnchangedButton.style.display = !usesBinaryPreview && activeFileShowsDiff() ? "inline-flex" : "none";
+	if (fileCollapseButton) fileCollapseButton.style.display = usesBranchStackedView() ? "none" : "inline-flex";
 	updateScopeButtons();
 	updateWorkingTreeRefreshButton();
 	modeHintEl.textContent = currentModeHint();
@@ -967,26 +996,11 @@ function updateToggleButtons() {
 
 function applyEditorOptions() {
 	if (!diffEditor) return;
-	const addedOnly = activeFileIsAddedOnly();
-	const showDiff = activeFileShowsDiff();
-	editorContainerEl.dataset.addedOnly = addedOnly ? "true" : "false";
-	diffEditor.updateOptions({
-		renderSideBySide: showDiff,
-		diffWordWrap: state.wrapLines ? "on" : "off",
-		hideUnchangedRegions: {
-			enabled: showDiff && state.hideUnchanged,
-			contextLineCount: 4,
-			minimumLineCount: 2,
-			revealLineCount: 12,
-		},
-	});
-	// For added-only files, hide the original editor's line numbers so the inline diff
-	// gutter doesn't paint a redundant two-column layout alongside the modified numbers.
-	diffEditor.getOriginalEditor().updateOptions({
-		wordWrap: state.wrapLines ? "on" : "off",
-		lineNumbers: addedOnly ? "off" : "on",
-	});
-	diffEditor.getModifiedEditor().updateOptions({ wordWrap: state.wrapLines ? "on" : "off" });
+	editorContainerEl.dataset.addedOnly = activeFileIsAddedOnly() ? "true" : "false";
+	applyDiffEditorOptions(diffEditor, activeFile(), state.currentScope);
+	for (const entry of branchCardEntries.values()) {
+		if (entry.editor) applyDiffEditorOptions(entry.editor, entry.file, "branch");
+	}
 }
 
 function renderTree() {
@@ -1142,9 +1156,9 @@ function showFileCommentPopover() {
 }
 
 function layoutEditor() {
-	if (!diffEditor) return;
-	const width = editorContainerEl.clientWidth;
-	const height = editorContainerEl.clientHeight;
+	if (!diffEditor || !singleEditorHostEl) return;
+	const width = singleEditorHostEl.clientWidth;
+	const height = singleEditorHostEl.clientHeight;
 	if (width <= 0 || height <= 0) return;
 	diffEditor.layout({ width, height });
 }
@@ -1187,20 +1201,27 @@ function renderCommentDOM(comment, onDelete) {
 	return container;
 }
 
-function canCommentOnSide(file, side) {
+function canCommentOnSideForFile(file, side, scope = state.currentScope) {
 	if (!file || file.kind !== "text") return false;
-	const comparison = activeComparison();
+	const comparison = getScopeComparison(file, scope);
 	if (side === "original") {
 		return comparison?.hasOriginal ?? false;
 	}
 	return comparison != null ? comparison.hasModified : file.hasWorkingTreeFile;
 }
 
-function isActiveFileReady() {
-	const file = activeFile();
+function canCommentOnSide(file, side) {
+	return canCommentOnSideForFile(file, side, state.currentScope);
+}
+
+function isFileReady(file, scope = state.currentScope) {
 	if (!file) return false;
-	const requestState = getRequestState(file.id, state.currentScope);
+	const requestState = getRequestState(file.id, scope);
 	return requestState.contents != null && requestState.error == null;
+}
+
+function isActiveFileReady() {
+	return isFileReady(activeFile(), state.currentScope);
 }
 
 function syncViewZones() {
@@ -1265,6 +1286,10 @@ function updateDecorations() {
 
 function renderFileComments() {
 	fileCommentsContainer.innerHTML = "";
+	if (usesBranchStackedView()) {
+		fileCommentsContainer.className = "hidden overflow-hidden px-0 py-0";
+		return;
+	}
 	const file = activeFile();
 	if (!file) {
 		fileCommentsContainer.className = "hidden overflow-hidden px-0 py-0";
@@ -1289,6 +1314,542 @@ function renderFileComments() {
 		dom.className = "rounded-lg border border-review-border bg-review-panel p-4";
 		fileCommentsContainer.appendChild(dom);
 	});
+}
+
+function createReadOnlyDiffEditor(container) {
+	return monacoApi.editor.createDiffEditor(container, {
+		automaticLayout: true,
+		renderSideBySide: true,
+		readOnly: true,
+		originalEditable: false,
+		minimap: { enabled: false },
+		renderOverviewRuler: false,
+		overviewRulerLanes: 0,
+		diffWordWrap: "on",
+		scrollBeyondLastLine: false,
+		lineNumbersMinChars: 4,
+		glyphMargin: true,
+		folding: true,
+		lineDecorationsWidth: 10,
+		overviewRulerBorder: false,
+		wordWrap: "on",
+	});
+}
+
+function applyDiffEditorOptions(editor, file, scope = state.currentScope) {
+	const addedOnly = fileIsAddedOnly(file, scope);
+	const showDiff = fileShowsDiff(file, scope);
+	editor.updateOptions({
+		renderSideBySide: showDiff,
+		diffWordWrap: state.wrapLines ? "on" : "off",
+		hideUnchangedRegions: {
+			enabled: showDiff && state.hideUnchanged,
+			contextLineCount: 4,
+			minimumLineCount: 2,
+			revealLineCount: 12,
+		},
+	});
+	editor.getOriginalEditor().updateOptions({
+		wordWrap: state.wrapLines ? "on" : "off",
+		lineNumbers: addedOnly ? "off" : "on",
+	});
+	editor.getModifiedEditor().updateOptions({ wordWrap: state.wrapLines ? "on" : "off" });
+}
+
+function disposeBranchCardEntry(entry) {
+	if (!entry) return;
+	for (const disposable of entry.disposables ?? []) {
+		try {
+			disposable.dispose?.();
+		} catch {}
+	}
+	if (entry.editor) {
+		try {
+			entry.editor.dispose();
+		} catch {}
+	}
+	if (entry.originalModel) {
+		try {
+			entry.originalModel.dispose();
+		} catch {}
+	}
+	if (entry.modifiedModel) {
+		try {
+			entry.modifiedModel.dispose();
+		} catch {}
+	}
+	entry.editor = null;
+	entry.originalModel = null;
+	entry.modifiedModel = null;
+	entry.originalDecorations = [];
+	entry.modifiedDecorations = [];
+	entry.activeViewZones = [];
+	entry.disposables = [];
+}
+
+function disposeAllBranchCardEntries() {
+	for (const entry of branchCardEntries.values()) {
+		disposeBranchCardEntry(entry);
+	}
+	branchCardEntries.clear();
+	branchStreamSignature = "";
+}
+
+function setBranchCardSelection(entry) {
+	entry.rootEl.dataset.selected = entry.file.id === state.activeFileId ? "true" : "false";
+	entry.rootEl.style.opacity = isFileReviewed(entry.file.id) ? "0.82" : "1";
+	entry.reviewedEl.textContent = isFileReviewed(entry.file.id) ? "Viewed" : "Not viewed";
+}
+
+function renderBranchCardComments(entry) {
+	entry.commentsEl.innerHTML = "";
+	const fileComments = state.comments.filter(
+		(comment) => comment.fileId === entry.file.id && comment.scope === "branch" && comment.side === "file",
+	);
+	entry.commentsEl.dataset.active = fileComments.length > 0 ? "true" : "false";
+	fileComments.forEach((comment) => {
+		const dom = renderCommentDOM(comment, () => {
+			state.comments = state.comments.filter((item) => item.id !== comment.id);
+			updateCommentsUI();
+		});
+		dom.className = "rounded-lg border border-review-border bg-review-panel p-4";
+		entry.commentsEl.appendChild(dom);
+	});
+}
+
+function clearBranchCardViewZones(entry) {
+	if (!entry.editor || entry.activeViewZones.length === 0) return;
+	const originalEditor = entry.editor.getOriginalEditor();
+	const modifiedEditor = entry.editor.getModifiedEditor();
+	originalEditor.changeViewZones((accessor) => {
+		for (const zone of entry.activeViewZones) if (zone.editor === originalEditor) accessor.removeZone(zone.id);
+	});
+	modifiedEditor.changeViewZones((accessor) => {
+		for (const zone of entry.activeViewZones) if (zone.editor === modifiedEditor) accessor.removeZone(zone.id);
+	});
+	entry.activeViewZones = [];
+}
+
+function updateBranchCardHeight(entry) {
+	if (!entry.editor) return;
+	const originalHeight = entry.editor.getOriginalEditor().getContentHeight();
+	const modifiedHeight = entry.editor.getModifiedEditor().getContentHeight();
+	const nextHeight = Math.max(160, originalHeight, modifiedHeight);
+	entry.editorHostEl.style.height = `${nextHeight}px`;
+	entry.editor.layout({ width: entry.editorHostEl.clientWidth || 1, height: nextHeight });
+}
+
+function syncBranchCardViewZones(entry) {
+	clearBranchCardViewZones(entry);
+	if (!entry.editor || !isFileReady(entry.file, "branch")) return;
+	const originalEditor = entry.editor.getOriginalEditor();
+	const modifiedEditor = entry.editor.getModifiedEditor();
+	const inlineComments = state.comments.filter(
+		(comment) => comment.fileId === entry.file.id && comment.scope === "branch" && comment.side !== "file",
+	);
+	inlineComments.forEach((item) => {
+		const editor = item.side === "original" ? originalEditor : modifiedEditor;
+		const domNode = renderCommentDOM(item, () => {
+			state.comments = state.comments.filter((comment) => comment.id !== item.id);
+			updateCommentsUI();
+		});
+		editor.changeViewZones((accessor) => {
+			const lineCount = typeof item.body === "string" && item.body.length > 0 ? item.body.split("\n").length : 1;
+			const id = accessor.addZone({
+				afterLineNumber: item.startLine,
+				heightInPx: Math.max(150, lineCount * 22 + 86),
+				domNode,
+			});
+			entry.activeViewZones.push({ id, editor });
+		});
+	});
+	updateBranchCardHeight(entry);
+}
+
+function updateBranchCardDecorations(entry) {
+	if (!entry.editor || !monacoApi) return;
+	const comments = state.comments.filter(
+		(comment) => comment.fileId === entry.file.id && comment.scope === "branch" && comment.side !== "file",
+	);
+	const originalRanges = [];
+	const modifiedRanges = [];
+	for (const comment of comments) {
+		const range = {
+			range: new monacoApi.Range(comment.startLine, 1, comment.startLine, 1),
+			options: {
+				isWholeLine: true,
+				className: comment.side === "original" ? "review-comment-line-original" : "review-comment-line-modified",
+				glyphMarginClassName:
+					comment.side === "original" ? "review-comment-glyph-original" : "review-comment-glyph-modified",
+			},
+		};
+		if (comment.side === "original") originalRanges.push(range);
+		else modifiedRanges.push(range);
+	}
+	entry.originalDecorations = entry.editor
+		.getOriginalEditor()
+		.deltaDecorations(entry.originalDecorations, originalRanges);
+	entry.modifiedDecorations = entry.editor
+		.getModifiedEditor()
+		.deltaDecorations(entry.modifiedDecorations, modifiedRanges);
+}
+
+function createBranchGlyphHoverActions(editor, side, fileId) {
+	let hoverDecoration = [];
+	function openDraftAtLine(line) {
+		const file = branchCardEntries.get(fileId)?.file;
+		if (!file || !canCommentOnSideForFile(file, side, "branch") || !isFileReady(file, "branch")) return;
+		state.activeFileId = fileId;
+		updateBranchActiveFileUI();
+		state.comments.push({
+			id: `${Date.now()}:${Math.random().toString(16).slice(2)}`,
+			fileId,
+			scope: "branch",
+			side,
+			startLine: line,
+			endLine: line,
+			body: "",
+		});
+		updateCommentsUI();
+		editor.revealLineInCenter(line);
+	}
+	editor.onMouseMove((event) => {
+		const file = branchCardEntries.get(fileId)?.file;
+		if (!file || !canCommentOnSideForFile(file, side, "branch") || !isFileReady(file, "branch")) {
+			hoverDecoration = editor.deltaDecorations(hoverDecoration, []);
+			return;
+		}
+		const target = event.target;
+		if (
+			target.type === monacoApi.editor.MouseTargetType.GUTTER_GLYPH_MARGIN ||
+			target.type === monacoApi.editor.MouseTargetType.GUTTER_LINE_NUMBERS
+		) {
+			const line = target.position?.lineNumber;
+			if (!line) return;
+			hoverDecoration = editor.deltaDecorations(hoverDecoration, [
+				{
+					range: new monacoApi.Range(line, 1, line, 1),
+					options: { glyphMarginClassName: "review-glyph-plus" },
+				},
+			]);
+		} else {
+			hoverDecoration = editor.deltaDecorations(hoverDecoration, []);
+		}
+	});
+	editor.onMouseLeave(() => {
+		hoverDecoration = editor.deltaDecorations(hoverDecoration, []);
+	});
+	editor.onMouseDown((event) => {
+		const file = branchCardEntries.get(fileId)?.file;
+		if (!file || !canCommentOnSideForFile(file, side, "branch") || !isFileReady(file, "branch")) return;
+		const target = event.target;
+		if (
+			target.type === monacoApi.editor.MouseTargetType.GUTTER_GLYPH_MARGIN ||
+			target.type === monacoApi.editor.MouseTargetType.GUTTER_LINE_NUMBERS
+		) {
+			const line = target.position?.lineNumber;
+			if (!line) return;
+			openDraftAtLine(line);
+		}
+	});
+}
+
+function mountBranchCardTextEditor(entry) {
+	if (!monacoApi) return;
+	const contents = getMountedContents(entry.file, "branch");
+	if (entry.editor) {
+		disposeBranchCardEntry(entry);
+		entry.editor = null;
+		entry.originalModel = null;
+		entry.modifiedModel = null;
+		entry.disposables = [];
+	}
+	entry.editorHostEl.innerHTML = "";
+	entry.coverEl = document.createElement("div");
+	entry.coverEl.className = "branch-file-cover";
+	entry.coverEl.dataset.active = "true";
+	entry.editorHostEl.appendChild(entry.coverEl);
+	entry.editor = createReadOnlyDiffEditor(entry.editorHostEl);
+	entry.originalModel = monacoApi.editor.createModel(
+		fileIsAddedOnly(entry.file, "branch") ? contents.modifiedContent : contents.originalContent,
+		inferLanguage(getScopeFilePath(entry.file) || entry.file.path),
+	);
+	entry.modifiedModel = monacoApi.editor.createModel(
+		contents.modifiedContent,
+		inferLanguage(getScopeFilePath(entry.file) || entry.file.path),
+	);
+	applyDiffEditorOptions(entry.editor, entry.file, "branch");
+	entry.editor.setModel({ original: entry.originalModel, modified: entry.modifiedModel });
+	entry.disposables = [
+		entry.editor.onDidUpdateDiff(() => {
+			updateBranchCardHeight(entry);
+			setTimeout(() => {
+				if (entry.coverEl) entry.coverEl.dataset.active = "false";
+			}, 40);
+		}),
+		entry.editor.getOriginalEditor().onDidContentSizeChange(() => updateBranchCardHeight(entry)),
+		entry.editor.getModifiedEditor().onDidContentSizeChange(() => updateBranchCardHeight(entry)),
+	];
+	createBranchGlyphHoverActions(entry.editor.getOriginalEditor(), "original", entry.file.id);
+	createBranchGlyphHoverActions(entry.editor.getModifiedEditor(), "modified", entry.file.id);
+	setTimeout(() => {
+		updateBranchCardHeight(entry);
+		if (entry.coverEl) entry.coverEl.dataset.active = "false";
+	}, 80);
+	syncBranchCardViewZones(entry);
+	updateBranchCardDecorations(entry);
+}
+
+function renderBranchCardContent(entry) {
+	const requestState = getRequestState(entry.file.id, "branch");
+	const contents = getMountedContents(entry.file, "branch");
+	entry.lastContentsRef = requestState.contents ?? null;
+	entry.lastError = requestState.error ?? null;
+	entry.lastLoadingKey =
+		requestState.requestId != null && requestState.contents == null ? requestState.requestId : null;
+	entry.placeholderEl.style.display = "none";
+	entry.editorHostEl.style.display = "block";
+	if (requestState.requestId != null && requestState.contents == null) {
+		entry.placeholderEl.style.display = "flex";
+		entry.placeholderEl.textContent = `Loading ${getScopeDisplayPath(entry.file, "branch")}...`;
+		entry.editorHostEl.style.display = "none";
+		return;
+	}
+	if (requestState.error) {
+		entry.placeholderEl.style.display = "flex";
+		entry.placeholderEl.textContent = `Failed to load ${getScopeDisplayPath(entry.file, "branch")}`;
+		entry.editorHostEl.style.display = "none";
+		return;
+	}
+	if (entry.file.kind !== "text") {
+		disposeBranchCardEntry(entry);
+		entry.editorHostEl.innerHTML = buildBinaryPreviewMarkup(entry.file, contents, "branch", requestState);
+		return;
+	}
+	mountBranchCardTextEditor(entry);
+}
+
+function updateBranchCardMeta(entry) {
+	entry.pathEl.innerHTML = formatFilePathMarkup(getScopeDisplayPath(entry.file, "branch"));
+	const status = getScopeComparison(entry.file, "branch")?.status ?? entry.file.worktreeStatus ?? null;
+	if (status) {
+		entry.statusEl.style.display = "inline-flex";
+		entry.statusEl.className = statusBadgeClass(status);
+		entry.statusEl.textContent = statusCode(status);
+		entry.statusEl.title = statusLabel(status);
+		entry.statusTextEl.textContent = statusLabel(status);
+	} else {
+		entry.statusEl.style.display = "none";
+		entry.statusTextEl.textContent = "";
+	}
+	entry.statsEl.innerHTML = buildDiffStatsMarkup(entry.file, "branch");
+	entry.commentCountEl.textContent = `${state.comments.filter((comment) => comment.fileId === entry.file.id && comment.scope === "branch").length} comment(s)`;
+	entry.toggleEl.innerHTML = state.collapsedFiles[entry.file.id] ? OCTICON_CHEVRON_RIGHT : OCTICON_CHEVRON_DOWN;
+	entry.bodyEl.dataset.collapsed = state.collapsedFiles[entry.file.id] ? "true" : "false";
+	setBranchCardSelection(entry);
+	renderBranchCardComments(entry);
+}
+
+function ensureBranchCardLoaded(entry) {
+	if (!entry || entry.loaded) return;
+	entry.loaded = true;
+	ensureFileLoaded(entry.file.id, "branch");
+	renderBranchCardContent(entry);
+}
+
+function ensureBranchCardObserver() {
+	if (branchCardObserver || typeof IntersectionObserver === "undefined") return;
+	branchCardObserver = new IntersectionObserver(
+		(entries) => {
+			for (const item of entries) {
+				if (!item.isIntersecting) continue;
+				const fileId = item.target.getAttribute("data-file-id");
+				const entry = branchCardEntries.get(fileId);
+				if (!entry) continue;
+				ensureBranchCardLoaded(entry);
+			}
+		},
+		{ root: branchStreamEl, rootMargin: "800px 0px" },
+	);
+}
+
+function updateBranchActiveFileUI() {
+	const file = activeFile();
+	renderTree();
+	renderFileComments();
+	updateToggleButtons();
+	renderFilePathLabel(getScopeDisplayPath(file, state.currentScope));
+	updateFileHeaderMeta(file);
+	for (const entry of branchCardEntries.values()) {
+		setBranchCardSelection(entry);
+	}
+}
+
+function syncBranchActiveFileFromScroll() {
+	branchScrollSyncScheduled = false;
+	if (!usesBranchStackedView() || !branchStreamEl) return;
+	if (performance.now() < branchScrollSuppressionUntil) return;
+	const containerRect = branchStreamEl.getBoundingClientRect();
+	let bestEntry = null;
+	let bestDistance = Number.POSITIVE_INFINITY;
+	for (const entry of branchCardEntries.values()) {
+		const rect = entry.rootEl.getBoundingClientRect();
+		if (rect.bottom < containerRect.top || rect.top > containerRect.bottom) continue;
+		const distance = Math.abs(rect.top - containerRect.top - 12);
+		if (distance < bestDistance) {
+			bestDistance = distance;
+			bestEntry = entry;
+		}
+	}
+	if (!bestEntry || bestEntry.file.id === state.activeFileId) return;
+	state.activeFileId = bestEntry.file.id;
+	updateBranchActiveFileUI();
+}
+
+function scheduleBranchActiveFileSync() {
+	if (branchScrollSyncScheduled) return;
+	branchScrollSyncScheduled = true;
+	requestAnimationFrame(syncBranchActiveFileFromScroll);
+}
+
+function scrollBranchCardIntoView(fileId) {
+	const entry = branchCardEntries.get(fileId);
+	if (!entry) return;
+	branchScrollSuppressionUntil = performance.now() + 800;
+	entry.rootEl.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+}
+
+function createBranchCard(file) {
+	const rootEl = document.createElement("section");
+	rootEl.className = "branch-file-card";
+	rootEl.dataset.fileId = file.id;
+	const headerEl = document.createElement("div");
+	headerEl.className = "branch-file-card-header";
+	const headerMainEl = document.createElement("div");
+	headerMainEl.className = "branch-file-card-header-main";
+	const toggleEl = document.createElement("button");
+	toggleEl.type = "button";
+	toggleEl.className = "icon-button";
+	toggleEl.style.width = "22px";
+	toggleEl.style.height = "22px";
+	const statusEl = document.createElement("span");
+	statusEl.className = "gh-status";
+	statusEl.style.display = "none";
+	const pathWrapEl = document.createElement("div");
+	pathWrapEl.className = "min-w-0 flex-1";
+	const pathEl = document.createElement("div");
+	pathEl.className = "gh-file-path";
+	const metaEl = document.createElement("div");
+	metaEl.className = "mt-0.5 text-[11px] text-review-muted";
+	pathWrapEl.append(pathEl, metaEl);
+	headerMainEl.append(toggleEl, statusEl, pathWrapEl);
+	const actionsEl = document.createElement("div");
+	actionsEl.className = "branch-file-card-actions";
+	const statsEl = document.createElement("div");
+	statsEl.className = "gh-diff-stats";
+	const commentCountEl = document.createElement("span");
+	const reviewedEl = document.createElement("span");
+	actionsEl.append(statsEl, commentCountEl, reviewedEl);
+	headerEl.append(headerMainEl, actionsEl);
+	const bodyEl = document.createElement("div");
+	bodyEl.className = "branch-file-card-body";
+	const editorHostEl = document.createElement("div");
+	editorHostEl.className = "branch-file-editor-host";
+	const placeholderEl = document.createElement("div");
+	placeholderEl.className = "branch-file-placeholder";
+	placeholderEl.textContent = `Loading ${getScopeDisplayPath(file, "branch")}...`;
+	const commentsEl = document.createElement("div");
+	commentsEl.className = "branch-file-comments space-y-4";
+	bodyEl.append(editorHostEl, placeholderEl, commentsEl);
+	rootEl.append(headerEl, bodyEl);
+	const entry = {
+		file,
+		rootEl,
+		headerEl,
+		bodyEl,
+		toggleEl,
+		statusEl,
+		pathEl,
+		statusTextEl: metaEl,
+		statsEl,
+		commentCountEl,
+		reviewedEl,
+		editorHostEl,
+		placeholderEl,
+		commentsEl,
+		editor: null,
+		originalModel: null,
+		modifiedModel: null,
+		originalDecorations: [],
+		modifiedDecorations: [],
+		activeViewZones: [],
+		disposables: [],
+		loaded: false,
+		lastContentsRef: null,
+		lastError: null,
+		lastLoadingKey: null,
+	};
+	toggleEl.addEventListener("click", (event) => {
+		event.stopPropagation();
+		state.collapsedFiles[file.id] = !state.collapsedFiles[file.id];
+		updateBranchCardMeta(entry);
+	});
+	headerEl.addEventListener("click", () => {
+		state.activeFileId = file.id;
+		updateBranchActiveFileUI();
+		scrollBranchCardIntoView(file.id);
+	});
+	rootEl.addEventListener("click", () => {
+		state.activeFileId = file.id;
+		updateBranchActiveFileUI();
+	});
+	branchCardEntries.set(file.id, entry);
+	updateBranchCardMeta(entry);
+	return entry;
+}
+
+function renderBranchStream() {
+	if (!branchStreamEl) return;
+	const files = getScopedFiles();
+	const signature = files.map((file) => file.id).join("|");
+	if (branchStreamSignature !== signature) {
+		disposeAllBranchCardEntries();
+		if (branchCardObserver) branchCardObserver.disconnect();
+		branchStreamEl.innerHTML = "";
+		ensureBranchCardObserver();
+		files.forEach((file) => {
+			const entry = createBranchCard(file);
+			branchStreamEl.appendChild(entry.rootEl);
+			branchCardObserver?.observe(entry.rootEl);
+		});
+		branchStreamSignature = signature;
+	}
+	for (const entry of branchCardEntries.values()) {
+		entry.file = files.find((file) => file.id === entry.file.id) ?? entry.file;
+		updateBranchCardMeta(entry);
+		const requestState = getRequestState(entry.file.id, "branch");
+		const loadingKey = requestState.requestId != null && requestState.contents == null ? requestState.requestId : null;
+		if (
+			entry.loaded &&
+			(entry.lastContentsRef !== (requestState.contents ?? null) ||
+				entry.lastError !== (requestState.error ?? null) ||
+				entry.lastLoadingKey !== loadingKey)
+		) {
+			renderBranchCardContent(entry);
+			entry.lastContentsRef = requestState.contents ?? null;
+			entry.lastError = requestState.error ?? null;
+			entry.lastLoadingKey = loadingKey;
+		}
+		if (entry.editor) {
+			applyDiffEditorOptions(entry.editor, entry.file, "branch");
+			syncBranchCardViewZones(entry);
+			updateBranchCardDecorations(entry);
+		}
+	}
+	if (state.activeFileId == null && files[0]) {
+		state.activeFileId = files[0].id;
+	}
+	updateBranchActiveFileUI();
 }
 
 function getPlaceholderContents(file, scope) {
@@ -1324,19 +1885,29 @@ function getMountedContents(file, scope = state.currentScope) {
 	return getRequestState(file.id, scope).contents || getPlaceholderContents(file, scope);
 }
 
-function renderFilePathLabel(path) {
-	if (!path) {
-		currentFileLabelEl.textContent = "";
-		return;
-	}
+function formatFilePathMarkup(path) {
+	if (!path) return "";
 	const idx = path.lastIndexOf("/");
-	if (idx < 0) {
-		currentFileLabelEl.textContent = path;
-		return;
-	}
+	if (idx < 0) return escapeHtml(path);
 	const dir = path.slice(0, idx + 1);
 	const base = path.slice(idx + 1);
-	currentFileLabelEl.innerHTML = `<span class="gh-file-path-dir">${escapeHtml(dir)}</span>${escapeHtml(base)}`;
+	return `<span class="gh-file-path-dir">${escapeHtml(dir)}</span>${escapeHtml(base)}`;
+}
+
+function renderFilePathLabel(path) {
+	currentFileLabelEl.innerHTML = formatFilePathMarkup(path);
+}
+
+function buildDiffStatsMarkup(file, scope = state.currentScope) {
+	if (!file || file.kind !== "text" || !fileShowsDiff(file, scope)) return "";
+	const contents = getRequestState(file.id, scope).contents;
+	if (!contents) return "";
+	const originalLines = contents.originalContent ? contents.originalContent.split("\n").length : 0;
+	const modifiedLines = contents.modifiedContent ? contents.modifiedContent.split("\n").length : 0;
+	const added = Math.max(0, modifiedLines - originalLines);
+	const removed = Math.max(0, originalLines - modifiedLines);
+	if (added === 0 && removed === 0) return "";
+	return `${added > 0 ? `<span class="gh-diff-stats-plus">+${added}</span>` : ""}${removed > 0 ? `<span class="gh-diff-stats-minus">−${removed}</span>` : ""}`;
 }
 
 function updateFileHeaderMeta(file) {
@@ -1354,27 +1925,13 @@ function updateFileHeaderMeta(file) {
 	} else {
 		fileStatusBadgeEl.style.display = "none";
 	}
-	if (file.kind !== "text") {
-		fileDiffStatsEl.style.display = "none";
-		return;
-	}
-	const contents = getRequestState(file.id, state.currentScope).contents;
-	if (!contents || !activeFileShowsDiff()) {
-		fileDiffStatsEl.style.display = "none";
-		return;
-	}
-	const originalLines = contents.originalContent ? contents.originalContent.split("\n").length : 0;
-	const modifiedLines = contents.modifiedContent ? contents.modifiedContent.split("\n").length : 0;
-	// Cheap estimate — we don't compute a full diff; the counts are naive line
-	// deltas, which is enough for the GitHub-style badge.
-	const added = Math.max(0, modifiedLines - originalLines);
-	const removed = Math.max(0, originalLines - modifiedLines);
-	if (added === 0 && removed === 0) {
+	const statsMarkup = buildDiffStatsMarkup(file, state.currentScope);
+	if (!statsMarkup) {
 		fileDiffStatsEl.style.display = "none";
 		return;
 	}
 	fileDiffStatsEl.style.display = "inline-flex";
-	fileDiffStatsEl.innerHTML = `${added > 0 ? `<span class="gh-diff-stats-plus">+${added}</span>` : ""}${removed > 0 ? `<span class="gh-diff-stats-minus">−${removed}</span>` : ""}`;
+	fileDiffStatsEl.innerHTML = statsMarkup;
 }
 
 // Hide the diff editor while Monaco is computing the diff, then reveal once
@@ -1556,6 +2113,17 @@ function submitDraftOnClose() {
 
 function updateCommentsUI() {
 	renderTree();
+	if (usesBranchStackedView()) {
+		for (const entry of branchCardEntries.values()) {
+			updateBranchCardMeta(entry);
+			if (entry.editor) {
+				syncBranchCardViewZones(entry);
+				updateBranchCardDecorations(entry);
+			}
+		}
+		updateBranchActiveFileUI();
+		return;
+	}
 	syncViewZones();
 	updateDecorations();
 	renderFileComments();
@@ -1565,6 +2133,14 @@ function renderAll(options = {}) {
 	renderTree();
 	renderCommitList();
 	submitButton.disabled = false;
+	if (usesBranchStackedView()) {
+		if (singleEditorHostEl) singleEditorHostEl.style.display = "none";
+		if (branchStreamEl) branchStreamEl.dataset.active = "true";
+		renderBranchStream();
+		return;
+	}
+	if (branchStreamEl) branchStreamEl.dataset.active = "false";
+	if (singleEditorHostEl) singleEditorHostEl.style.display = "block";
 	if (diffEditor && monacoApi) {
 		mountFile(options);
 		requestAnimationFrame(() => {
@@ -1714,6 +2290,14 @@ window.__reviewReceive = (message) => {
 		delete state.fileErrors[key];
 		delete state.pendingRequestIds[key];
 		renderTree();
+		if (message.scope === "branch") {
+			const entry = branchCardEntries.get(message.fileId);
+			if (entry) renderBranchCardContent(entry);
+			if (state.activeFileId === message.fileId && state.currentScope === message.scope) {
+				updateBranchActiveFileUI();
+			}
+			return;
+		}
 		if (state.activeFileId === message.fileId && state.currentScope === message.scope) {
 			mountFile({ restoreFileScroll: true });
 		}
@@ -1725,6 +2309,14 @@ window.__reviewReceive = (message) => {
 		state.fileErrors[key] = message.message || "Unknown error";
 		delete state.pendingRequestIds[key];
 		renderTree();
+		if (message.scope === "branch") {
+			const entry = branchCardEntries.get(message.fileId);
+			if (entry) renderBranchCardContent(entry);
+			if (state.activeFileId === message.fileId && state.currentScope === message.scope) {
+				updateBranchActiveFileUI();
+			}
+			return;
+		}
 		if (state.activeFileId === message.fileId && state.currentScope === message.scope) {
 			mountFile({ preserveScroll: false });
 		}
@@ -1762,26 +2354,7 @@ function setupMonaco() {
 		});
 		monacoApi.editor.setTheme("review-dark");
 
-		diffEditor = monacoApi.editor.createDiffEditor(editorContainerEl, {
-			automaticLayout: true,
-			renderSideBySide: activeFileShowsDiff(),
-			readOnly: true,
-			originalEditable: false,
-			// GitHub-style review: no minimap and no diff overview ruler on the side.
-			// Those were the panels that visibly flashed during remount because Monaco
-			// repaints them as hide-unchanged view zones settle.
-			minimap: { enabled: false },
-			renderOverviewRuler: false,
-			overviewRulerLanes: 0,
-			diffWordWrap: "on",
-			scrollBeyondLastLine: false,
-			lineNumbersMinChars: 4,
-			glyphMargin: true,
-			folding: true,
-			lineDecorationsWidth: 10,
-			overviewRulerBorder: false,
-			wordWrap: "on",
-		});
+		diffEditor = createReadOnlyDiffEditor(singleEditorHostEl);
 
 		createGlyphHoverActions(diffEditor.getOriginalEditor(), "original");
 		createGlyphHoverActions(diffEditor.getModifiedEditor(), "modified");
@@ -1789,6 +2362,9 @@ function setupMonaco() {
 		if (typeof ResizeObserver !== "undefined") {
 			editorResizeObserver = new ResizeObserver(() => {
 				layoutEditor();
+				for (const entry of branchCardEntries.values()) {
+					if (entry.editor) updateBranchCardHeight(entry);
+				}
 			});
 			editorResizeObserver.observe(editorContainerEl);
 		}
@@ -1799,7 +2375,7 @@ function setupMonaco() {
 			setTimeout(layoutEditor, 150);
 		});
 
-		mountFile();
+		renderAll();
 	});
 }
 
@@ -1875,6 +2451,10 @@ toggleReviewedButton.addEventListener("click", () => {
 	const file = activeFile();
 	if (!file) return;
 	state.reviewedFiles[file.id] = !isFileReviewed(file.id);
+	if (usesBranchStackedView()) {
+		updateBranchActiveFileUI();
+		return;
+	}
 	renderTree();
 });
 
@@ -1899,7 +2479,6 @@ toggleSidebarButton.addEventListener("click", () => {
 	});
 });
 
-const fileCollapseButton = document.getElementById("file-collapse-button");
 if (fileCollapseButton) {
 	fileCollapseButton.addEventListener("click", () => {
 		const collapsed = editorContainerEl.style.display === "none";
@@ -1934,6 +2513,12 @@ sidebarSearchInputEl.addEventListener("keydown", (event) => {
 		renderTree();
 	}
 });
+
+if (branchStreamEl) {
+	branchStreamEl.addEventListener("scroll", () => {
+		scheduleBranchActiveFileSync();
+	});
+}
 
 if (state.currentScope === "commits" && state.selectedCommitSha) {
 	ensureCommitFilesLoaded(state.selectedCommitSha);
