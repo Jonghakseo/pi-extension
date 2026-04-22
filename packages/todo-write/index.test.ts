@@ -31,6 +31,16 @@ describe("todo-write helpers", () => {
 		expect(renderTodoWriteSummary(applied.state)).toContain("진행률: 1/3 완료");
 	});
 
+	it("summarizes older completed items and shows only the latest completed item", () => {
+		const applied = applyTodoWrite([
+			{ content: "A", status: "completed" },
+			{ content: "B", status: "completed" },
+			{ content: "C", status: "completed" },
+		]);
+
+		expect(renderTodoWidgetLines(applied.state)).toEqual(["완료 +2", "~~● C"]);
+	});
+
 	it("hides fully completed widgets after the grace period", () => {
 		const applied = applyTodoWrite([{ content: "Done", status: "completed" }]);
 		const now = Date.now();

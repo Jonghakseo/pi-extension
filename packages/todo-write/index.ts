@@ -52,7 +52,7 @@ const todoWidgetAgentRunningStore = new Map<string, boolean>();
 const todoTurnStore = new Map<string, number>();
 const TODO_HIDE_COMPLETED_AFTER_TURNS = 2;
 const TODO_HIDE_COMPLETED_AFTER_MS = 90_000;
-const TODO_MAX_VISIBLE_COMPLETED_WIDGET_ITEMS = 2;
+const TODO_MAX_VISIBLE_COMPLETED_WIDGET_ITEMS = 1;
 const TODO_STATE_ENTRY_TYPE = "todo-write-state";
 const TODO_COMPACTION_REMINDER_TYPE = "todo-write-compaction-reminder";
 
