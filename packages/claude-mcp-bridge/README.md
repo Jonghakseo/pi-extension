@@ -10,7 +10,7 @@ Bridge [Claude Code MCP](https://modelcontextprotocol.io/) server configurations
   - Global: `~/.mcp.json`, `~/.claude.json`
   - First-seen server name wins on duplicates
 - **Server transports** — `stdio`, `sse`, `http` (streamable-HTTP)
-- **Tool registration** — each MCP tool becomes a pi tool named `mcp_<server>_<tool>`
+- **Tool registration** — each MCP tool becomes a pi tool named `mcp__<server>__<tool>`
 - **Tool toggle** — enable/disable per-tool via `/mcp-status` overlay; persisted in `~/.pi/agent/claude-mcp-bridge-tools.json`
 - **Auto-reconnect** — exponential backoff on unexpected disconnection (up to 5 attempts)
 - **Status bar** — footer shows `MCP connected/total`

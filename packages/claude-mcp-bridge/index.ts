@@ -658,7 +658,7 @@ export function sanitizeName(value: string): string {
 export function buildPiToolName(serverName: string, toolName: string): string {
 	const safeServer = sanitizeName(serverName) || "server";
 	const safeTool = sanitizeName(toolName) || "tool";
-	return `mcp_${safeServer}_${safeTool}`;
+	return `mcp__${safeServer}__${safeTool}`;
 }
 
 export function mimeToExt(mimeType: string): string {

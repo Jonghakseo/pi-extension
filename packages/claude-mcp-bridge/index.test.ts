@@ -59,24 +59,24 @@ describe("sanitizeName", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildPiToolName", () => {
-	it("should combine server and tool names with mcp_ prefix", () => {
-		expect(buildPiToolName("my-server", "read_file")).toBe("mcp_my_server_read_file");
+	it("should combine server and tool names with mcp__ prefix and __ separator", () => {
+		expect(buildPiToolName("my-server", "read_file")).toBe("mcp__my_server__read_file");
 	});
 
 	it("should sanitize both names", () => {
-		expect(buildPiToolName("My Server!", "Get-Data")).toBe("mcp_my_server_get_data");
+		expect(buildPiToolName("My Server!", "Get-Data")).toBe("mcp__my_server__get_data");
 	});
 
 	it("should fall back to 'server' for empty server name", () => {
-		expect(buildPiToolName("", "read")).toBe("mcp_server_read");
+		expect(buildPiToolName("", "read")).toBe("mcp__server__read");
 	});
 
 	it("should fall back to 'tool' for empty tool name", () => {
-		expect(buildPiToolName("myserver", "")).toBe("mcp_myserver_tool");
+		expect(buildPiToolName("myserver", "")).toBe("mcp__myserver__tool");
 	});
 
 	it("should fall back to both defaults for all-special-chars", () => {
-		expect(buildPiToolName("---", "!!!")).toBe("mcp_server_tool");
+		expect(buildPiToolName("---", "!!!")).toBe("mcp__server__tool");
 	});
 });
 
