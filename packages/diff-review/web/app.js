@@ -1429,12 +1429,29 @@ function clearBranchCardViewZones(entry) {
 	entry.activeViewZones = [];
 }
 
+function getMonacoLineHeight(editor) {
+	if (!editor || !monacoApi?.editor?.EditorOption) return 19;
+	try {
+		const option = editor.getOption(monacoApi.editor.EditorOption.lineHeight);
+		return typeof option === "number" && option > 0 ? option : 19;
+	} catch {
+		return 19;
+	}
+}
+
 function updateBranchCardHeight(entry) {
 	if (!entry.editor) return;
-	const originalHeight = entry.editor.getOriginalEditor().getContentHeight?.() || 0;
-	const modifiedHeight = entry.editor.getModifiedEditor().getContentHeight?.() || 0;
-	// Floor of 240px keeps empty/short diffs legible; Monaco automaticLayout handles resizes.
-	const nextHeight = Math.ceil(Math.max(240, originalHeight, modifiedHeight));
+	const originalEditor = entry.editor.getOriginalEditor();
+	const modifiedEditor = entry.editor.getModifiedEditor();
+	// Model line count is the authoritative floor. Monaco's getContentHeight can under-report
+	// for diffs where sides share content (e.g. Added files with identical models in inline
+	// mode), which would clip the card to a tiny height.
+	const modelLines = Math.max(entry.originalModel?.getLineCount?.() ?? 0, entry.modifiedModel?.getLineCount?.() ?? 0);
+	const lineHeight = getMonacoLineHeight(modifiedEditor);
+	// Add chrome for the scrollbar / padding and one trailing line so the last line isn't hugged.
+	const modelHeight = modelLines > 0 ? modelLines * lineHeight + lineHeight + 24 : 0;
+	const measuredHeight = Math.max(originalEditor.getContentHeight?.() || 0, modifiedEditor.getContentHeight?.() || 0);
+	const nextHeight = Math.ceil(Math.max(240, modelHeight, measuredHeight));
 	entry.editorHostEl.style.height = `${nextHeight}px`;
 }
 
@@ -1569,14 +1586,13 @@ function mountBranchCardTextEditor(entry) {
 	entry.coverEl.dataset.active = "true";
 	entry.editorHostEl.appendChild(entry.coverEl);
 	entry.editor = createReadOnlyDiffEditor(entry.editorHostEl);
-	entry.originalModel = monacoApi.editor.createModel(
-		fileIsAddedOnly(entry.file, "branch") ? contents.modifiedContent : contents.originalContent,
-		inferLanguage(getScopeFilePath(entry.file) || entry.file.path),
-	);
-	entry.modifiedModel = monacoApi.editor.createModel(
-		contents.modifiedContent,
-		inferLanguage(getScopeFilePath(entry.file) || entry.file.path),
-	);
+	const language = inferLanguage(getScopeFilePath(entry.file) || entry.file.path);
+	// For Added files, keep the original side empty so Monaco renders a proper "added"
+	// diff (every line green) instead of treating the models as identical which collapses
+	// the diff editor's layout.
+	const originalText = fileIsAddedOnly(entry.file, "branch") ? "" : contents.originalContent;
+	entry.originalModel = monacoApi.editor.createModel(originalText, language);
+	entry.modifiedModel = monacoApi.editor.createModel(contents.modifiedContent, language);
 	applyDiffEditorOptions(entry.editor, entry.file, "branch");
 	entry.editor.setModel({ original: entry.originalModel, modified: entry.modifiedModel });
 	const revealCover = () => {
