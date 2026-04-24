@@ -14,7 +14,15 @@ vi.mock("@mariozechner/pi-ai", () => ({
 import { readFileSync, writeFileSync } from "node:fs";
 import { streamSimpleOpenAICodexResponses } from "@mariozechner/pi-ai";
 import { createExtensionApiMock } from "../../tests/mock-extension-api.ts";
-import codexFastMode, { loadCodexFastModeState, SUPPORTED_MODEL_ID, shouldUseCodexFastBadge } from "./index.ts";
+import codexFastMode, {
+	loadCodexFastModeState,
+	SUPPORTED_MODEL_ID,
+	SUPPORTED_MODEL_IDS,
+	shouldUseCodexFastBadge,
+} from "./index.ts";
+
+const SUPPORTED_MODEL_LABEL = SUPPORTED_MODEL_IDS.join(" or ");
+const SECOND_SUPPORTED_MODEL_ID = "gpt-5.5";
 
 describe("codex fast mode", () => {
 	beforeEach(() => {
@@ -37,6 +45,7 @@ describe("codex fast mode", () => {
 
 		expect(loadCodexFastModeState()).toEqual({ enabled: true });
 		expect(shouldUseCodexFastBadge("openai-codex", SUPPORTED_MODEL_ID)).toBe(true);
+		expect(shouldUseCodexFastBadge("openai-codex", SECOND_SUPPORTED_MODEL_ID)).toBe(true);
 		expect(shouldUseCodexFastBadge("openai", SUPPORTED_MODEL_ID)).toBe(false);
 	});
 
@@ -54,12 +63,12 @@ describe("codex fast mode", () => {
 
 		expect(writeFileSync).toHaveBeenCalledTimes(1);
 		expect(notify).toHaveBeenCalledWith(
-			`Codex Fast Mode enabled (openai-codex/${SUPPORTED_MODEL_ID} → text.verbosity=low + service_tier=priority)`,
+			`Codex Fast Mode enabled (openai-codex/${SUPPORTED_MODEL_LABEL} → text.verbosity=low + service_tier=priority)`,
 			"info",
 		);
 	});
 
-	it("wraps the upstream codex payload with low verbosity", async () => {
+	it.each(SUPPORTED_MODEL_IDS)("wraps the upstream codex payload with low verbosity for %s", async (modelId) => {
 		vi.mocked(readFileSync).mockReturnValue('{"enabled":true}');
 		vi.mocked(streamSimpleOpenAICodexResponses).mockResolvedValue("stream-result" as never);
 		const apiMock = createExtensionApiMock();
@@ -69,21 +78,14 @@ describe("codex fast mode", () => {
 		const options = {
 			onPayload: vi.fn(async (payload: unknown) => payload),
 		};
-		const result = await provider.streamSimple(
-			{ provider: "openai-codex", id: SUPPORTED_MODEL_ID },
-			{ messages: [] },
-			options,
-		);
+		const result = await provider.streamSimple({ provider: "openai-codex", id: modelId }, { messages: [] }, options);
 
 		expect(result).toBe("stream-result");
 		expect(streamSimpleOpenAICodexResponses).toHaveBeenCalledTimes(1);
 		const handler = vi.mocked(streamSimpleOpenAICodexResponses).mock.calls[0]?.[2]?.onPayload;
 		if (typeof handler !== "function") throw new Error("onPayload handler missing");
 		const onPayload = handler as unknown as (payload: unknown, model: unknown) => Promise<unknown>;
-		const payload = await onPayload(
-			{ text: { format: "plain" } },
-			{ provider: "openai-codex", id: SUPPORTED_MODEL_ID },
-		);
+		const payload = await onPayload({ text: { format: "plain" } }, { provider: "openai-codex", id: modelId });
 		expect(payload).toMatchObject({
 			text: { format: "plain", verbosity: "low" },
 			service_tier: "priority",
@@ -112,11 +114,11 @@ describe("codex fast mode", () => {
 
 		expect(notify).toHaveBeenCalledWith("Usage: /codex-fast [on|off|status]", "info");
 		expect(notify).toHaveBeenCalledWith(
-			`Codex Fast Mode: OFF (always force text.verbosity=low; inject service_tier=priority when ON for openai-codex/${SUPPORTED_MODEL_ID})`,
+			`Codex Fast Mode: OFF (always force text.verbosity=low; inject service_tier=priority when ON for openai-codex/${SUPPORTED_MODEL_LABEL})`,
 			"info",
 		);
 		expect(notify).toHaveBeenCalledWith(
-			`Codex Fast Mode disabled (text.verbosity=low still applies for openai-codex/${SUPPORTED_MODEL_ID})`,
+			`Codex Fast Mode disabled (text.verbosity=low still applies for openai-codex/${SUPPORTED_MODEL_LABEL})`,
 			"info",
 		);
 	});
@@ -133,7 +135,7 @@ describe("codex fast mode", () => {
 		} as unknown as ExtensionContext);
 
 		expect(notify).toHaveBeenCalledWith(
-			`Codex Fast Mode: ON (always force text.verbosity=low; inject service_tier=priority when ON for openai-codex/${SUPPORTED_MODEL_ID})`,
+			`Codex Fast Mode: ON (always force text.verbosity=low; inject service_tier=priority when ON for openai-codex/${SUPPORTED_MODEL_LABEL})`,
 			"info",
 		);
 	});
@@ -158,6 +160,11 @@ describe("codex fast mode", () => {
 		await expect(onPayload({ text: {} }, { provider: "openai-codex", id: SUPPORTED_MODEL_ID })).resolves.toEqual({
 			text: { verbosity: "low" },
 		});
+		await expect(onPayload({ text: {} }, { provider: "openai-codex", id: SECOND_SUPPORTED_MODEL_ID })).resolves.toEqual(
+			{
+				text: { verbosity: "low" },
+			},
+		);
 		await expect(onPayload({ text: "plain" }, { provider: "openai-codex", id: SUPPORTED_MODEL_ID })).resolves.toEqual({
 			text: { verbosity: "low" },
 		});

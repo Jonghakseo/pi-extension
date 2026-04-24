@@ -2,7 +2,7 @@
 
 This extension helps pi use OpenAI Codex in a faster, lower-verbosity mode.
 
-It is mainly intended for `openai-codex` with `gpt-5.4`, where you want quick execution and shorter responses.
+It is mainly intended for `openai-codex` with `gpt-5.4` or `gpt-5.5`, where you want quick execution and shorter responses.
 
 ## Install
 
@@ -26,7 +26,7 @@ pi install npm:@ryan_nookpi/pi-extension-codex-fast-mode
 
 ## Notes
 
-- Target model: `openai-codex / gpt-5.4`
+- Target models: `openai-codex / gpt-5.4` and `openai-codex / gpt-5.5`
 - It always applies `text.verbosity=low`.
 - When fast mode is enabled, it also injects `service_tier=priority`.
 - The setting is stored locally and persists across sessions.

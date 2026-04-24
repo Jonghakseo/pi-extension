@@ -5,7 +5,9 @@ import { streamSimpleOpenAICodexResponses } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 const STATE_FILE = join(homedir(), ".pi", "agent", "state", "codex-fast-mode.json");
-export const SUPPORTED_MODEL_ID = "gpt-5.4";
+export const SUPPORTED_MODEL_IDS = ["gpt-5.4", "gpt-5.5"] as const;
+export const SUPPORTED_MODEL_ID = SUPPORTED_MODEL_IDS[0];
+const SUPPORTED_MODEL_LABEL = SUPPORTED_MODEL_IDS.join(" or ");
 
 type FastModeState = {
 	enabled: boolean;
@@ -30,7 +32,9 @@ export function isCodexFastModeEnabled(): boolean {
 }
 
 export function shouldUseCodexFastBadge(provider: string | undefined, modelId: string | undefined): boolean {
-	return provider === "openai-codex" && modelId === SUPPORTED_MODEL_ID && isCodexFastModeEnabled();
+	return (
+		provider === "openai-codex" && modelId !== undefined && isFastSupportedModel(modelId) && isCodexFastModeEnabled()
+	);
 }
 
 function saveState(state: FastModeState): void {
@@ -43,7 +47,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isFastSupportedModel(modelId: string): boolean {
-	return modelId === SUPPORTED_MODEL_ID;
+	return SUPPORTED_MODEL_IDS.includes(modelId as (typeof SUPPORTED_MODEL_IDS)[number]);
 }
 
 function parseCommandArg(args: string): "on" | "off" | "status" | "help" {
@@ -88,7 +92,7 @@ export default function codexFastMode(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("codex-fast", {
-		description: "Toggle Codex Fast Mode service tier injection for openai-codex/gpt-5.4",
+		description: "Toggle Codex Fast Mode service tier injection for openai-codex/gpt-5.4 or gpt-5.5",
 		getArgumentCompletions: (prefix) => {
 			const options = ["on", "off", "status"];
 			const filtered = options.filter((o) => o.startsWith(prefix.trim().toLowerCase()));
@@ -107,7 +111,7 @@ export default function codexFastMode(pi: ExtensionAPI) {
 			if (action === "status") {
 				if (ctx.hasUI) {
 					ctx.ui.notify(
-						`Codex Fast Mode: ${isCodexFastModeEnabled() ? "ON" : "OFF"} (always force text.verbosity=low; inject service_tier=priority when ON for openai-codex/${SUPPORTED_MODEL_ID})`,
+						`Codex Fast Mode: ${isCodexFastModeEnabled() ? "ON" : "OFF"} (always force text.verbosity=low; inject service_tier=priority when ON for openai-codex/${SUPPORTED_MODEL_LABEL})`,
 						"info",
 					);
 				}
@@ -120,8 +124,8 @@ export default function codexFastMode(pi: ExtensionAPI) {
 			if (ctx.hasUI) {
 				ctx.ui.notify(
 					nextState.enabled
-						? `Codex Fast Mode enabled (openai-codex/${SUPPORTED_MODEL_ID} → text.verbosity=low + service_tier=priority)`
-						: `Codex Fast Mode disabled (text.verbosity=low still applies for openai-codex/${SUPPORTED_MODEL_ID})`,
+						? `Codex Fast Mode enabled (openai-codex/${SUPPORTED_MODEL_LABEL} → text.verbosity=low + service_tier=priority)`
+						: `Codex Fast Mode disabled (text.verbosity=low still applies for openai-codex/${SUPPORTED_MODEL_LABEL})`,
 					"info",
 				);
 			}
