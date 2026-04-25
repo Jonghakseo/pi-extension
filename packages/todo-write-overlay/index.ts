@@ -53,6 +53,7 @@ const todoStateStore = new Map<string, TodoState>();
 const todoOverlayStore = new Map<string, TodoOverlayRecord>();
 const todoOverlayMetaStore = new Map<string, { completedAt?: number; completedTurn?: number }>();
 const todoOverlayAgentRunningStore = new Map<string, boolean>();
+const todoOverlayHiddenStore = new Map<string, boolean>();
 const todoTurnStore = new Map<string, number>();
 const TODO_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 const TODO_SPINNER_INTERVAL_MS = 120;
@@ -327,6 +328,23 @@ function setTodoOverlayAgentRunning(ctx: Pick<ExtensionContext, "cwd" | "session
 	todoOverlayAgentRunningStore.set(key, running);
 }
 
+export type TodoOverlayCommandAction = "show" | "hide" | "status" | "invalid";
+
+export function parseTodoOverlayCommand(args: string): TodoOverlayCommandAction {
+	const action = args.trim().toLowerCase();
+	if (action === "") return "status";
+	if (action === "show" || action === "hide") return action;
+	return "invalid";
+}
+
+function isTodoOverlayHidden(key: string): boolean {
+	return todoOverlayHiddenStore.get(key) ?? false;
+}
+
+function setTodoOverlayHidden(key: string, hidden: boolean): void {
+	todoOverlayHiddenStore.set(key, hidden);
+}
+
 function hideTodoOverlay(key: string): void {
 	const record = todoOverlayStore.get(key);
 	if (!record) return;
@@ -510,10 +528,47 @@ async function syncTodoOverlay(ctx: ExtensionContext, pi: Pick<ExtensionAPI, "ap
 		return;
 	}
 
+	if (isTodoOverlayHidden(key)) {
+		hideTodoOverlay(key);
+		return;
+	}
+
 	showOrUpdateTodoOverlay(ctx, key, state);
 }
 
 export default function todoWriteOverlayExtension(pi: ExtensionAPI): void {
+	pi.registerCommand("todo-overlay", {
+		description: "Show or hide the todo overlay. Usage: /todo-overlay show|hide",
+		getArgumentCompletions(prefix: string) {
+			const filtered = ["show", "hide"].filter((value) => value.startsWith(prefix.trim().toLowerCase()));
+			return filtered.length > 0 ? filtered.map((value) => ({ value, label: value })) : null;
+		},
+		async handler(args, ctx) {
+			const key = getTodoStateKey(ctx);
+			const action = parseTodoOverlayCommand(args);
+
+			if (action === "invalid") {
+				ctx.ui.notify("사용법: /todo-overlay show 또는 /todo-overlay hide", "warning");
+				return;
+			}
+
+			if (action === "status") {
+				ctx.ui.notify(`todo overlay: ${isTodoOverlayHidden(key) ? "hidden" : "shown"}`, "info");
+				return;
+			}
+
+			setTodoOverlayHidden(key, action === "hide");
+			if (action === "hide") {
+				hideTodoOverlay(key);
+				ctx.ui.notify("todo overlay를 숨겼습니다. /todo-overlay show로 다시 표시할 수 있습니다.", "info");
+				return;
+			}
+
+			await syncTodoOverlay(ctx, pi);
+			ctx.ui.notify("todo overlay를 표시합니다.", "info");
+		},
+	});
+
 	pi.registerTool({
 		name: "todo_write",
 		label: "할 일 관리",
@@ -642,6 +697,7 @@ export default function todoWriteOverlayExtension(pi: ExtensionAPI): void {
 		hideTodoOverlay(key);
 		todoOverlayMetaStore.delete(key);
 		todoOverlayAgentRunningStore.delete(key);
+		todoOverlayHiddenStore.delete(key);
 		todoTurnStore.delete(key);
 	});
 }

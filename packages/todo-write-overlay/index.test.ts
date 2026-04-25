@@ -4,12 +4,20 @@ import {
 	applyTodoWrite,
 	buildPostCompactionTodoReminder,
 	getTodoOverlayVisibility,
+	parseTodoOverlayCommand,
 	renderTodoOverlayPlainLines,
 	renderTodoWriteSummary,
 	restoreTodoWriteState,
 } from "./index.ts";
 
 describe("todo-write-overlay helpers", () => {
+	it("parses todo overlay command actions", () => {
+		expect(parseTodoOverlayCommand("")).toBe("status");
+		expect(parseTodoOverlayCommand(" show ")).toBe("show");
+		expect(parseTodoOverlayCommand("HIDE")).toBe("hide");
+		expect(parseTodoOverlayCommand("toggle")).toBe("invalid");
+	});
+
 	it("normalizes multiple in-progress tasks", () => {
 		const applied = applyTodoWrite([
 			{ content: "first", status: "in_progress" },

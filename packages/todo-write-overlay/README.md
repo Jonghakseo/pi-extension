@@ -20,6 +20,7 @@ pi install npm:@ryan_nookpi/pi-extension-todo-write-overlay
 - 세션 단위 todo 상태 저장 및 복원
 - 우측 상단 오버레이 렌더링
 - 입력 포커스를 뺏지 않는 `nonCapturing` overlay 사용
+- `/todo-overlay show` / `/todo-overlay hide` 명령으로 오버레이 표시 토글
 - 진행 중 작업 스피너 표시
 - 완료/진행/대기 상태별 색상과 아이콘 표시
 - `notes`는 상태에는 보존하지만 오버레이에는 표시하지 않음
@@ -36,6 +37,17 @@ pi install npm:@ryan_nookpi/pi-extension-todo-write-overlay
 - 입력 처리: `nonCapturing: true`
 
 기존 `todo-write`의 `완료 +2` 같은 완료 항목 접기 로직은 사용하지 않습니다. 완료된 항목도 모두 그대로 표시합니다.
+
+## 명령어
+
+```text
+/todo-overlay show
+/todo-overlay hide
+```
+
+- 기본값은 `show`입니다.
+- `hide`는 todo 상태와 reminder 주입은 유지하고, 우측 상단 오버레이 UI만 숨깁니다.
+- 인자 없이 `/todo-overlay`를 실행하면 현재 표시 상태를 알려줍니다.
 
 ## 사용 예
 
