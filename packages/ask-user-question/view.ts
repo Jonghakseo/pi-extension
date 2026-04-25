@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 
 import { SYM } from "./constants.ts";
 import { allRequiredAnswered, isAnswered } from "./state.ts";
@@ -7,12 +7,12 @@ import type { RenderFormInput } from "./types.ts";
 function createLineHelpers(width: number, theme: RenderFormInput["theme"]) {
 	const lines: string[] = [];
 	const maxWidth = Math.min(width, 120);
-	const add = (text: string) => lines.push(truncateToWidth(text, maxWidth));
+	const add = (text: string) => lines.push(...wrapTextWithAnsi(text, maxWidth));
 	const hr = () => add(theme.fg("accent", "─".repeat(maxWidth)));
 	return { lines, maxWidth, add, hr };
 }
 
-export function renderSubmitTab(input: RenderFormInput, add: (text: string) => void, maxWidth: number): void {
+export function renderSubmitTab(input: RenderFormInput, add: (text: string) => void): void {
 	const { questions, answerState, theme } = input;
 	add(` ${theme.fg("accent", theme.bold("검토 및 제출"))}`);
 	add("");
@@ -41,7 +41,7 @@ export function renderSubmitTab(input: RenderFormInput, add: (text: string) => v
 
 		const answer = answerState.textAnswers.get(question.id)?.trim();
 		if (answer) {
-			add(` ${label} ${truncateToWidth(answer, maxWidth - visibleWidth(question.label) - 5)}`);
+			add(` ${label} ${answer}`);
 		} else {
 			add(` ${label} ${theme.fg("warning", "(미응답)")}`);
 		}
@@ -201,7 +201,7 @@ export function renderForm(input: RenderFormInput): string[] {
 	renderTabBar(input, add);
 
 	if (input.questions.length > 1 && input.currentTab === input.questions.length) {
-		renderSubmitTab(input, add, maxWidth);
+		renderSubmitTab(input, add);
 		hr();
 		return lines;
 	}
