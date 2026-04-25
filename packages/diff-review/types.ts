@@ -96,12 +96,24 @@ export interface ReviewRequestReviewDataPayload {
 	requestId: string;
 }
 
+export interface ReviewClipboardReadPayload {
+	type: "clipboard-read";
+	requestId: string;
+}
+
+export interface ReviewClipboardWritePayload {
+	type: "clipboard-write";
+	text: string;
+}
+
 export type ReviewWindowMessage =
 	| ReviewSubmitPayload
 	| ReviewCancelPayload
 	| ReviewRequestFilePayload
 	| ReviewRequestCommitPayload
-	| ReviewRequestReviewDataPayload;
+	| ReviewRequestReviewDataPayload
+	| ReviewClipboardReadPayload
+	| ReviewClipboardWritePayload;
 
 export interface ReviewFileDataMessage {
 	type: "file-data";
@@ -152,12 +164,20 @@ export interface ReviewReviewDataMessage {
 	repositoryHasHead: boolean;
 }
 
+export interface ReviewClipboardDataMessage {
+	type: "clipboard-data";
+	requestId: string;
+	text: string;
+	message?: string;
+}
+
 export type ReviewHostMessage =
 	| ReviewFileDataMessage
 	| ReviewFileErrorMessage
 	| ReviewCommitDataMessage
 	| ReviewCommitErrorMessage
-	| ReviewReviewDataMessage;
+	| ReviewReviewDataMessage
+	| ReviewClipboardDataMessage;
 
 export interface ReviewWindowData {
 	repoRoot: string;

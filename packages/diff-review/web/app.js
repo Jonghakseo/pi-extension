@@ -1576,6 +1576,36 @@ function renderAll(options = {}) {
 	}
 }
 
+function getFocusedTextEditor() {
+	if (!diffEditor) return null;
+	const editors = [diffEditor.getModifiedEditor(), diffEditor.getOriginalEditor()];
+	return editors.find((editor) => editor?.hasTextFocus?.() || editor?.hasWidgetFocus?.()) ?? null;
+}
+
+function getEditorSelectionText(editor) {
+	const model = editor?.getModel?.();
+	const selections = editor?.getSelections?.() ?? [];
+	if (!model || selections.length === 0) return "";
+	return selections
+		.filter((selection) => !selection.isEmpty())
+		.map((selection) => model.getValueInRange(selection))
+		.join("\n");
+}
+
+window.__reviewClipboard = {
+	getSelectedText() {
+		const editor = getFocusedTextEditor();
+		return editor ? getEditorSelectionText(editor) : "";
+	},
+	selectAll() {
+		const editor = getFocusedTextEditor();
+		const model = editor?.getModel?.();
+		if (!editor || !model) return false;
+		editor.setSelection(model.getFullModelRange());
+		return true;
+	},
+};
+
 function createGlyphHoverActions(editor, side) {
 	let hoverDecoration = [];
 
@@ -1644,6 +1674,11 @@ function createGlyphHoverActions(editor, side) {
 
 window.__reviewReceive = (message) => {
 	if (!message || typeof message !== "object") return;
+
+	if (message.type === "clipboard-data") {
+		window.__reviewReceiveClipboardData?.(message);
+		return;
+	}
 
 	if (message.type === "review-data") {
 		if (state.reviewDataRequestId !== message.requestId) return;

@@ -1,9 +1,12 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import { readSystemClipboard, writeSystemClipboard } from "./clipboard.js";
 import { getCommitFiles, getReviewWindowData, isWorkingTreeCommitSha, loadReviewFileContents } from "./git.js";
 import { composeReviewPrompt } from "./prompt.js";
 import { openQuietGlimpse, type QuietGlimpseWindow } from "./quiet-glimpse.js";
 import type {
 	ReviewCancelPayload,
+	ReviewClipboardReadPayload,
+	ReviewClipboardWritePayload,
 	ReviewFile,
 	ReviewFileContents,
 	ReviewHostMessage,
@@ -33,6 +36,14 @@ function isRequestCommitPayload(value: ReviewWindowMessage): value is ReviewRequ
 
 function isRequestReviewDataPayload(value: ReviewWindowMessage): value is ReviewRequestReviewDataPayload {
 	return value.type === "request-review-data";
+}
+
+function isClipboardReadPayload(value: ReviewWindowMessage): value is ReviewClipboardReadPayload {
+	return value.type === "clipboard-read";
+}
+
+function isClipboardWritePayload(value: ReviewWindowMessage): value is ReviewClipboardWritePayload {
+	return value.type === "clipboard-write";
 }
 
 function escapeForInlineScript(value: string): string {
@@ -236,6 +247,33 @@ export default function (pi: ExtensionAPI) {
 						});
 					};
 
+					const handleClipboardRead = (message: ReviewClipboardReadPayload): void => {
+						try {
+							sendWindowMessage({
+								type: "clipboard-data",
+								requestId: message.requestId,
+								text: readSystemClipboard(),
+							});
+						} catch (error) {
+							const messageText = error instanceof Error ? error.message : String(error);
+							sendWindowMessage({
+								type: "clipboard-data",
+								requestId: message.requestId,
+								text: "",
+								message: messageText,
+							});
+						}
+					};
+
+					const handleClipboardWrite = (message: ReviewClipboardWritePayload): void => {
+						try {
+							writeSystemClipboard(message.text);
+						} catch (error) {
+							const messageText = error instanceof Error ? error.message : String(error);
+							ctx.ui.notify(`Failed to copy from review window: ${messageText}`, "warning");
+						}
+					};
+
 					const onMessage = (data: unknown): void => {
 						const message = data as ReviewWindowMessage;
 						if (isRequestFilePayload(message)) {
@@ -248,6 +286,14 @@ export default function (pi: ExtensionAPI) {
 						}
 						if (isRequestReviewDataPayload(message)) {
 							void handleRequestReviewData(message);
+							return;
+						}
+						if (isClipboardReadPayload(message)) {
+							handleClipboardRead(message);
+							return;
+						}
+						if (isClipboardWritePayload(message)) {
+							handleClipboardWrite(message);
 							return;
 						}
 						if (isSubmitPayload(message) || isCancelPayload(message)) {

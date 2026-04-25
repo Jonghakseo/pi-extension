@@ -620,67 +620,151 @@
 <script>
 /**
  * Keyboard shortcut bridge for WKWebView (glimpseui).
- * glimpseui creates a native window without a macOS Edit menu, so Cmd+C/V/X/A/W
- * key equivalents aren't routed to the WKWebView's first responder chain. We install
- * a capture-phase keydown listener that runs BEFORE any editor handler so we can
- * fill those gaps ourselves.
- *
- * Paste is the tricky case: because there is no "Paste" menu item, WKWebView never
- * fires a native `paste` event on the focused element, so neither plain inputs nor
- * Monaco's internal textarea ever see clipboard data. We read the clipboard with
- * navigator.clipboard.readText() and either insert the text directly (plain inputs)
- * or dispatch a synthetic ClipboardEvent carrying pre-filled DataTransfer data
- * (Monaco — it reads clipboardData from the event, not the system clipboard).
+ * glimpseui loads inline HTML as about:blank/null-origin content. That is not a
+ * secure context, so navigator.clipboard is unavailable and Cmd+C/V/X/A are not
+ * backed by a native Edit menu. We bridge clipboard reads/writes through the
+ * extension host and use DOM/Monaco APIs only to collect or insert text.
  */
 (() => {
-  function insertAtCursor(el, text) {
-    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
-      const start = el.selectionStart ?? el.value.length;
-      const end = el.selectionEnd ?? el.value.length;
-      el.value = el.value.slice(0, start) + text + el.value.slice(end);
-      el.selectionStart = el.selectionEnd = start + text.length;
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      return true;
-    }
-    if (el.isContentEditable) {
-      return document.execCommand("insertText", false, text);
-    }
-    return false;
+  const pendingClipboardReads = new Map();
+  let clipboardRequestSeq = 0;
+
+  function isTextControl(el) {
+    return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
   }
 
-  function dispatchSyntheticPaste(target, text) {
-    try {
-      const dt = new DataTransfer();
-      dt.setData("text/plain", text);
-      const evt = new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true });
-      target.dispatchEvent(evt);
-      return !evt.defaultPrevented ? null : true;
-    } catch (_err) {
-      return false;
-    }
+  function isEditableTextControl(el) {
+    return isTextControl(el) && !el.disabled && !el.readOnly;
   }
 
   function isMonacoInput(el) {
     return !!(el?.classList?.contains("inputarea") && el.closest?.(".monaco-editor"));
   }
 
-  async function handlePaste(e) {
+  function getTextControlSelection(el) {
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? start;
+    if (start === end) return "";
+    return el.value.slice(start, end);
+  }
+
+  function replaceTextControlSelection(el, text) {
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    el.value = el.value.slice(0, start) + text + el.value.slice(end);
+    const cursor = start + text.length;
+    el.selectionStart = el.selectionEnd = cursor;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  }
+
+  function getDomSelectionText() {
+    return window.getSelection?.().toString() ?? "";
+  }
+
+  function getSelectedText() {
     const active = document.activeElement;
-    if (!active) return;
-    const editable = active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable;
-    const monaco = isMonacoInput(active);
-    if (!editable && !monaco) return;
-    if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") return;
+    if (active && isTextControl(active) && !isMonacoInput(active)) {
+      return getTextControlSelection(active);
+    }
+    const editorText = window.__reviewClipboard?.getSelectedText?.() ?? "";
+    if (editorText) return editorText;
+    return getDomSelectionText();
+  }
+
+  function deleteSelectedText() {
+    const active = document.activeElement;
+    if (active && isEditableTextControl(active) && !isMonacoInput(active)) {
+      return replaceTextControlSelection(active, "");
+    }
+    if (active?.isContentEditable) {
+      return document.execCommand("delete");
+    }
+    return window.__reviewClipboard?.deleteSelection?.() === true;
+  }
+
+  function canReceivePaste() {
+    const active = document.activeElement;
+    if (!active) return false;
+    if (isMonacoInput(active)) return window.__reviewClipboard?.canPaste?.() === true;
+    return isEditableTextControl(active) || active.isContentEditable || window.__reviewClipboard?.canPaste?.() === true;
+  }
+
+  function insertAtActiveTarget(text) {
+    const active = document.activeElement;
+    if (active && isEditableTextControl(active) && !isMonacoInput(active)) {
+      return replaceTextControlSelection(active, text);
+    }
+    if (active?.isContentEditable) {
+      return document.execCommand("insertText", false, text);
+    }
+    return window.__reviewClipboard?.insertText?.(text) === true;
+  }
+
+  function writeClipboardText(text) {
+    if (!text) return;
+    if (window.glimpse?.send) {
+      window.glimpse.send({ type: "clipboard-write", text });
+      return;
+    }
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text).catch(() => {});
+    }
+  }
+
+  function requestClipboardText() {
+    if (!window.glimpse?.send) {
+      if (navigator.clipboard?.readText) return navigator.clipboard.readText();
+      return Promise.resolve("");
+    }
+    const requestId = `clipboard:${Date.now()}:${++clipboardRequestSeq}`;
+    return new Promise((resolve) => {
+      const timeoutId = setTimeout(() => {
+        pendingClipboardReads.delete(requestId);
+        resolve("");
+      }, 3000);
+      pendingClipboardReads.set(requestId, { resolve, timeoutId });
+      window.glimpse.send({ type: "clipboard-read", requestId });
+    });
+  }
+
+  window.__reviewReceiveClipboardData = (message) => {
+    const pending = pendingClipboardReads.get(message?.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timeoutId);
+    pendingClipboardReads.delete(message.requestId);
+    pending.resolve(typeof message.text === "string" ? message.text : "");
+  };
+
+  function handleCopyOrCut(e, cut) {
+    const text = getSelectedText();
+    if (!text) return;
     e.preventDefault();
-    try {
-      const text = await navigator.clipboard.readText();
-      if (!text) return;
-      if (monaco) {
-        dispatchSyntheticPaste(active, text);
-      } else {
-        insertAtCursor(active, text);
-      }
-    } catch (_err) {
+    writeClipboardText(text);
+    if (cut) deleteSelectedText();
+  }
+
+  async function handlePaste(e) {
+    if (!canReceivePaste()) return;
+    e.preventDefault();
+    const text = await requestClipboardText();
+    if (text) insertAtActiveTarget(text);
+  }
+
+  function handleSelectAll(e) {
+    const active = document.activeElement;
+    if (active && isTextControl(active) && !isMonacoInput(active)) {
+      e.preventDefault();
+      active.select();
+      return;
+    }
+    if (window.__reviewClipboard?.selectAll?.() === true) {
+      e.preventDefault();
+      return;
+    }
+    if (active?.isContentEditable) {
+      e.preventDefault();
+      document.execCommand("selectAll");
     }
   }
 
@@ -699,11 +783,16 @@
         void handlePaste(e);
         return;
       }
-      if (key === "c" || key === "x" || key === "a") {
-        if (e.defaultPrevented) return;
-        try {
-          document.execCommand(key === "c" ? "copy" : key === "x" ? "cut" : "selectAll");
-        } catch (_err) {}
+      if (key === "c") {
+        handleCopyOrCut(e, false);
+        return;
+      }
+      if (key === "x") {
+        handleCopyOrCut(e, true);
+        return;
+      }
+      if (key === "a") {
+        handleSelectAll(e);
       }
     },
     true,
