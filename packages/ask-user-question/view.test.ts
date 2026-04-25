@@ -197,7 +197,7 @@ describe("ask-user-question/view", () => {
 		const submitInput = createInput({ questions: submitQuestions, answerState: createAnswerState(submitQuestions) });
 		submitInput.answerState.radioAnswers.set("radio", { value: "custom", label: "custom", wasCustom: true });
 		submitInput.answerState.checkCustom.set("check", "custom");
-		renderSubmitTab(submitInput, (text) => submitLines.push(text), 80);
+		renderSubmitTab(submitInput, (text) => submitLines.push(text));
 		expect(submitLines.join("\n")).toContain("(직접 입력) custom");
 
 		const unansweredLines: string[] = [];
@@ -206,7 +206,7 @@ describe("ask-user-question/view", () => {
 			answerState: createAnswerState(submitQuestions),
 		});
 		unansweredInput.answerState.checkAnswers.delete("check");
-		renderSubmitTab(unansweredInput, (text) => unansweredLines.push(text), 80);
+		renderSubmitTab(unansweredInput, (text) => unansweredLines.push(text));
 		expect(unansweredLines.join("\n")).toContain("(미응답)");
 
 		const output = renderForm(createInput({ currentTab: 99 }));
