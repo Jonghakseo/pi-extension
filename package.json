@@ -45,6 +45,7 @@
 		"publish:diff-review": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-diff-review publish --access public --no-git-checks",
 		"publish:open-pr": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-open-pr publish --access public --no-git-checks",
 		"publish:memory-layer": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-memory-layer publish --access public --no-git-checks",
+		"publish:setup-sh": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-setup-sh publish --access public --no-git-checks",
 		"prepare": "lefthook install --reset-hooks-path"
 	},
 	"devDependencies": {

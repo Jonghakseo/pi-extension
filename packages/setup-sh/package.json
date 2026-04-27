@@ -1,0 +1,42 @@
+{
+	"name": "@ryan_nookpi/pi-extension-setup-sh",
+	"version": "0.1.1",
+	"description": "Auto-run setup.sh extension for pi.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/setup-sh"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/setup-sh#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package"
+	],
+	"files": [
+		"constants.ts",
+		"context.ts",
+		"index.ts",
+		"runner.ts",
+		"state.ts",
+		"types.ts",
+		"utils.ts",
+		"widget.ts",
+		"README.md"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "*",
+		"@mariozechner/pi-tui": "*"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

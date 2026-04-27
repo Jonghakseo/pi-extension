@@ -22,6 +22,7 @@ packages/
   idle-screensaver/
   memory-layer/
   open-pr/
+  setup-sh/
   todo-write/
   todo-write-overlay/
   until/
@@ -100,6 +101,7 @@ pi install npm:@ryan_nookpi/pi-extension-generative-ui
 pi install npm:@ryan_nookpi/pi-extension-idle-screensaver
 pi install npm:@ryan_nookpi/pi-extension-memory-layer
 pi install npm:@ryan_nookpi/pi-extension-open-pr
+pi install npm:@ryan_nookpi/pi-extension-setup-sh
 pi install npm:@ryan_nookpi/pi-extension-todo-write
 pi install npm:@ryan_nookpi/pi-extension-todo-write-overlay
 pi install npm:@ryan_nookpi/pi-extension-until
