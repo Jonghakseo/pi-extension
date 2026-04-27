@@ -12,7 +12,7 @@ import * as path from "node:path";
 export const SUBAGENT_SESSION_DIR = path.join(os.homedir(), ".pi", "agent", "sessions", "subagents");
 
 export const NAME_SYSTEM_PROMPT =
-	"사용자 메시지를 분석해서 세션의 목적을 20자 이내 한 줄로 추출해. 오직 목적 텍스트만 출력하고, 설명이나 다른 텍스트는 절대 출력하지 마.";
+	"사용자 메시지를 분석해서 세션의 목적을 20자 이내 한 줄로 추출해. 세션 이름은 사용자 메시지의 언어로 작성해. 사용자 메시지의 언어를 판단하기 어려우면 제공된 시스템 로케일의 언어로 작성해. 오직 목적 텍스트만 출력하고, 설명이나 다른 텍스트는 절대 출력하지 마.";
 
 /** Max chars for the user message sent to the LLM. */
 export const MAX_MESSAGE_LENGTH = 500;
@@ -73,8 +73,12 @@ export function formatNameStatus(name: string): string {
  * Build the user-message text sent to the LLM for name detection.
  * Truncates to MAX_MESSAGE_LENGTH.
  */
-export function buildNameContext(userMessage: string): string {
-	return `사용자 메시지: ${userMessage.slice(0, MAX_MESSAGE_LENGTH)}`;
+export function buildNameContext(userMessage: string, locale: string): string {
+	return [`시스템 로케일: ${locale}`, `사용자 메시지: ${userMessage.slice(0, MAX_MESSAGE_LENGTH)}`].join("\n");
+}
+
+export function getSystemLocale(): string {
+	return Intl.DateTimeFormat().resolvedOptions().locale;
 }
 
 /**

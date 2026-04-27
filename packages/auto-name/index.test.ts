@@ -3,7 +3,7 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createExtensionApiMock } from "../../tests/mock-extension-api.ts";
 import autoSessionName from "./index.ts";
-import { SUBAGENT_SESSION_DIR } from "./utils/auto-name-utils.ts";
+import { getSystemLocale, SUBAGENT_SESSION_DIR } from "./utils/auto-name-utils.ts";
 import { generateShortLabel } from "./utils/short-label.js";
 import { NAME_STATUS_KEY } from "./utils/status-keys.ts";
 
@@ -41,6 +41,12 @@ describe("auto-name extension", () => {
 		await sessionStart({}, ctx);
 
 		expect(generateShortLabel).toHaveBeenCalledTimes(1);
+		expect(generateShortLabel).toHaveBeenCalledWith(
+			ctx,
+			expect.objectContaining({
+				prompt: expect.stringContaining(`시스템 로케일: ${getSystemLocale()}`),
+			}),
+		);
 		expect(apiMock.getSessionName()).toBe("Release prep");
 		expect(setStatus).toHaveBeenCalledWith(NAME_STATUS_KEY, "Release prep");
 		expect(setTitle).toHaveBeenCalledWith(`π - Release prep - ${path.basename(process.cwd())}`);
