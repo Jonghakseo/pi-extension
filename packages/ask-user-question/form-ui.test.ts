@@ -66,6 +66,32 @@ describe("ask-user-question/form-ui", () => {
 		expect(result).toEqual({ title: "Title", questions, answers: [], cancelled: true });
 	});
 
+	it("coerces unexpected native bridge answers into safe form results", async () => {
+		const questions = normalizeQuestions([
+			{ id: "choice", type: "radio", prompt: "Pick", options: [{ value: "a", label: "A" }] },
+			{ id: "single", type: "checkbox", prompt: "Single", options: [{ value: "solo", label: "Solo" }] },
+			{ id: "missing", type: "checkbox", prompt: "Missing", options: [{ value: "x", label: "X" }] },
+		]);
+		const askUserQuestion = vi.fn(async () => ({ choice: 123, single: "solo" }));
+		const ctx = {
+			hasUI: true,
+			ui: { askUserQuestion },
+		} as unknown as ExtensionContext;
+
+		const result = await runAskUserQuestionForm(ctx, {}, questions);
+
+		expect(result).toEqual({
+			title: undefined,
+			questions,
+			answers: [
+				{ id: "choice", type: "radio", value: "", wasCustom: false },
+				{ id: "single", type: "checkbox", value: ["solo"], wasCustom: false },
+				{ id: "missing", type: "checkbox", value: [], wasCustom: false },
+			],
+			cancelled: false,
+		});
+	});
+
 	it("wires the custom UI factory to the controller", async () => {
 		const questions = normalizeQuestions([{ id: "text", type: "text", prompt: "Explain", default: "seed" }]);
 		let captured: FormResult | undefined;
