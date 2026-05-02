@@ -62,7 +62,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 		promptSnippet: "radio, checkbox, text 입력을 사용하는 인터랙티브 질문 폼 열기",
 		promptGuidelines: PROMPT_GUIDELINES,
 		parameters: AskUserQuestionParams,
-		async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
 			if (!ctx.hasUI) {
 				return errorResult("오류: UI를 사용할 수 없습니다. 현재 비대화형 모드에서 실행 중입니다.");
 			}
@@ -77,6 +77,7 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 				ctx,
 				{ title: params.title, description: params.description },
 				questions,
+				{ signal },
 			);
 			return result.cancelled ? buildCancelledResponse(result) : buildSuccessResponse(result);
 		},
