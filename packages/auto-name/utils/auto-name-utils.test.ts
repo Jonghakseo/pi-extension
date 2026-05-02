@@ -9,6 +9,7 @@ import {
 	MAX_MESSAGE_LENGTH,
 	MAX_NAME_LENGTH,
 	MAX_STATUS_CHARS,
+	NAME_SYSTEM_PROMPT,
 	SUBAGENT_SESSION_DIR,
 } from "./auto-name-utils.ts";
 
@@ -43,10 +44,16 @@ describe("auto-name utils", () => {
 		expect(formatted.length).toBeLessThanOrEqual(MAX_STATUS_CHARS);
 	});
 
-	it("builds the name context with truncation", () => {
+	it("builds the name context with locale and truncation", () => {
 		const message = "m".repeat(MAX_MESSAGE_LENGTH + 25);
-		const context = buildNameContext(message);
-		expect(context).toBe(`사용자 메시지: ${message.slice(0, MAX_MESSAGE_LENGTH)}`);
+		const context = buildNameContext(message, "en-US");
+
+		expect(context).toBe(["시스템 로케일: en-US", `사용자 메시지: ${message.slice(0, MAX_MESSAGE_LENGTH)}`].join("\n"));
+	});
+
+	it("keeps the Korean prompt while requiring locale fallback", () => {
+		expect(NAME_SYSTEM_PROMPT).toContain("사용자 메시지의 언어");
+		expect(NAME_SYSTEM_PROMPT).toContain("제공된 시스템 로케일");
 	});
 
 	it("extracts text-only content and clips the result length", () => {

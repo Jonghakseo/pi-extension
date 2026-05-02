@@ -15,6 +15,7 @@ import {
 	extractNameFromResult,
 	extractSessionFilePath,
 	formatNameStatus,
+	getSystemLocale,
 	isSubagentSessionPath,
 	NAME_SYSTEM_PROMPT,
 } from "./utils/auto-name-utils.ts";
@@ -29,9 +30,11 @@ function isSubagentSession(ctx: ExtensionContext): boolean {
 }
 
 async function detectNameFromMessage(userMessage: string, ctx: ExtensionContext): Promise<string> {
+	const locale = getSystemLocale();
+
 	return generateShortLabel(ctx, {
 		systemPrompt: NAME_SYSTEM_PROMPT,
-		prompt: buildNameContext(userMessage),
+		prompt: buildNameContext(userMessage, locale),
 		extractText: extractNameFromResult,
 	});
 }
