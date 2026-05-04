@@ -66,6 +66,18 @@ describe("ask-user-question/controller", () => {
 		expect(empty.done).not.toHaveBeenCalled();
 	});
 
+	it("invalidates cached lines when render width changes (terminal resize)", () => {
+		const setup = createController([{ id: "text", type: "text", prompt: "Explain" }]);
+		const wide = setup.controller.render(70);
+		const narrow = setup.controller.render(34);
+		expect(narrow).not.toBe(wide);
+		for (const line of narrow) {
+			expect(line.length).toBeLessThanOrEqual(34);
+		}
+		const narrowAgain = setup.controller.render(34);
+		expect(narrowAgain).toBe(narrow);
+	});
+
 	it("handles text questions, submission, cancellation, and editor fallback submit", () => {
 		const first = createController([{ id: "text", type: "text", prompt: "Explain", default: "seed" }]);
 		expect(first.editor.getText()).toBe("seed");

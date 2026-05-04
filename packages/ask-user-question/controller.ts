@@ -37,6 +37,7 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 	let otherMode = false;
 	let otherQuestionId: string | null = null;
 	let cachedLines: string[] | undefined;
+	let cachedWidth: number | undefined;
 
 	function getCurrentQuestion(): NormalizedQuestion | undefined {
 		return questions[currentTab];
@@ -44,6 +45,7 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 
 	function refresh(): void {
 		cachedLines = undefined;
+		cachedWidth = undefined;
 		input.requestRender();
 	}
 
@@ -116,7 +118,8 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 
 	return {
 		render(width) {
-			if (cachedLines) return cachedLines;
+			if (cachedLines && cachedWidth === width) return cachedLines;
+			cachedWidth = width;
 			cachedLines = renderForm({
 				title: input.title,
 				description: input.description,
@@ -134,6 +137,7 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 		},
 		invalidate() {
 			cachedLines = undefined;
+			cachedWidth = undefined;
 		},
 		handleInput(data) {
 			if (otherMode) {
