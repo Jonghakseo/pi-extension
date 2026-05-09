@@ -14,6 +14,21 @@ document.addEventListener('keydown',function(e){
       e.preventDefault();
       document.execCommand(e.key==='c'?'copy':e.key==='x'?'cut':'selectAll');
       break;
+    case'=':
+    case'+':
+      e.preventDefault();
+      var z=parseFloat(document.body.style.zoom)||1;
+      document.body.style.zoom=Math.min(z+0.1,3);
+      break;
+    case'-':
+      e.preventDefault();
+      var z=parseFloat(document.body.style.zoom)||1;
+      document.body.style.zoom=Math.max(z-0.1,0.3);
+      break;
+    case'0':
+      e.preventDefault();
+      document.body.style.zoom=1;
+      break;
     case'w':
       e.preventDefault();
       if(window.glimpse&&typeof window.glimpse.close==='function')window.glimpse.close();
