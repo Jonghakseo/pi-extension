@@ -1,5 +1,9 @@
-import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
+
+const MemoryScopeSchema = Type.Union([Type.Literal("user"), Type.Literal("project")], {
+	description:
+		"Storage scope. 'user' for personal profile, global preferences, or cross-project rules. 'project' for repo-specific tech decisions, env, tooling, configs.",
+});
 
 // ── Memory Scope ─────────────────────────────────────────────────────────────
 
@@ -12,12 +16,7 @@ export const RememberParams = Type.Object({
 		description: "Content to remember (the fact, rule, or lesson to store in long-term memory)",
 	}),
 	title: Type.Optional(Type.String({ description: "Short title/summary for the memory (auto-generated if omitted)" })),
-	scope: StringEnum(["user", "project"] as const, {
-		description:
-			"Storage scope. 'user' for personal profile, global preferences, or cross-project rules. " +
-			"'project' for repo-specific tech decisions, env, tooling, configs. " +
-			"Choose based on whether the information applies globally or only to the current project.",
-	}),
+	scope: MemoryScopeSchema,
 });
 
 export const RecallParams = Type.Object({
@@ -30,11 +29,7 @@ export const RecallParams = Type.Object({
 	id: Type.Optional(
 		Type.String({ description: "Memory entry ID for detail lookup. Returns the full content of a specific memory." }),
 	),
-	scope: Type.Optional(
-		StringEnum(["user", "project"] as const, {
-			description: "Optional scope filter for recall results (user|project).",
-		}),
-	),
+	scope: Type.Optional(MemoryScopeSchema),
 });
 
 export const ForgetParams = Type.Object(
@@ -49,17 +44,13 @@ export const ForgetParams = Type.Object(
 			description:
 				"Title of the memory entry to remove. Exact match is preferred; if topic is omitted, it must resolve to a single memory.",
 		}),
-		scope: Type.Optional(
-			StringEnum(["user", "project"] as const, {
-				description: "Scope to delete from (user|project). If omitted, searches both and errors on ambiguity.",
-			}),
-		),
+		scope: Type.Optional(MemoryScopeSchema),
 	},
 	{ description: "Permanently delete a memory entry. This action is irreversible." },
 );
 
 export const MemoryListParams = Type.Object({
-	scope: Type.Optional(StringEnum(["user", "project"] as const, { description: "Filter by scope" })),
+	scope: Type.Optional(MemoryScopeSchema),
 });
 
 // ── Project ID Resolution (unchanged) ────────────────────────────────────────

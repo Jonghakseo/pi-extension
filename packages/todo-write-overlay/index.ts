@@ -1,7 +1,6 @@
-import { StringEnum } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import type { OverlayHandle, TUI } from "@mariozechner/pi-tui";
-import { Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { OverlayHandle, TUI } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 
 type TodoStatus = "pending" | "in_progress" | "completed";
@@ -25,7 +24,7 @@ type TodoOverlayRecord = {
 	close?: () => void;
 };
 
-const StatusEnum = StringEnum(["pending", "in_progress", "completed"] as const, {
+const StatusEnum = Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")], {
 	description: "작업 상태",
 });
 

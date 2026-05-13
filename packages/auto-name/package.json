@@ -27,8 +27,8 @@
 		]
 	},
 	"peerDependencies": {
-		"@mariozechner/pi-ai": "*",
-		"@mariozechner/pi-coding-agent": "*"
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*"
 	},
 	"publishConfig": {
 		"access": "public"

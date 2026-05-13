@@ -1,11 +1,10 @@
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { StringEnum } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ThemeColor } from "@mariozechner/pi-coding-agent";
-import { DynamicBorder } from "@mariozechner/pi-coding-agent";
-import { Key, matchesKey, Text, truncateToWidth } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ThemeColor } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder } from "@earendil-works/pi-coding-agent";
+import { Key, matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { AVAILABLE_MODULES, getGuidelines } from "./guidelines.js";
+import { getGuidelines } from "./guidelines.js";
 import { escapeJS, shellHTML, wrapHTML } from "./html-utils.js";
 
 interface WidgetHistoryEntry {
@@ -187,9 +186,20 @@ export default function (pi: ExtensionAPI) {
 			"Pick the modules that match your use case: interactive, chart, mockup, art, diagram.",
 		],
 		parameters: Type.Object({
-			modules: Type.Array(StringEnum(AVAILABLE_MODULES as readonly string[]), {
-				description: "Which module(s) to load. Pick all that fit.",
-			}),
+			modules: Type.Array(
+				Type.Union(
+					[
+						Type.Literal("art"),
+						Type.Literal("mockup"),
+						Type.Literal("interactive"),
+						Type.Literal("chart"),
+						Type.Literal("diagram"),
+					],
+					{
+						description: "Which module(s) to load. Pick all that fit.",
+					},
+				),
+			),
 		}),
 
 		async execute(_toolCallId, params) {

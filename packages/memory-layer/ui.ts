@@ -3,7 +3,7 @@
  * Displays entries as [scope] topic / title.
  */
 
-import { DynamicBorder, getMarkdownTheme, type Theme } from "@mariozechner/pi-coding-agent";
+import { DynamicBorder, getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import {
 	Container,
 	type Focusable,
@@ -20,7 +20,7 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 import type { SearchResult } from "./storage.ts";
 import type { MemoryScope } from "./types.ts";
 

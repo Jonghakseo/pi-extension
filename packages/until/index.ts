@@ -1,5 +1,5 @@
-import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@mariozechner/pi-coding-agent";
-import { Box, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
+import { type ExtensionAPI, type ExtensionContext, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { Box, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 const CUSTOM_TYPE = "until";
