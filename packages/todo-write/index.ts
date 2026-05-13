@@ -1,6 +1,5 @@
-import { StringEnum } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Text, truncateToWidth } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 
 type TodoStatus = "pending" | "in_progress" | "completed";
@@ -17,7 +16,7 @@ type TodoState = {
 	tasks: TodoTask[];
 };
 
-const StatusEnum = StringEnum(["pending", "in_progress", "completed"] as const, {
+const StatusEnum = Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")], {
 	description: "작업 상태",
 });
 

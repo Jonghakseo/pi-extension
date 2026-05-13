@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PENDING_AFTER_MS, STATE_ROOT, STATUS_KEY, WIDGET_KEY, WIDGET_REFRESH_MS } from "./constants.js";
 import { displayPath, findSetupPath, repoKeyFor, resolveSetupContext } from "./context.js";
 import { cancelSetup, createWrapperScript, startSetup } from "./runner.js";

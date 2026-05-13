@@ -1,6 +1,6 @@
-import type { ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import type { TUI } from "@mariozechner/pi-tui";
-import { truncateToWidth } from "@mariozechner/pi-tui";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { TUI } from "@earendil-works/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import { PENDING_AFTER_MS, STATUS_KEY, WIDGET_KEY } from "./constants.js";
 import { displayPath } from "./context.js";
 import { finalizeRunIfNeeded } from "./state.js";

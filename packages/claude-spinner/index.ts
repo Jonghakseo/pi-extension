@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export const SPINNER_FRAMES = ["·", "✻", "✽", "✶", "✳", "✢"] as const;
 const SPINNER_INTERVAL_MS = 120;

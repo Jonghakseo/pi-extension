@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const CUSTOM_TYPE = "delayed-action";
 const DEFAULT_SOON_DELAY_MS = 10 * 60 * 1000; // "좀 있다가" 기본값: 10분

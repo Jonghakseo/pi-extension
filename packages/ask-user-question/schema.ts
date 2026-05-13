@@ -1,4 +1,3 @@
-import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 
 export const OptionSchema = Type.Object({
@@ -14,7 +13,7 @@ export const LooseOptionSchema = Type.Union([
 
 export const QuestionSchema = Type.Object({
 	id: Type.Optional(Type.String({ description: "질문 고유 식별자. 생략 시 q1, q2...로 자동 생성" })),
-	type: StringEnum(["radio", "checkbox", "text"] as const, {
+	type: Type.Union([Type.Literal("radio"), Type.Literal("checkbox"), Type.Literal("text")], {
 		description: "질문 유형: radio(단일 선택), checkbox(복수 선택), text(자유 입력)",
 	}),
 	prompt: Type.Optional(Type.String({ description: "사용자에게 표시할 질문 문구" })),

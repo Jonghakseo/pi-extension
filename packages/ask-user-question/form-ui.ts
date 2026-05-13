@@ -1,5 +1,5 @@
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Editor, type EditorTheme } from "@mariozechner/pi-tui";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Editor, type EditorTheme } from "@earendil-works/pi-tui";
 
 import { createFormController } from "./controller.ts";
 import { createAnswerState } from "./state.ts";

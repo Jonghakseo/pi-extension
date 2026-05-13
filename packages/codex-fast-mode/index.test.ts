@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:fs", () => ({
@@ -7,12 +7,12 @@ vi.mock("node:fs", () => ({
 	writeFileSync: vi.fn(),
 }));
 
-vi.mock("@mariozechner/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai", () => ({
 	streamSimpleOpenAICodexResponses: vi.fn(),
 }));
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { streamSimpleOpenAICodexResponses } from "@mariozechner/pi-ai";
+import { streamSimpleOpenAICodexResponses } from "@earendil-works/pi-ai";
 import { createExtensionApiMock } from "../../tests/mock-extension-api.ts";
 import codexFastMode, {
 	loadCodexFastModeState,

@@ -1,4 +1,4 @@
-import { Key, matchesKey } from "@mariozechner/pi-tui";
+import { Key, matchesKey } from "@earendil-works/pi-tui";
 
 import { allRequiredAnswered, buildAnswers, optionCount, saveOtherAnswer, saveTextAnswer } from "./state.ts";
 import type { AnswerState, EditorAdapter, FormResult, NormalizedQuestion, RenderTheme } from "./types.ts";
