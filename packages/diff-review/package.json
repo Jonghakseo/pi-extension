@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-diff-review",
-	"version": "0.1.6",
+	"version": "0.2.0",
 	"description": "Native diff review window extension for pi.",
 	"license": "MIT",
 	"repository": {

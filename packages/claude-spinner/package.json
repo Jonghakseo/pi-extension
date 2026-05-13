@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-claude-spinner",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Standalone Pi extension package for Claude-style spinner frames.",
 	"license": "MIT",
 	"repository": {

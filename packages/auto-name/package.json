@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-auto-name",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "Auto session name extension for pi.",
 	"license": "MIT",
 	"repository": {
