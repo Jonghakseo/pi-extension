@@ -11,6 +11,22 @@ vi.mock("./utils/short-label.js", () => ({
 	generateShortLabel: vi.fn(),
 }));
 
+function createMockCtx(overrides?: Partial<ExtensionContext>) {
+	return {
+		hasUI: true,
+		ui: { setStatus: vi.fn(), setTitle: vi.fn() },
+		model: { id: "claude-sonnet-4", provider: "anthropic", name: "Claude Sonnet 4" },
+		modelRegistry: {
+			getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: true, apiKey: "test-key" }),
+			find: vi.fn().mockReturnValue(undefined),
+		},
+		sessionManager: {
+			getSessionFile: () => "/tmp/root/session.json",
+		},
+		...overrides,
+	} as unknown as ExtensionContext;
+}
+
 describe("auto-name extension", () => {
 	beforeEach(() => {
 		vi.mocked(generateShortLabel).mockReset();
@@ -25,15 +41,8 @@ describe("auto-name extension", () => {
 		const sessionStart = apiMock.getHandlers("session_start")[0];
 		if (!beforeAgentStart || !sessionStart) throw new Error("required handlers are missing");
 
-		const setStatus = vi.fn();
-		const setTitle = vi.fn();
-		const ctx = {
-			hasUI: true,
-			ui: { setStatus, setTitle },
-			sessionManager: {
-				getSessionFile: () => "/tmp/root/session.json",
-			},
-		} as unknown as ExtensionContext;
+		const ctx = createMockCtx();
+		const { setStatus, setTitle } = ctx.ui;
 
 		await beforeAgentStart({ prompt: "Ship the next release" }, ctx);
 		await Promise.resolve();
@@ -90,15 +99,8 @@ describe("auto-name extension", () => {
 		const sessionShutdown = apiMock.getHandlers("session_shutdown")[0];
 		if (!beforeAgentStart || !sessionTree || !sessionShutdown) throw new Error("required handlers are missing");
 
-		const setStatus = vi.fn();
-		const setTitle = vi.fn();
-		const ctx = {
-			hasUI: true,
-			ui: { setStatus, setTitle },
-			sessionManager: {
-				getSessionFile: () => "/tmp/root/session.json",
-			},
-		} as unknown as ExtensionContext;
+		const ctx = createMockCtx();
+		const { setStatus, setTitle } = ctx.ui;
 
 		await beforeAgentStart({ prompt: "Will fail" }, ctx);
 		await Promise.resolve();

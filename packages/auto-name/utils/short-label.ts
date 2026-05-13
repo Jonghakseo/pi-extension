@@ -1,4 +1,5 @@
 import { completeSimple } from "@mariozechner/pi-ai";
+import type { ThinkingLevel } from "./settings.ts";
 
 type SummaryModel = Parameters<typeof completeSimple>[0];
 type SummaryResult = Awaited<ReturnType<typeof completeSimple>>;
@@ -21,6 +22,8 @@ export type GenerateShortLabelOptions = {
 	prompt: string;
 	maxTokens?: number;
 	timeoutMs?: number;
+	/** 추론 레벨 (기본값: "minimal") */
+	reasoning?: ThinkingLevel;
 	extractText?: (content: SummaryResult["content"]) => string;
 };
 
@@ -60,7 +63,7 @@ export async function generateShortLabel(ctx: ShortLabelContext, options: Genera
 				apiKey: auth.apiKey,
 				headers: auth.headers,
 				signal: controller.signal,
-				reasoning: "minimal",
+				reasoning: options.reasoning ?? "minimal",
 				maxTokens: options.maxTokens ?? 60,
 			},
 		);
