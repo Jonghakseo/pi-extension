@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-cross-agent",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Load commands from Claude, Gemini, and Codex agent directories into pi.",
 	"license": "MIT",
 	"repository": {
@@ -27,6 +27,11 @@
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		}
 	},
 	"publishConfig": {
 		"access": "public"

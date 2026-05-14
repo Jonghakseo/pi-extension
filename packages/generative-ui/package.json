@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-generative-ui",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Generative UI widget extension for pi.",
 	"license": "MIT",
 	"repository": {
@@ -33,6 +33,20 @@
 		"@earendil-works/pi-coding-agent": "*",
 		"@earendil-works/pi-tui": "*",
 		"@sinclair/typebox": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-ai": {
+			"optional": true
+		},
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		},
+		"@earendil-works/pi-tui": {
+			"optional": true
+		},
+		"@sinclair/typebox": {
+			"optional": true
+		}
 	},
 	"dependencies": {
 		"glimpseui": "^0.6.2"

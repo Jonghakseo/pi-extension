@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-open-pr",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Open the current branch pull request in your browser via GitHub CLI.",
 	"license": "MIT",
 	"repository": {
@@ -27,6 +27,11 @@
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		}
 	},
 	"publishConfig": {
 		"access": "public"

@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-clipboard",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Clipboard copy tool extension for pi using OSC52 escape sequences.",
 	"license": "MIT",
 	"repository": {
@@ -28,6 +28,14 @@
 	"peerDependencies": {
 		"@earendil-works/pi-coding-agent": "*",
 		"@sinclair/typebox": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		},
+		"@sinclair/typebox": {
+			"optional": true
+		}
 	},
 	"publishConfig": {
 		"access": "public"
