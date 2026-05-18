@@ -7,12 +7,16 @@ vi.mock("node:fs", () => ({
 	writeFileSync: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai", () => ({
-	streamSimpleOpenAICodexResponses: vi.fn(),
-}));
+vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@earendil-works/pi-ai")>();
+	return {
+		...actual,
+		streamSimpleOpenAICodexResponses: vi.fn(),
+	};
+});
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { streamSimpleOpenAICodexResponses } from "@earendil-works/pi-ai";
+import { getModel, streamSimpleOpenAICodexResponses } from "@earendil-works/pi-ai";
 import { createExtensionApiMock } from "../../tests/mock-extension-api.ts";
 import codexFastMode, {
 	loadCodexFastModeState,
@@ -121,6 +125,15 @@ describe("codex fast mode", () => {
 			`Codex Fast Mode disabled (text.verbosity=low still applies for openai-codex/${SUPPORTED_MODEL_LABEL})`,
 			"info",
 		);
+	});
+
+	it.each(
+		SUPPORTED_MODEL_IDS,
+	)("keeps %s registered on the openai-codex provider with openai-codex-responses api", (modelId) => {
+		const model = getModel("openai-codex", modelId);
+		expect(model.provider).toBe("openai-codex");
+		expect(model.id).toBe(modelId);
+		expect(model.api).toBe("openai-codex-responses");
 	});
 
 	it("shows the enabled status message when persisted state is on", async () => {
