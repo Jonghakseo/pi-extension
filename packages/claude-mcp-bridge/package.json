@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-claude-mcp-bridge",
-	"version": "1.1.1",
+	"version": "1.1.2",
 	"description": "Bridge Claude Code MCP server configs into pi — auto-discovers tools from stdio/sse/http MCP servers.",
 	"license": "MIT",
 	"repository": {

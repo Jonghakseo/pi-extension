@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-claude-hooks-bridge",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Bridge Claude Code hooks (.claude/settings.json) into pi extension lifecycle events.",
 	"license": "MIT",
 	"repository": {

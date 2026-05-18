@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-idle-screensaver",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Standalone Pi extension package for the idle screensaver overlay.",
 	"license": "MIT",
 	"repository": {

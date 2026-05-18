@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-setup-sh",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Auto-run setup.sh extension for pi.",
 	"license": "MIT",
 	"repository": {

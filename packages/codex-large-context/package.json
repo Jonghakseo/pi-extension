@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-codex-large-context",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Codex large context window extension for pi.",
 	"license": "MIT",
 	"repository": {

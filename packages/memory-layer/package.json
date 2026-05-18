@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-memory-layer",
-	"version": "0.2.1",
+	"version": "0.2.2",
 	"description": "Long-term memory layer for pi — remember, recall, forget, and browse memories across sessions.",
 	"license": "MIT",
 	"repository": {
