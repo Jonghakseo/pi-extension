@@ -1,7 +1,7 @@
 {
 	"name": "@ryan_nookpi/pi-extension-clipboard",
-	"version": "0.2.2",
-	"description": "Clipboard copy tool extension for pi using OSC52 escape sequences.",
+	"version": "0.3.0",
+	"description": "Clipboard copy and paste tools for pi (OSC52 copy + pbpaste/xclip/wl-paste/Get-Clipboard paste).",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
