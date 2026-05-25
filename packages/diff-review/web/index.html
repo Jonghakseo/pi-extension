@@ -136,12 +136,13 @@
               }
 
               /* Added-only files in inline diff mode: suppress the original gutter/line-number column
-                 that Monaco still paints alongside the modified line numbers. */
+                 that Monaco still paints alongside the modified line numbers.
+                 Keep the original editor's layout width intact: Monaco uses that width for word-wrap
+                 height calculation, and collapsing it to 0px makes wrapped added files render huge
+                 folded/diagonal gaps. */
               #editor-container[data-added-only="true"] .monaco-diff-editor .editor.original,
               #editor-container[data-added-only="true"] .monaco-diff-editor .original-in-monaco {
                 visibility: hidden;
-                width: 0;
-                min-width: 0;
               }
               #editor-container[data-added-only="true"] .monaco-editor .line-numbers.original,
               #editor-container[data-added-only="true"] .monaco-editor .margin-view-overlays .line-numbers[data-lineNumberType="original"] {
