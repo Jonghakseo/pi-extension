@@ -1,0 +1,48 @@
+{
+	"name": "@ryan_nookpi/pi-extension-headroom",
+	"version": "0.1.0",
+	"description": "Headroom token compression for pi — compress large tool results via a local Headroom proxy to reclaim context window.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/headroom"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/headroom#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package"
+	],
+	"files": [
+		"index.ts",
+		"types.ts",
+		"config.ts",
+		"bridge.ts",
+		"client.ts",
+		"proxy-manager.ts",
+		"README.md"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-ai": {
+			"optional": true
+		},
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		}
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

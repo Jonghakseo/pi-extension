@@ -19,6 +19,7 @@ packages/
   delayed-action/
   diff-review/
   generative-ui/
+  headroom/
   idle-screensaver/
   memory-layer/
   open-pr/
