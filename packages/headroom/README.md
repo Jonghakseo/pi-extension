@@ -63,6 +63,6 @@ Example:
 | `command` | `PI_HEADROOM_COMMAND` | `headroom` | Command used to launch the proxy. |
 | `minContextTokens` | `PI_HEADROOM_MIN_CONTEXT_TOKENS` | `20000` | Skip compression below this context token count. |
 | `minMessageChars` | `PI_HEADROOM_MIN_MESSAGE_CHARS` | `2000` | Only compress tool results at or above this size. |
-| `timeoutMs` | `PI_HEADROOM_TIMEOUT_MS` | `15000` | HTTP timeout for proxy requests. |
+| `timeoutMs` | `PI_HEADROOM_TIMEOUT_MS` | `30000` | HTTP timeout for proxy requests. |
 
 Boolean values accept JSON booleans, or strings such as `1/0`, `true/false`, `yes/no`, `on/off`.

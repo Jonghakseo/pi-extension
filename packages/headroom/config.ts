@@ -6,7 +6,7 @@ import type { HeadroomConfig } from "./types.ts";
 const DEFAULT_BASE_URL = "http://127.0.0.1:8788";
 const DEFAULT_MIN_CONTEXT_TOKENS = 20_000;
 const DEFAULT_MIN_MESSAGE_CHARS = 2_000;
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 export const HEADROOM_SETTINGS_DIR = path.join(os.homedir(), ".pi", "agent", "headroom");
 export const HEADROOM_SETTINGS_FILE = path.join(HEADROOM_SETTINGS_DIR, "settings.json");

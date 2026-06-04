@@ -15,6 +15,20 @@ function createStats(): HeadroomStats {
 	return { attempts: 0, applied: 0, guardSkips: 0, tokensSaved: 0 };
 }
 
+describe("headroom error classification", () => {
+	it("treats timeout and abort errors as transient compression skips", () => {
+		expect(
+			__test__.isAbortOrTimeoutError(new DOMException("The operation was aborted due to timeout", "TimeoutError")),
+		).toBe(true);
+		expect(__test__.isAbortOrTimeoutError(new DOMException("The operation was aborted", "AbortError"))).toBe(true);
+		expect(__test__.isAbortOrTimeoutError(new Error("The operation was aborted due to timeout"))).toBe(true);
+	});
+
+	it("does not treat regular Headroom failures as transient aborts", () => {
+		expect(__test__.isAbortOrTimeoutError(new Error("Headroom /v1/compress failed with HTTP 500"))).toBe(false);
+	});
+});
+
 describe("headroom status rendering", () => {
 	it("falls back to plain text when the UI theme cannot color text", () => {
 		const config = loadHeadroomConfig({});

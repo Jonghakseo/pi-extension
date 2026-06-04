@@ -15,6 +15,7 @@ describe("headroom config", () => {
 		expect(config.command).toBe("headroom");
 		expect(config.minContextTokens).toBe(20_000);
 		expect(config.minMessageChars).toBe(2_000);
+		expect(config.timeoutMs).toBe(30_000);
 	});
 
 	it("blocks remote proxy URLs unless explicitly allowed", () => {
