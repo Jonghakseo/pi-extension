@@ -4,7 +4,7 @@ import type { ExtensionAPI, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { getGuidelines } from "./guidelines.js";
+import { AVAILABLE_MODULES, getGuidelines } from "./guidelines.js";
 import { escapeJS, shellHTML, wrapHTML } from "./html-utils.js";
 
 interface WidgetHistoryEntry {
@@ -187,26 +187,20 @@ export default function (pi: ExtensionAPI) {
 		],
 		parameters: Type.Object({
 			modules: Type.Array(
-				Type.Union(
-					[
-						Type.Literal("art"),
-						Type.Literal("mockup"),
-						Type.Literal("interactive"),
-						Type.Literal("chart"),
-						Type.Literal("diagram"),
-					],
-					{
-						description: "Which module(s) to load. Pick all that fit.",
-					},
-				),
+				Type.Unsafe<string>({
+					type: "string",
+					enum: AVAILABLE_MODULES,
+					description: "Which module(s) to load. Pick all that fit.",
+				}),
 			),
 		}),
 
 		async execute(_toolCallId, params) {
-			const content = getGuidelines(params.modules);
+			const modules = params.modules.filter((module): module is string => typeof module === "string");
+			const content = getGuidelines(modules);
 			return {
 				content: [{ type: "text" as const, text: content }],
-				details: { modules: params.modules },
+				details: { modules },
 			};
 		},
 

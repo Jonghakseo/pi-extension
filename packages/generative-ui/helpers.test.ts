@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { createExtensionApiMock } from "../../tests/mock-extension-api.ts";
 import { AVAILABLE_MODULES, getGuidelines } from "./guidelines.ts";
 import { escapeJS, shellHTML, wrapHTML } from "./html-utils.ts";
-import { shouldApplyFinalStreamingHTML } from "./index.ts";
+import generativeUi, { shouldApplyFinalStreamingHTML } from "./index.ts";
 
 describe("generative-ui helpers", () => {
 	it("returns guideline content for requested modules", () => {
@@ -24,6 +25,20 @@ describe("generative-ui helpers", () => {
 
 	it("escapes script-sensitive strings safely", () => {
 		expect(escapeJS("a'b\\c\n</script>")).toBe("a\\'b\\\\c\\n<\\/script>");
+	});
+
+	it("exposes visualize_read_me modules as a plain enum schema", () => {
+		const { api, getTool } = createExtensionApiMock();
+		generativeUi(api);
+
+		const tool = getTool("visualize_read_me");
+		const parameters = tool.parameters as {
+			properties?: { modules?: { items?: { enum?: string[]; anyOf?: unknown } } };
+		};
+		const items = parameters.properties?.modules?.items;
+
+		expect(items?.enum).toEqual(AVAILABLE_MODULES);
+		expect(items?.anyOf).toBeUndefined();
 	});
 
 	it("applies final streaming html only once", () => {
