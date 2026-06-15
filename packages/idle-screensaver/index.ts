@@ -67,7 +67,7 @@ async function showScreensaver(): Promise<void> {
 
 	await latestCtx.ui.custom(
 		(tui: ScreensaverTui, theme: ScreensaverTheme, _kb: unknown, done: (v: undefined) => void) => ({
-			render: (w: number) => renderScreensaver(w, (tui.terminal?.rows as number | undefined) ?? 40, title, theme),
+			render: (w: number) => renderScreensaver(w, tui.terminal?.rows ?? 40, title, theme),
 			handleInput: (_data: string) => {
 				done(undefined);
 			},
@@ -117,7 +117,7 @@ function renderScreensaver(width: number, height: number, title: string, theme: 
 	const separatorWidth = Math.min(innerWidth - 4, Math.max(visibleWidth(titleText) + 8, 24));
 	const separator = bc("─".repeat(Math.max(1, separatorWidth)));
 	const topSeparatorLine = centerLine(separator);
-	const titleLine = centerLine(theme.fg("accent", titleText) as string);
+	const titleLine = centerLine(theme.fg("accent", titleText));
 	const bottomSeparatorLine = centerLine(separator);
 
 	// ── Layout ───────────────────────────────────────────────────
@@ -145,7 +145,7 @@ function renderScreensaver(width: number, height: number, title: string, theme: 
 
 	// 5. Footer hint
 	if (lines.length === height - 2) {
-		lines.push(centerLine(theme.fg("dim", "Press any key to dismiss") as string));
+		lines.push(centerLine(theme.fg("dim", "Press any key to dismiss")));
 	}
 
 	// 6. Bottom border
