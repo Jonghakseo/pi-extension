@@ -171,7 +171,7 @@ function safeRefreshStatus(runtime: HeadroomRuntime, ctx: ExtensionContext | und
 }
 
 async function waitForProxyHealth(runtime: HeadroomRuntime, signal?: AbortSignal): Promise<boolean> {
-	for (const delay of [300, 500, 800, 1200, 2000]) {
+	for (const delay of [500, 1000, 1000, 1500, 1500, 1500, 1500, 1500]) {
 		await sleep(delay);
 		if (await updateHealthState(runtime, signal)) return true;
 	}
