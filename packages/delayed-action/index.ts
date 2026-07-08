@@ -1,36 +1,38 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+import { Type } from "@sinclair/typebox";
+import { parseDelayArgs, parseDurationMs } from "./parse.ts";
 
-const CUSTOM_TYPE = "delayed-action";
-const DEFAULT_SOON_DELAY_MS = 10 * 60 * 1000; // "좀 있다가" 기본값: 10분
-const MAX_DELAY_MS = 7 * 24 * 60 * 60 * 1000; // 7일
+const STATUS_KEY = "delay";
 
-type ParsedReminder = {
-	task: string;
-	delayMs: number;
-	delayLabel: string;
-};
-
-type Reminder = {
-	id: number;
-	task: string;
-	delayMs: number;
-	delayLabel: string;
+interface DelayTask {
+	id: string;
+	prompt: string;
 	createdAt: number;
 	dueAt: number;
 	timer: ReturnType<typeof setTimeout>;
-};
-
-const EXPLICIT_DELAY_RE = /^(\d+)\s*(초|분|시간)\s*(?:있다가|후(?:에)?|뒤(?:에)?)\s*[,，:]?\s*(.+)$/i;
-const SOON_DELAY_RE = /^(?:좀|조금|잠깐|잠시)\s*(?:있다가|후(?:에)?|뒤(?:에)?)\s*[,，:]?\s*(.+)$/i;
-const DELAY_ONLY_RE = /^(?:\d+\s*(?:초|분|시간)|(?:좀|조금|잠깐|잠시))\s*(?:있다가|후(?:에)?|뒤(?:에)?)\s*$/i;
-
-function toDelayMs(amount: number, unit: "초" | "분" | "시간"): number {
-	if (unit === "초") return amount * 1000;
-	if (unit === "시간") return amount * 60 * 60 * 1000;
-	return amount * 60 * 1000;
+	ctx: ExtensionContext;
 }
 
-function formatDuration(ms: number): string {
+const DelayParamsSchema = Type.Object({
+	delay: Type.String({ description: "Delay duration such as 30s, 5m, 1h, 1h30m, 2시간." }),
+	prompt: Type.String({ description: "Prompt text to submit to the agent after the delay (triggers a turn)." }),
+	id: Type.Optional(Type.String({ description: "Optional task id. Auto-generated when omitted." })),
+});
+
+interface DelayToolParams {
+	delay: string;
+	prompt: string;
+	id?: string;
+}
+
+const tasks = new Map<string, DelayTask>();
+let nextId = 1;
+let latestCtx: ExtensionContext | undefined;
+let api: ExtensionAPI | undefined;
+let statusInterval: ReturnType<typeof setInterval> | undefined;
+
+function formatKoreanDuration(ms: number): string {
 	if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))}초`;
 	if (ms < 3_600_000) return `${Math.max(1, Math.round(ms / 60_000))}분`;
 
@@ -40,239 +42,281 @@ function formatDuration(ms: number): string {
 	return `${hours}시간 ${minutes}분`;
 }
 
-function formatClock(ts: number): string {
-	return new Date(ts).toLocaleTimeString("ko-KR", {
+function allocateId(requested?: string): string {
+	const base = requested?.trim() || `delay-${nextId++}`;
+	if (!/^[a-zA-Z0-9._-]+$/.test(base)) throw new Error(`Invalid delay id: ${base}`);
+	if (!tasks.has(base)) return base;
+	if (requested) throw new Error(`Delay id already exists: ${base}`);
+	return allocateId(`delay-${nextId++}`);
+}
+
+function preview(text: string, max = 80): string {
+	const oneLine = text.replace(/\s+/g, " ").trim();
+	return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
+}
+
+function formatTask(task: DelayTask, now = Date.now()): string {
+	const remaining = Math.max(0, task.dueAt - now);
+	const dueTime = new Date(task.dueAt).toLocaleTimeString("ko-KR", {
 		hour: "2-digit",
 		minute: "2-digit",
 		second: "2-digit",
 		hour12: false,
 	});
+	return `${task.id} · ${formatKoreanDuration(remaining)} 후 (${dueTime}) · ${preview(task.prompt)}`;
 }
 
-function parseReminderRequest(text: string): ParsedReminder | null {
-	const trimmed = text.trim();
-	if (!trimmed) return null;
+function listTasks(): string {
+	if (tasks.size === 0) return "예약된 delay가 없어요.";
+	const now = Date.now();
+	return [
+		"예약된 delay:",
+		...[...tasks.values()].sort((a, b) => a.dueAt - b.dueAt).map((task) => `- ${formatTask(task, now)}`),
+	].join("\n");
+}
 
-	const explicit = trimmed.match(EXPLICIT_DELAY_RE);
-	if (explicit) {
-		const amount = Number(explicit[1]);
-		const unit = explicit[2] as "초" | "분" | "시간";
-		const task = explicit[3]?.trim() ?? "";
-		if (!Number.isFinite(amount) || amount <= 0 || !task) return null;
+function paintStatus(ctx: ExtensionContext, text: string): string {
+	const theme = ctx.ui.theme as { fg?: unknown } | undefined;
+	return typeof theme?.fg === "function" ? theme.fg("accent", text) : text;
+}
 
-		const delayMs = toDelayMs(amount, unit);
-		if (delayMs > MAX_DELAY_MS) return null;
+function refreshStatus(): void {
+	const ctx = latestCtx;
+	if (!ctx?.hasUI) return;
+	try {
+		if (tasks.size === 0) {
+			ctx.ui.setStatus(STATUS_KEY, undefined);
+			return;
+		}
+		const next = [...tasks.values()].sort((a, b) => a.dueAt - b.dueAt)[0];
+		ctx.ui.setStatus(
+			STATUS_KEY,
+			paintStatus(ctx, `⏰ ${tasks.size} · ${formatKoreanDuration(next.dueAt - Date.now())}`),
+		);
+	} catch {}
+}
 
-		return {
-			task,
-			delayMs,
-			delayLabel: `${amount}${unit}`,
-		};
+function ensureStatusTicker(): void {
+	if (statusInterval) return;
+	statusInterval = setInterval(refreshStatus, 1000);
+}
+
+function stopStatusTickerIfIdle(): void {
+	if (tasks.size > 0 || !statusInterval) return;
+	clearInterval(statusInterval);
+	statusInterval = undefined;
+}
+
+function injectPrompt(task: DelayTask): void {
+	try {
+		if (!api) throw new Error("delay runtime is not initialized.");
+		const idle = task.ctx.isIdle();
+		// idle이면 즉시 턴을 트리거하고, 작업 중이면 현재 턴 종료 후 실행되도록 followUp으로 큐잉한다.
+		api.sendUserMessage(task.prompt, idle ? undefined : { deliverAs: "followUp" });
+		if (task.ctx.hasUI) {
+			task.ctx.ui.notify(
+				idle
+					? `⏰ ${task.id} 시간이 되어 프롬프트를 실행했어요.`
+					: `⏰ ${task.id} 작업 중이라 followUp으로 예약했어요.`,
+				"info",
+			);
+		}
+	} catch (err) {
+		if (task.ctx.hasUI) {
+			const message = err instanceof Error ? err.message : String(err);
+			task.ctx.ui.notify(`⏰ ${task.id} 프롬프트 실행 실패: ${message}`, "error");
+		}
+	} finally {
+		tasks.delete(task.id);
+		refreshStatus();
+		stopStatusTickerIfIdle();
 	}
+}
 
-	const soon = trimmed.match(SOON_DELAY_RE);
-	if (soon) {
-		const task = soon[1]?.trim() ?? "";
-		if (!task) return null;
-		return {
-			task,
-			delayMs: DEFAULT_SOON_DELAY_MS,
-			delayLabel: formatDuration(DEFAULT_SOON_DELAY_MS),
-		};
-	}
+function scheduleDelay(ctx: ExtensionContext, delayMs: number, prompt: string, requestedId?: string): DelayTask {
+	if (!ctx.hasUI) throw new Error("delay requires an interactive UI so it can submit the prompt to the agent.");
+	latestCtx = ctx;
+	const id = allocateId(requestedId);
+	const createdAt = Date.now();
+	const task: DelayTask = {
+		id,
+		prompt,
+		createdAt,
+		dueAt: createdAt + delayMs,
+		timer: setTimeout(() => injectPrompt(task), delayMs),
+		ctx,
+	};
+	tasks.set(id, task);
+	ensureStatusTicker();
+	refreshStatus();
+	return task;
+}
 
-	return null;
+function cancelTask(id: string): boolean {
+	const task = tasks.get(id);
+	if (!task) return false;
+	clearTimeout(task.timer);
+	tasks.delete(id);
+	refreshStatus();
+	stopStatusTickerIfIdle();
+	return true;
+}
+
+function cancelAll(): number {
+	const count = tasks.size;
+	for (const task of tasks.values()) clearTimeout(task.timer);
+	tasks.clear();
+	refreshStatus();
+	stopStatusTickerIfIdle();
+	return count;
+}
+
+function helpText(): string {
+	return [
+		"Usage:",
+		"  /delay <duration> <prompt>     지연 후 프롬프트를 제출하고 턴을 트리거",
+		"  /delay list                    예약 목록 보기",
+		"  /delay-cancel [id|all]         예약 취소 (id 생략 시 전체 취소)",
+		"",
+		"Examples:",
+		"  /delay 5m 상태 확인해줘",
+		"  /delay 1h30m 회의록 정리 시작",
+		"  /delay 2시간 배포 결과 확인",
+		"",
+		"Duration units: ms, s, m, h, d, 초, 분, 시간, 일",
+	].join("\n");
+}
+
+function scheduleFromCommand(args: string, ctx: ExtensionContext): string {
+	const parsed = parseDelayArgs(args);
+	if ("error" in parsed) return parsed.error;
+	const task = scheduleDelay(ctx, parsed.delayMs, parsed.prompt);
+	return `✓ ${task.id} 예약됨: ${formatKoreanDuration(parsed.delayMs)} 후 제출 · ${preview(task.prompt)}`;
+}
+
+async function handleDelayCommand(args: string, ctx: ExtensionContext): Promise<string> {
+	const trimmed = args.trim();
+	if (!trimmed || trimmed === "help" || trimmed === "--help" || trimmed === "-h") return helpText();
+	if (trimmed === "list" || trimmed === "ls" || trimmed === "status") return listTasks();
+
+	return scheduleFromCommand(trimmed, ctx);
+}
+
+function handleDelayCancelCommand(args: string): string {
+	const target = args.trim();
+	if (!target || target === "all") return `✓ ${cancelAll()}개의 delay를 취소했어요.`;
+	return cancelTask(target) ? `✓ ${target} 예약을 취소했어요.` : `예약을 찾을 수 없어요: ${target}`;
+}
+
+function clearAllTimers(): void {
+	for (const task of tasks.values()) clearTimeout(task.timer);
+	tasks.clear();
+	if (statusInterval) clearInterval(statusInterval);
+	statusInterval = undefined;
 }
 
 export default function (pi: ExtensionAPI) {
-	const reminders = new Map<number, Reminder>();
-	let nextReminderId = 1;
-	let agentRunning = false;
-	let latestCtx: ExtensionContext | undefined;
-
-	const clearAllReminders = () => {
-		for (const reminder of reminders.values()) {
-			clearTimeout(reminder.timer);
-		}
-		reminders.clear();
-	};
-
-	const listReminderLines = (): string[] => {
-		const now = Date.now();
-		return Array.from(reminders.values())
-			.sort((a, b) => a.dueAt - b.dueAt)
-			.map((r) => {
-				const remainMs = Math.max(0, r.dueAt - now);
-				return `#${r.id} · ${formatDuration(remainMs)} 후 · ${r.task}`;
-			});
-	};
-
-	const fireReminder = (id: number) => {
-		const reminder = reminders.get(id);
-		if (!reminder) return;
-
-		reminders.delete(id);
-
-		pi.sendMessage({
-			customType: CUSTOM_TYPE,
-			content: `[reminder#${reminder.id}] 시간 도달 (${formatClock(Date.now())})\nTask: ${reminder.task}`,
-			display: true,
-			details: {
-				id: reminder.id,
-				task: reminder.task,
-				dueAt: reminder.dueAt,
-				createdAt: reminder.createdAt,
-			},
-		});
-
-		const prompt = `예약한 시간이 되었어. 지금 아래 작업을 수행해줘.\n\n${reminder.task}`;
-		if (agentRunning) {
-			pi.sendUserMessage(prompt, { deliverAs: "followUp" });
-		} else {
-			pi.sendUserMessage(prompt);
-		}
-
-		if (latestCtx?.hasUI) {
-			latestCtx.ui.notify(`⏰ reminder #${reminder.id} 실행됨`, "info");
-		}
-	};
-
-	const scheduleReminder = (parsed: ParsedReminder, ctx: ExtensionContext) => {
-		const id = nextReminderId++;
-		const createdAt = Date.now();
-		const dueAt = createdAt + parsed.delayMs;
-
-		const timer = setTimeout(() => fireReminder(id), parsed.delayMs);
-		const reminder: Reminder = {
-			id,
-			task: parsed.task,
-			delayMs: parsed.delayMs,
-			delayLabel: parsed.delayLabel,
-			createdAt,
-			dueAt,
-			timer,
-		};
-		reminders.set(id, reminder);
-
-		pi.sendMessage({
-			customType: CUSTOM_TYPE,
-			content: `[reminder#${id}] 예약됨: ${parsed.delayLabel} 후\nTask: ${parsed.task}\nETA: ${formatClock(dueAt)}`,
-			display: true,
-			details: {
-				id,
-				task: parsed.task,
-				delayMs: parsed.delayMs,
-				dueAt,
-				createdAt,
-			},
-		});
-
-		if (ctx.hasUI) {
-			ctx.ui.notify(`⏰ reminder #${id} 설정됨 (${parsed.delayLabel})`, "info");
-		}
-	};
-
-	pi.registerCommand("reminders", {
-		description: "List pending reminders",
-		handler: async (_args, ctx) => {
-			latestCtx = ctx;
-			if (reminders.size === 0) {
-				ctx.ui.notify("현재 예약된 reminder가 없어.", "info");
-				return;
-			}
-
-			pi.sendMessage({
-				customType: CUSTOM_TYPE,
-				content: `Pending reminders\n\n${listReminderLines().join("\n")}`,
-				display: true,
-			});
+	api = pi;
+	pi.registerCommand("delay", {
+		description: "지정한 시간 후 프롬프트를 제출하고 턴 트리거: /delay 5m <프롬프트>",
+		getArgumentCompletions: (prefix) => {
+			const trimmed = prefix.trimStart();
+			if (trimmed.includes(" ")) return null;
+			return ["list", "5m", "30s", "1h"]
+				.filter((value) => value.startsWith(trimmed))
+				.map((value) => ({ value, label: value }));
 		},
-	});
-
-	pi.registerCommand("reminder-cancel", {
-		description: "Cancel reminder by id or all (usage: /reminder-cancel <id|all>)",
 		handler: async (args, ctx) => {
 			latestCtx = ctx;
-			const raw = (args ?? "").trim().toLowerCase();
-			if (!raw) {
-				ctx.ui.notify("Usage: /reminder-cancel <id|all>", "info");
-				return;
-			}
-
-			if (raw === "all") {
-				const count = reminders.size;
-				clearAllReminders();
-				ctx.ui.notify(`reminder ${count}개 취소됨`, "info");
-				return;
-			}
-
-			const id = Number(raw);
-			if (!Number.isInteger(id)) {
-				ctx.ui.notify("id는 숫자여야 해. 예: /reminder-cancel 3", "warning");
-				return;
-			}
-
-			const target = reminders.get(id);
-			if (!target) {
-				ctx.ui.notify(`reminder #${id} 없음`, "warning");
-				return;
-			}
-
-			clearTimeout(target.timer);
-			reminders.delete(id);
-			ctx.ui.notify(`reminder #${id} 취소됨`, "info");
+			const message = await handleDelayCommand(args ?? "", ctx);
+			ctx.ui.notify(
+				message,
+				message.startsWith("✓") || message.startsWith("예약된") || message.startsWith("Usage") ? "info" : "warning",
+			);
 		},
 	});
 
-	pi.on("input", async (event, ctx) => {
-		latestCtx = ctx;
-		if (event.source === "extension") return { action: "continue" as const };
+	pi.registerCommand("delay-cancel", {
+		description: "delay 예약 취소. 사용법: /delay-cancel [id|all] (인자 생략 시 전체 취소)",
+		getArgumentCompletions: (prefix) => {
+			const trimmed = prefix.trimStart();
+			const items = [
+				{ value: "all", label: "all" },
+				...[...tasks.keys()].map((id) => ({ value: id, label: id })),
+			].filter((item) => item.value.startsWith(trimmed));
+			return items.length > 0 ? items : null;
+		},
+		handler: async (args, ctx) => {
+			latestCtx = ctx;
+			const message = handleDelayCancelCommand(args ?? "");
+			ctx.ui.notify(message, message.startsWith("✓") ? "info" : "warning");
+		},
+	});
 
-		const text = event.text ?? "";
-		if (DELAY_ONLY_RE.test(text.trim())) {
-			if (ctx.hasUI) {
-				ctx.ui.notify('예약할 작업도 같이 써줘. 예: "10분 있다가 배포 로그 확인해"', "warning");
+	pi.registerTool({
+		name: "delay",
+		label: "Delay",
+		description:
+			"Schedule a prompt to be submitted to the agent after a short delay, triggering a new turn when it fires. Use for one-shot reminders like 5m, 1h, or 2시간. The user can cancel with /delay-cancel <id> or /delay-cancel for all.",
+		promptSnippet: "Submit a prompt to the agent after a delay, e.g. delay=5m prompt='check status'.",
+		promptGuidelines: [
+			"Use delay only when the user explicitly asks to run a prompt later in the same interactive session.",
+			"When the delay fires the prompt is submitted as a user message and triggers a turn (followUp-queued if the agent is busy), not just inserted into the editor.",
+			"For recurring or persistent headless scheduled jobs, use cron instead of delay.",
+			"Tell the user the returned id so they can cancel it with `/delay-cancel <id>`; `/delay-cancel` without an id cancels all.",
+		],
+		parameters: DelayParamsSchema,
+		executionMode: "parallel",
+		async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx) {
+			const params = rawParams as DelayToolParams;
+			const delayMs = parseDurationMs(params.delay);
+			if (delayMs === undefined) {
+				return {
+					content: [{ type: "text" as const, text: "Invalid delay. Use forms like 30s, 5m, 1h, 1h30m, 2시간." }],
+					details: {},
+					isError: true,
+				};
 			}
-			return { action: "handled" as const };
-		}
+			if (!params.prompt.trim()) {
+				return {
+					content: [{ type: "text" as const, text: "prompt is required." }],
+					details: {},
+					isError: true,
+				};
+			}
 
-		const parsed = parseReminderRequest(text);
-		if (!parsed) return { action: "continue" as const };
-
-		scheduleReminder(parsed, ctx);
-		return { action: "handled" as const };
-	});
-
-	pi.on("agent_start", async (_event, ctx) => {
-		agentRunning = true;
-		latestCtx = ctx;
-	});
-
-	pi.on("agent_end", async (_event, ctx) => {
-		agentRunning = false;
-		latestCtx = ctx;
-	});
-
-	// Filter out delayed-action log messages before LLM sees them.
-	// CustomMessageEntry (created by sendMessage) has role="custom" and participates
-	// in LLM context by default. We strip them here so they remain visible in the TUI
-	// (display:true is handled by the UI layer independently) but never reach the model.
-	pi.on("context", async (event, _ctx) => {
-		const filtered = event.messages.filter(
-			(m) => !(m.role === "custom" && (m as { customType?: string }).customType === CUSTOM_TYPE),
-		);
-		if (filtered.length === event.messages.length) return;
-		return { messages: filtered };
+			const task = scheduleDelay(ctx, delayMs, params.prompt.trim(), params.id);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `✓ ${task.id} scheduled: prompt will be submitted ${formatKoreanDuration(delayMs)} later (triggers a turn). Cancel with /delay-cancel ${task.id}`,
+					},
+				],
+				details: { id: task.id, dueAt: new Date(task.dueAt).toISOString(), prompt: task.prompt },
+			};
+		},
+		renderCall(args, theme) {
+			const params = args as Partial<DelayToolParams>;
+			return new Text(
+				`${theme.fg("toolTitle", theme.bold("delay "))}${theme.fg("accent", params.delay ?? "?")} ${theme.fg("dim", preview(params.prompt ?? ""))}`,
+				0,
+				0,
+			);
+		},
+		renderResult(result, _options, theme, context) {
+			const raw = result.content[0];
+			const text = raw?.type === "text" ? raw.text : "(no output)";
+			return new Text(context.isError ? theme.fg("error", text) : text, 0, 0);
+		},
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
-		agentRunning = false;
 		latestCtx = ctx;
-		clearAllReminders();
+		refreshStatus();
 	});
 
 	pi.on("session_shutdown", async () => {
-		agentRunning = false;
-		clearAllReminders();
+		clearAllTimers();
 	});
 }
