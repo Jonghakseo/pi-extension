@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-open-pr",
-	"version": "0.2.2",
+	"version": "0.2.3",
 	"description": "Open the current branch pull request in your browser via GitHub CLI.",
 	"license": "MIT",
 	"repository": {

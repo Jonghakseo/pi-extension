@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-cc-system-prompt",
-	"version": "0.2.3",
+	"version": "0.2.4",
 	"description": "Pi extension that swaps pi's system prompt with a vendored Claude Code system prompt.",
 	"license": "MIT",
 	"repository": {

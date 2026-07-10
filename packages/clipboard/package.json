@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-clipboard",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "Clipboard copy and paste tools for pi (OSC52 copy + pbpaste/xclip/wl-paste/Get-Clipboard paste).",
 	"license": "MIT",
 	"repository": {

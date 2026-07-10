@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-generative-ui",
-	"version": "0.2.3",
+	"version": "0.2.4",
 	"description": "Generative UI widget extension for pi.",
 	"license": "MIT",
 	"repository": {
