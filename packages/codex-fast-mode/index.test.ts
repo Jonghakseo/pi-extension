@@ -7,12 +7,16 @@ vi.mock("node:fs", () => ({
 	writeFileSync: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai/api/openai-codex-responses", () => ({
-	streamSimple: vi.fn(),
+const { streamSimpleOpenAICodexResponses } = vi.hoisted(() => ({
+	streamSimpleOpenAICodexResponses: vi.fn(),
+}));
+
+vi.mock("@earendil-works/pi-ai/compat", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@earendil-works/pi-ai/compat")>()),
+	openAICodexResponsesApi: () => ({ streamSimple: streamSimpleOpenAICodexResponses }),
 }));
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { streamSimple as streamSimpleOpenAICodexResponses } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { getModel } from "@earendil-works/pi-ai/compat";
 import { createExtensionApiMock } from "../../tests/mock-extension-api.ts";
 import codexFastMode, {

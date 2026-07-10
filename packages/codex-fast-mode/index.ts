@@ -1,9 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { streamSimple as streamSimpleOpenAICodexResponses } from "@earendil-works/pi-ai/api/openai-codex-responses";
+import { openAICodexResponsesApi } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+const { streamSimple: streamSimpleOpenAICodexResponses } = openAICodexResponsesApi();
 const STATE_FILE = join(homedir(), ".pi", "agent", "state", "codex-fast-mode.json");
 export const SUPPORTED_MODEL_IDS = ["gpt-5.4", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"] as const;
 export const SUPPORTED_MODEL_ID = SUPPORTED_MODEL_IDS[0];
