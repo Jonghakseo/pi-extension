@@ -7,16 +7,13 @@ vi.mock("node:fs", () => ({
 	writeFileSync: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@earendil-works/pi-ai")>();
-	return {
-		...actual,
-		streamSimpleOpenAICodexResponses: vi.fn(),
-	};
-});
+vi.mock("@earendil-works/pi-ai/api/openai-codex-responses", () => ({
+	streamSimple: vi.fn(),
+}));
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { getModel, streamSimpleOpenAICodexResponses } from "@earendil-works/pi-ai";
+import { streamSimple as streamSimpleOpenAICodexResponses } from "@earendil-works/pi-ai/api/openai-codex-responses";
+import { getModel } from "@earendil-works/pi-ai/compat";
 import { createExtensionApiMock } from "../../tests/mock-extension-api.ts";
 import codexFastMode, {
 	loadCodexFastModeState,
@@ -27,6 +24,7 @@ import codexFastMode, {
 
 const SUPPORTED_MODEL_LABEL = SUPPORTED_MODEL_IDS.join(" or ");
 const SECOND_SUPPORTED_MODEL_ID = "gpt-5.5";
+const GPT_56_SUPPORTED_MODEL_ID = "gpt-5.6-luna";
 
 describe("codex fast mode", () => {
 	beforeEach(() => {
@@ -50,6 +48,7 @@ describe("codex fast mode", () => {
 		expect(loadCodexFastModeState()).toEqual({ enabled: true });
 		expect(shouldUseCodexFastBadge("openai-codex", SUPPORTED_MODEL_ID)).toBe(true);
 		expect(shouldUseCodexFastBadge("openai-codex", SECOND_SUPPORTED_MODEL_ID)).toBe(true);
+		expect(shouldUseCodexFastBadge("openai-codex", GPT_56_SUPPORTED_MODEL_ID)).toBe(true);
 		expect(shouldUseCodexFastBadge("openai", SUPPORTED_MODEL_ID)).toBe(false);
 	});
 
@@ -174,6 +173,11 @@ describe("codex fast mode", () => {
 			text: { verbosity: "low" },
 		});
 		await expect(onPayload({ text: {} }, { provider: "openai-codex", id: SECOND_SUPPORTED_MODEL_ID })).resolves.toEqual(
+			{
+				text: { verbosity: "low" },
+			},
+		);
+		await expect(onPayload({ text: {} }, { provider: "openai-codex", id: GPT_56_SUPPORTED_MODEL_ID })).resolves.toEqual(
 			{
 				text: { verbosity: "low" },
 			},

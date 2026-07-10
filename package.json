@@ -8,6 +8,14 @@
 	"workspaces": [
 		"packages/*"
 	],
+	"pnpm": {
+		"overrides": {
+			"@earendil-works/pi-agent-core": "0.80.6",
+			"@earendil-works/pi-ai": "0.80.6",
+			"@earendil-works/pi-coding-agent": "0.80.6",
+			"@earendil-works/pi-tui": "0.80.6"
+		}
+	},
 	"scripts": {
 		"list": "pnpm -r --depth -1 list --json",
 		"check": "node scripts/check-workspace.mjs",
@@ -51,9 +59,9 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.0",
-		"@earendil-works/pi-ai": "^0.79.4",
-		"@earendil-works/pi-coding-agent": "^0.79.4",
-		"@earendil-works/pi-tui": "^0.79.4",
+		"@earendil-works/pi-ai": "^0.80.6",
+		"@earendil-works/pi-coding-agent": "^0.80.6",
+		"@earendil-works/pi-tui": "^0.80.6",
 		"@sinclair/typebox": "^0.34.49",
 		"@types/node": "^25.7.0",
 		"@vitest/coverage-v8": "^4.1.6",

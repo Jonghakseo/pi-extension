@@ -1,4 +1,4 @@
-import { completeSimple } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ThinkingLevel } from "./settings.ts";
 
 type SummaryModel = Parameters<typeof completeSimple>[0];

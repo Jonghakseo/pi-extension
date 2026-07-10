@@ -1,11 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { streamSimpleOpenAICodexResponses } from "@earendil-works/pi-ai";
+import { streamSimple as streamSimpleOpenAICodexResponses } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const STATE_FILE = join(homedir(), ".pi", "agent", "state", "codex-fast-mode.json");
-export const SUPPORTED_MODEL_IDS = ["gpt-5.4", "gpt-5.5"] as const;
+export const SUPPORTED_MODEL_IDS = ["gpt-5.4", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"] as const;
 export const SUPPORTED_MODEL_ID = SUPPORTED_MODEL_IDS[0];
 const SUPPORTED_MODEL_LABEL = SUPPORTED_MODEL_IDS.join(" or ");
 
@@ -92,7 +92,7 @@ export default function codexFastMode(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("codex-fast", {
-		description: "Toggle Codex Fast Mode service tier injection for openai-codex/gpt-5.4 or gpt-5.5",
+		description: `Toggle Codex Fast Mode service tier injection for openai-codex/${SUPPORTED_MODEL_LABEL}`,
 		getArgumentCompletions: (prefix) => {
 			const options = ["on", "off", "status"];
 			const filtered = options.filter((o) => o.startsWith(prefix.trim().toLowerCase()));
