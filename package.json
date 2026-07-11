@@ -54,6 +54,7 @@
 		"publish:open-pr": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-open-pr publish --access public --no-git-checks",
 		"publish:memory-layer": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-memory-layer publish --access public --no-git-checks",
 		"publish:setup-sh": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-setup-sh publish --access public --no-git-checks",
+		"publish:subagent": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-subagent publish --access public --no-git-checks",
 		"publish:headroom": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-headroom publish --access public --no-git-checks",
 		"prepare": "lefthook install --reset-hooks-path"
 	},

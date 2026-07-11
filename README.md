@@ -24,6 +24,7 @@ packages/
   memory-layer/
   open-pr/
   setup-sh/
+  subagent/
   todo-write/
   todo-write-overlay/
   until/

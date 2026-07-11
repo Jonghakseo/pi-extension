@@ -1,0 +1,95 @@
+{
+	"name": "@ryan_nookpi/pi-extension-subagent",
+	"version": "0.1.0",
+	"description": "Asynchronous subagent delegation for pi with run, batch, chain, and continuation workflows.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/subagent"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/subagent#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"subagent",
+		"delegation"
+	],
+	"files": [
+		"above-widget.ts",
+		"agents.ts",
+		"claude-args.ts",
+		"claude-sdk-runner.ts",
+		"claude-sdk-stream-adapter.ts",
+		"claude-sidecar-writer.ts",
+		"claude-stream-parser.ts",
+		"cli.ts",
+		"commands.ts",
+		"config.ts",
+		"constants.ts",
+		"context-limits.ts",
+		"display-task.ts",
+		"escalation.ts",
+		"format.ts",
+		"group-pending.ts",
+		"index.ts",
+		"invocation-queue.ts",
+		"live-preview.ts",
+		"persisted-session.ts",
+		"replay.ts",
+		"retry.ts",
+		"run-utils.ts",
+		"runner.ts",
+		"session.ts",
+		"store.ts",
+		"tool-execute.ts",
+		"tool-render.ts",
+		"types.ts",
+		"widget.ts",
+		"utils/agent-utils.ts",
+		"utils/short-label.ts",
+		"utils/string-utils.ts",
+		"utils/format-utils.ts",
+		"utils/time-utils.ts",
+		"README.md"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"dependencies": {
+		"@anthropic-ai/claude-agent-sdk": "^0.2.98",
+		"yaml": "^2.9.0"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-agent-core": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"typebox": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-ai": {
+			"optional": true
+		},
+		"@earendil-works/pi-agent-core": {
+			"optional": true
+		},
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		},
+		"@earendil-works/pi-tui": {
+			"optional": true
+		},
+		"typebox": {
+			"optional": true
+		}
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
