@@ -156,6 +156,26 @@ describe("subagent input shortcuts", () => {
 		expect(mockRunSingleAgent).not.toHaveBeenCalled();
 	});
 
+	it("leaves ordinary Markdown blockquotes for the main agent", async () => {
+		const { registerAll } = await import("./commands.ts");
+		const store = createStore();
+		const { pi, handlers } = createPi();
+		registerAll(pi as never, store);
+		const ctx = {
+			cwd: tmpDir,
+			hasUI: true,
+			ui: { notify: vi.fn(), select: vi.fn(), getEditorText: vi.fn(() => ""), setEditorText: vi.fn() },
+			sessionManager: { getSessionFile: () => path.join(tmpDir, "main.jsonl"), getEntries: () => [] },
+		};
+
+		const single = await dispatchInput(handlers, ">quoted context", ctx);
+		const legacy = await dispatchInput(handlers, ">>>quoted context", ctx);
+
+		expect(single.action).toBe("continue");
+		expect(legacy.action).toBe("continue");
+		expect(mockRunSingleAgent).not.toHaveBeenCalled();
+	});
+
 	it("> task defaults to hidden worker", async () => {
 		const { registerAll } = await import("./commands.ts");
 		const store = createStore();

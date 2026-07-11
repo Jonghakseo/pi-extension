@@ -11,11 +11,12 @@ import type { WidgetRenderCtx } from "./widget.js";
 export const COLLAPSED_ITEM_COUNT = 10;
 
 export interface SubagentStore {
+	/** True after session_shutdown; async callbacks must not use captured runtime APIs. */
+	disposed: boolean;
 	commandRuns: Map<number, CommandRunState>;
 	/**
-	 * Global live run registry — tracks running subagent processes independently
-	 * of session lifecycle. Never cleared by session switches. Entries are removed
-	 * only when a run completes, is aborted, or is explicitly removed.
+	 * Live run registry for the current extension runtime. Pi session replacement
+	 * tears down that runtime, so session_shutdown aborts and clears these entries.
 	 */
 	globalLiveRuns: Map<number, GlobalRunEntry>;
 	renderedRunWidgetIds: Set<number>;
@@ -29,10 +30,7 @@ export interface SubagentStore {
 	switchSessionFn: ((sessionPath: string) => Promise<{ cancelled: boolean }>) | null;
 	/** Persistent parent session file path, restored from session entries. Null when at root. */
 	currentParentSessionFile: string | null;
-	/**
-	 * Per-session in-memory run snapshots used as a fallback when a session switch
-	 * happens before subagent status logs are fully persisted to JSONL.
-	 */
+	/** Legacy snapshot fallback for hosts that re-emit session_start on one runtime. */
 	sessionRunCache: Map<string, CommandRunState[]>;
 	/** Last active session file path for snapshot bookkeeping. */
 	currentSessionFile: string | null;
@@ -46,6 +44,7 @@ export interface SubagentStore {
 
 export function createStore(): SubagentStore {
 	return {
+		disposed: false,
 		commandRuns: new Map(),
 		globalLiveRuns: new Map(),
 		renderedRunWidgetIds: new Set(),

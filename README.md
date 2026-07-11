@@ -104,6 +104,7 @@ pi install npm:@ryan_nookpi/pi-extension-idle-screensaver
 pi install npm:@ryan_nookpi/pi-extension-memory-layer
 pi install npm:@ryan_nookpi/pi-extension-open-pr
 pi install npm:@ryan_nookpi/pi-extension-setup-sh
+pi install npm:@ryan_nookpi/pi-extension-subagent
 pi install npm:@ryan_nookpi/pi-extension-todo-write
 pi install npm:@ryan_nookpi/pi-extension-todo-write-overlay
 pi install npm:@ryan_nookpi/pi-extension-until

@@ -89,7 +89,7 @@ function refreshDisplayTaskInBackground(
 		},
 	})
 		.then((displayTask) => {
-			if (!displayTask || runState.removed) return;
+			if (!displayTask || runState.removed || store.disposed) return;
 			if (!isDisplayTaskRefreshTokenCurrent(runState, refreshToken)) return;
 			if (displayTask === runState.displayTask) return;
 			runState.displayTask = displayTask;
@@ -471,10 +471,9 @@ function toNonNegativeNumber(value: unknown): number | undefined {
  * Used by session_start handler (covers all session lifecycle reasons).
  * Also restores `currentParentSessionFile` from the latest `subagent-parent` entry.
  *
- * After restoring session entries, merges any still-running global live runs
- * into commandRuns so they remain visible and controllable across sessions.
- * Also delivers any pending completion messages for runs that finished while
- * the user was in a different session.
+ * Includes backward-compatible in-memory and pending-completion recovery for
+ * hosts that reuse one extension runtime. Standard Pi session replacement is
+ * handled by aborting active children during session_shutdown.
  */
 function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAPI): void {
 	let currentSessionFile: string | null = null;
@@ -484,8 +483,7 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 		currentSessionFile = null;
 	}
 
-	// Snapshot previous session view before switching away so we can recover
-	// transient runs when JSONL persistence lags behind session switching.
+	// Legacy fallback for hosts that reuse a runtime across session_start events.
 	if (store.currentSessionFile && store.currentSessionFile !== currentSessionFile) {
 		const snapshot = Array.from(store.commandRuns.values()).map((run) => ({ ...run }));
 		if (snapshot.length > 0) {
@@ -709,9 +707,7 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 		// Silently ignore restore errors — fresh state is fine
 	}
 
-	// ── Merge global live runs (origin session only) ────────────────────
-	// Re-integrate all non-removed runs that originated from the current session
-	// so grouped batch/chain progress remains visible across session switches.
+	// ── Legacy live-run merge (origin session only) ────────────────────
 	const mergeSessionFile = currentSessionFile;
 	if (mergeSessionFile) {
 		for (const [runId, entry] of store.globalLiveRuns) {
@@ -722,10 +718,7 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 		}
 	}
 
-	// ── Deliver pending completions ─────────────────────────────────────
-	// If a run/batch/pipeline finished while the user was in a different session
-	// and the user has now switched back to the origin session, deliver the stored
-	// completion message via pi.sendMessage().
+	// ── Deliver legacy pending completions ──────────────────────────────
 	if (pi && currentSessionFile) {
 		for (const [runId, entry] of store.globalLiveRuns) {
 			if (!entry.pendingCompletion) continue;
@@ -1270,7 +1263,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 			const abortController = new AbortController();
 			runState.abortController = abortController;
 
-			// Register in global live run registry (survives session switches).
+			// Register for abort and completion handling within this session runtime.
 			let originSessionFile = "";
 			try {
 				originSessionFile = normalizePath(ctx.sessionManager.getSessionFile()) ?? "";
@@ -1379,7 +1372,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 									undefined,
 									abortController.signal,
 									(partial) => {
-										if (runState.removed) return;
+										if (runState.removed || store.disposed) return;
 										const current = partial.details?.results?.[0];
 										if (!current) return;
 										updateRunFromResult(runState, current);
@@ -1429,7 +1422,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 					});
 					runState.retryCount = retryCount;
 
-					if (runState.removed) return;
+					if (runState.removed || store.disposed) return;
 
 					updateRunFromResult(runState, result);
 					const isError = result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
@@ -1506,10 +1499,11 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 						);
 					}
 				} catch (error: any) {
-					if (runState.removed) return;
+					if (runState.removed || store.disposed) return;
 					runState.status = "error";
 					runState.elapsedMs = Date.now() - runState.startedAt;
-					runState.lastLine = error?.message ? String(error.message) : "Subagent execution failed";
+					runState.lastLine =
+						runState.autoAbortReason ?? (error?.message ? String(error.message) : "Subagent execution failed");
 					runState.lastOutput = runState.lastLine;
 
 					const cmdErrorMessage = {
@@ -1557,14 +1551,16 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 				} finally {
 					clearInterval(tick);
 					runState.abortController = undefined;
-					trimCommandRunHistory(store, {
-						maxRuns: 10,
-						ctx,
-						pi,
-						updateWidget: false,
-						removalReason: "trim",
-					});
-					updateCommandRunsWidget(store);
+					if (!store.disposed) {
+						trimCommandRunHistory(store, {
+							maxRuns: 10,
+							ctx,
+							pi,
+							updateWidget: false,
+							removalReason: "trim",
+						});
+						updateCommandRunsWidget(store);
+					}
 				}
 			})();
 		},
@@ -1969,9 +1965,14 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		}
 
 		const text = event.text ?? "";
-		const isLegacyHiddenShortcut = text.startsWith(">>>");
+		if (!text.startsWith(">")) return { action: "continue" as const };
+
+		const symbolMap = loadSubagentConfig(ctx.cwd).symbolMap;
+		const legacySymbol = text.length > 3 && text[3] !== " " ? symbolMap[text[3]] : undefined;
+		const hiddenSymbol = text.length > 1 && text[1] !== " " && text[1] !== "<" ? symbolMap[text[1]] : undefined;
+		const isLegacyHiddenShortcut = text === ">>>" || text.startsWith(">>> ") || Boolean(legacySymbol);
 		const isVisibleShortcut = text.startsWith(">>") && !isLegacyHiddenShortcut;
-		const isHiddenShortcut = text.startsWith(">") && !isVisibleShortcut && !text.startsWith("><");
+		const isHiddenShortcut = !isVisibleShortcut && (text === ">" || text.startsWith("> ") || Boolean(hiddenSymbol));
 		if (!isLegacyHiddenShortcut && !isVisibleShortcut && !isHiddenShortcut) {
 			return { action: "continue" as const };
 		}
@@ -2030,7 +2031,6 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		}
 
 		// ── Configured symbol shortcut: >><symbol> task ──
-		const symbolMap = loadSubagentConfig(ctx.cwd).symbolMap;
 		if (text.length >= 3) {
 			const symbolChar = text[2];
 			const symbolAgent = symbolChar !== " " ? symbolMap[symbolChar] : undefined;
@@ -2161,7 +2161,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 
 		// << 1,2,3 — multiple run IDs (comma-separated)
 		// << 1 — single run ID
-		// << (no args) — latest running or latest finished
+		// << (no args) — latest running run only
 		const ids = raw
 			? raw
 					.split(",")
@@ -2298,5 +2298,10 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 	pi.on("session_start", async (_event, ctx) => {
 		restoreRunsFromSession(store, ctx, pi);
 		registerTerminalInputRedirect(ctx);
+	});
+
+	pi.on("session_shutdown", () => {
+		unsubTerminalInput?.();
+		unsubTerminalInput = null;
 	});
 }

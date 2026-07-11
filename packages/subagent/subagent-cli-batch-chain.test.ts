@@ -49,6 +49,14 @@ describe("subagent CLI batch/chain parsing", () => {
 		}
 	});
 
+	it("rejects an entire comma-separated target when any run ID is invalid", () => {
+		const malformed = parseSubagentToolCommand("subagent remove 12,typo");
+		const emptySegment = parseSubagentToolCommand("subagent abort 12,,13");
+
+		expect(malformed.type).toBe("error");
+		expect(emptySegment.type).toBe("error");
+	});
+
 	it("treats batch and chain as async launch commands", () => {
 		expect(isSubagentAsyncLaunchCommand("subagent batch --agent worker --task A --agent reviewer --task B")).toBe(true);
 		expect(isSubagentAsyncLaunchCommand("subagent chain --agent worker --task A --agent reviewer --task B")).toBe(true);

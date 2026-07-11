@@ -79,7 +79,7 @@ function makeClaudeLines(sessionId: string, text: string): string[] {
 	];
 }
 
-function makeProcess(lines: string[]): MockProc {
+function makeProcess(lines: string[], trailingNewline = true): MockProc {
 	const proc = new EventEmitter() as MockProc;
 	proc.stdout = new EventEmitter();
 	proc.stderr = new EventEmitter();
@@ -90,7 +90,8 @@ function makeProcess(lines: string[]): MockProc {
 	});
 
 	queueMicrotask(() => {
-		proc.stdout.emit("data", Buffer.from(`${lines.join("\n")}\n`, "utf8"));
+		const output = `${lines.join("\n")}${trailingNewline ? "\n" : ""}`;
+		proc.stdout.emit("data", Buffer.from(output, "utf8"));
 		proc.exitCode = 0;
 		proc.emit("exit", 0);
 		proc.emit("close", 0);
@@ -237,6 +238,52 @@ describe("runSingleAgent Claude session contract", () => {
 		expect(spawnArgs).toContain("--resume");
 		expect(spawnArgs).toContain(resumeId);
 		expect(result.sessionFile).toBeUndefined();
+	});
+
+	it("persists a non-zero completion marker for an unterminated error result", async () => {
+		spawnMock.mockImplementationOnce(() =>
+			makeProcess(
+				[
+					JSON.stringify({
+						type: "system",
+						subtype: "init",
+						session_id: "sess-error",
+						model: "claude-sonnet-4-6",
+						cwd: "/tmp/project",
+					}),
+					JSON.stringify({
+						type: "result",
+						subtype: "error_during_execution",
+						session_id: "sess-error",
+						is_error: true,
+						stop_reason: "error",
+						result: "boom",
+					}),
+				],
+				false,
+			),
+		);
+
+		const result = await runSingleAgent(
+			"/tmp/project",
+			[makeClaudeAgent()],
+			"claude-worker",
+			"fail without newline",
+			undefined,
+			undefined,
+			undefined,
+			makeDetails,
+			{ sessionFile: sidecarFile, sidecarSessionFile: sidecarFile },
+		);
+
+		expect(result.exitCode).toBe(1);
+		const done = fs
+			.readFileSync(sidecarFile, "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line))
+			.find((entry) => entry.type === "subagent_done");
+		expect(done).toMatchObject({ exitCode: 1, stopReason: "error" });
 	});
 
 	it("writes aborted marker with non-zero exitCode on signal abort", async () => {

@@ -182,12 +182,10 @@ function parseRunTarget(
 	}
 
 	if (raw.includes(",")) {
-		const ids = raw
-			.split(",")
-			.map((part) => parseInteger(part.trim()))
-			.filter((id): id is number => id !== null);
-		if (ids.length === 0) return { error: `Invalid run target: ${raw}` };
-		const unique = Array.from(new Set(ids));
+		const parts = raw.split(",").map((part) => part.trim());
+		const ids = parts.map((part) => parseInteger(part));
+		if (ids.some((id) => id === null)) return { error: `Invalid run target: ${raw}` };
+		const unique = Array.from(new Set(ids.filter((id): id is number => id !== null)));
 		return unique.length === 1 ? { runId: unique[0] } : { runIds: unique };
 	}
 

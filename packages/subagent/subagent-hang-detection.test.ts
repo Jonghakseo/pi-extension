@@ -81,7 +81,9 @@ describe("subagent hang detection with persisted session fallback", () => {
 
 		expect(run.status).toBe("error");
 		expect(run.lastLine).toContain("Auto-aborted");
-		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+		expect(run.autoAbortReason).toBe(run.lastLine);
+		// The normal run finalizer owns the single user-facing completion.
+		expect(pi.sendMessage).not.toHaveBeenCalled();
 	});
 
 	it("marks the run done from the persisted terminal session state instead of auto-aborting", () => {

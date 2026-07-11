@@ -26,8 +26,6 @@ export interface AgentConfig {
 	systemPrompt: string;
 	source: "user" | "project";
 	filePath: string;
-	/** Pixel art character for the above-editor widget (e.g. "fox", "blue-slime"). */
-	character?: string;
 	runtime: AgentRuntime;
 }
 
@@ -159,7 +157,6 @@ function loadAgentsFromDir(dir: string, source: "user" | "project", options: Loa
 			systemPrompt: attachCommonSubagentRule(body, runtime),
 			source,
 			filePath,
-			character: frontmatter.character || undefined,
 			runtime,
 		});
 	}

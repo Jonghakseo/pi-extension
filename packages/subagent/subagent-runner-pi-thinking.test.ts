@@ -57,9 +57,18 @@ function makeHangingProcess(lines: string[]): MockProc {
 	return proc;
 }
 
-function makeCompletedProcess(lines: string[]): MockProc {
-	const proc = makeHangingProcess(lines);
+function makeCompletedProcess(lines: string[], trailingNewline = true): MockProc {
+	const proc = new EventEmitter() as MockProc;
+	proc.stdout = new EventEmitter();
+	proc.stderr = new EventEmitter();
+	proc.exitCode = null;
+	proc.kill = vi.fn((signal?: string) => {
+		proc.exitCode = signal === "SIGKILL" ? 137 : 0;
+		return true;
+	});
 	queueMicrotask(() => {
+		const output = `${lines.join("\n")}${trailingNewline ? "\n" : ""}`;
+		proc.stdout.emit("data", Buffer.from(output, "utf8"));
 		proc.exitCode = 0;
 		proc.emit("exit", 0);
 		proc.emit("close", 0);
@@ -336,6 +345,37 @@ describe("runSingleAgent pi live preview parity", () => {
 		expect(updates.some((partial) => partial.thoughtText === "Second turn thought")).toBe(true);
 		expect(result.thoughtText).toBe("Second turn thought");
 	});
+
+	it("does not duplicate a message repeated in agent_end", async () => {
+		const { runSingleAgent } = await import("./runner.ts");
+		const finalMessage = {
+			role: "assistant",
+			model: "test-model",
+			content: [{ type: "text", text: "Final answer" }],
+			stopReason: "stop",
+		};
+		spawnMock.mockImplementationOnce(() =>
+			makeCompletedProcess([
+				JSON.stringify({ type: "agent_start" }),
+				JSON.stringify({ type: "message_end", message: finalMessage }),
+				JSON.stringify({ type: "agent_end", messages: [finalMessage] }),
+			]),
+		);
+
+		const result = await runSingleAgent(
+			"/tmp/project",
+			[makePiAgent()],
+			"pi-worker",
+			"review task",
+			undefined,
+			undefined,
+			undefined,
+			makeDetails,
+		);
+
+		expect(result.messages).toHaveLength(1);
+		expect((result.messages[0]?.content[0] as any)?.text).toBe("Final answer");
+	});
 });
 
 describe("runSingleAgent pi terminal message fallback", () => {
@@ -352,6 +392,49 @@ describe("runSingleAgent pi terminal message fallback", () => {
 		vi.useRealTimers();
 		vi.clearAllMocks();
 		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("persists a non-zero marker for an unterminated terminal error", async () => {
+		const { runSingleAgent } = await import("./runner.ts");
+		spawnMock.mockImplementationOnce(() =>
+			makeCompletedProcess(
+				[
+					JSON.stringify({ type: "agent_start" }),
+					JSON.stringify({
+						type: "message_end",
+						message: {
+							role: "assistant",
+							model: "test-model",
+							content: [{ type: "text", text: "Failed" }],
+							stopReason: "error",
+							errorMessage: "boom",
+						},
+					}),
+				],
+				false,
+			),
+		);
+
+		const result = await runSingleAgent(
+			"/tmp/project",
+			[makePiAgent()],
+			"pi-worker",
+			"fail without newline",
+			undefined,
+			undefined,
+			undefined,
+			makeDetails,
+			sessionFile,
+		);
+
+		expect(result.exitCode).toBe(1);
+		const done = fs
+			.readFileSync(sessionFile, "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line))
+			.find((entry) => entry.type === "subagent_done");
+		expect(done).toMatchObject({ exitCode: 1, stopReason: "error" });
 	});
 
 	it("force-resolves after a terminal assistant message even if the pi child never exits", async () => {

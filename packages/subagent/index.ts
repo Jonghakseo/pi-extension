@@ -29,7 +29,7 @@ import { getSessionFileMtimeMs, readPersistedSessionSnapshot } from "./persisted
 import { getLastNonEmptyLine } from "./runner.js";
 import { createStore, type SubagentStore } from "./store.js";
 import type { CommandRunState } from "./types.js";
-import { updateCommandRunsWidget } from "./widget.js";
+import { cleanupCommandRunsWidgetTimer, updateCommandRunsWidget } from "./widget.js";
 
 function reconcileRunWithPersistedSession(run: CommandRunState): void {
 	if (!run.sessionFile) return;
@@ -61,11 +61,77 @@ function reconcileRunWithPersistedSession(run: CommandRunState): void {
 }
 
 /**
- * Sweep all running subagent runs for hang detection.
- * If a run has had no activity for HANG_TIMEOUT_MS, auto-abort it
- * and notify the main session via a followUp message.
+ * Abort all session-scoped child processes before Pi invalidates this
+ * extension runtime. A non-triggering failure entry is persisted so returning
+ * to the old session explains why the run stopped.
  */
-export function checkForHungRuns(store: SubagentStore, pi: ExtensionAPI): void {
+type SessionShutdownReason = "quit" | "reload" | "new" | "resume" | "fork";
+
+export function shutdownSubagentRuns(store: SubagentStore, pi: ExtensionAPI, reason: SessionShutdownReason): void {
+	if (store.disposed) return;
+	store.disposed = true;
+
+	const activeRuns = new Map<number, CommandRunState>();
+	for (const [runId, run] of store.commandRuns) activeRuns.set(runId, run);
+	for (const [runId, entry] of store.globalLiveRuns) activeRuns.set(runId, entry.runState);
+
+	for (const [runId, run] of activeRuns) {
+		if (run.status !== "running") continue;
+		const message = `Aborted because the parent pi session ${reason} is shutting down.`;
+		run.status = "error";
+		run.elapsedMs = Date.now() - run.startedAt;
+		run.lastActivityAt = Date.now();
+		run.lastLine = message;
+		run.lastOutput = message;
+		run.removed = true;
+
+		const controller = run.abortController ?? store.globalLiveRuns.get(runId)?.abortController;
+		controller?.abort();
+		run.abortController = undefined;
+
+		if (run.deliveryMode === "humanOnly") continue;
+		try {
+			pi.sendMessage(
+				{
+					customType: run.source === "tool" ? "subagent-tool" : "subagent-command",
+					content: `[subagent:${run.agent}#${runId}] failed\n\n${message}`,
+					display: false,
+					details: {
+						runId,
+						agent: run.agent,
+						task: run.task,
+						displayTask: run.displayTask,
+						status: "error",
+						error: message,
+						startedAt: run.startedAt,
+						elapsedMs: run.elapsedMs,
+						lastActivityAt: run.lastActivityAt,
+						sessionFile: run.sessionFile,
+					},
+				},
+				{ deliverAs: "followUp", triggerTurn: false },
+			);
+		} catch {
+			// The runtime may already be closing; aborting the child remains the priority.
+		}
+	}
+
+	store.globalLiveRuns.clear();
+	store.batchGroups.clear();
+	store.pipelines.clear();
+	store.recentLaunchTimestamps.clear();
+	store.commandRuns.clear();
+	store.commandWidgetCtx = null;
+	store.pixelWidgetCtx = null;
+	cleanupCommandRunsWidgetTimer();
+}
+
+/**
+ * Sweep active runs for inactivity. The normal run finalizer owns completion
+ * delivery so an auto-abort cannot emit two follow-up messages.
+ */
+export function checkForHungRuns(store: SubagentStore, _pi: ExtensionAPI): void {
+	if (store.disposed) return;
 	const now = Date.now();
 	const processed = new Set<number>();
 
@@ -88,33 +154,11 @@ export function checkForHungRuns(store: SubagentStore, pi: ExtensionAPI): void {
 		run.lastLine = reason;
 		run.lastOutput = reason;
 		run.status = "error";
+		run.autoAbortReason = reason;
 
 		if (controller) {
 			controller.abort();
 		}
-
-		const message = `⚠️ worker#${runId} (${run.agent}) — automatically aborted after ${Math.round(idleMs / 1000)}s without activity`;
-		if (run.deliveryMode === "humanOnly") {
-			return;
-		}
-
-		// Notify main session
-		pi.sendMessage(
-			{
-				customType: "subagent-command",
-				content: message,
-				display: true,
-				details: {
-					runId,
-					agent: run.agent,
-					task: run.task,
-					displayTask: run.displayTask,
-					status: "auto-aborted",
-					idleMs,
-				},
-			},
-			{ deliverAs: "followUp", triggerTurn: false },
-		);
 	}
 
 	// Sweep commandRuns first
@@ -123,7 +167,7 @@ export function checkForHungRuns(store: SubagentStore, pi: ExtensionAPI): void {
 		tryAbort(runId, run);
 	}
 
-	// Sweep globalLiveRuns for runs that may have been dropped from commandRuns (e.g. session switch)
+	// Sweep registry-only runs that are not present in the current widget view.
 	for (const [runId, entry] of store.globalLiveRuns) {
 		if (processed.has(runId)) continue;
 		tryAbort(runId, entry.runState);
@@ -137,12 +181,20 @@ export default function (pi: ExtensionAPI) {
 	registerAskMasterTool(pi);
 	registerAll(pi, store);
 
-	// Periodic hang detection — auto-abort subagents with no activity
-	const hangCheckTimer = setInterval(() => checkForHungRuns(store, pi), HANG_CHECK_INTERVAL_MS);
+	let hangCheckTimer: ReturnType<typeof setInterval> | undefined;
+	pi.on("session_start", () => {
+		store.disposed = false;
+		if (!hangCheckTimer) {
+			hangCheckTimer = setInterval(() => checkForHungRuns(store, pi), HANG_CHECK_INTERVAL_MS);
+		}
+	});
 
-	// Clean up intervals on session shutdown
-	pi.on("session_shutdown", async () => {
-		clearInterval(hangCheckTimer);
+	pi.on("session_shutdown", async (event) => {
+		if (hangCheckTimer) {
+			clearInterval(hangCheckTimer);
+			hangCheckTimer = undefined;
+		}
+		shutdownSubagentRuns(store, pi, event.reason);
 		cleanupPixelTimer();
 	});
 }

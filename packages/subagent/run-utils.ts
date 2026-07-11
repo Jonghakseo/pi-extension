@@ -84,8 +84,7 @@ export function removeRun(store: SubagentStore, runId: number, options: RemoveRu
 
 	run.removed = true;
 
-	// Abort via globalLiveRuns if the run's own abortController is missing
-	// (can happen after session switch clears commandRuns references).
+	// Abort via globalLiveRuns if the view state lost its controller reference.
 	const globalEntry = store.globalLiveRuns.get(runId);
 	const controller = run.abortController ?? globalEntry?.abortController;
 

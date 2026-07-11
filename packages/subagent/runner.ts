@@ -415,7 +415,13 @@ async function runClaudeAgent(
 			const resolveOnce = (code: number) => {
 				if (settled) return;
 				settled = true;
-				writeCompletionMarkerOnce(code);
+				if (buffer.trim()) {
+					const pendingLine = buffer;
+					buffer = "";
+					processLine(pendingLine);
+				}
+				const finalCode = streamState.isError || streamState.stopReason === "error" ? 1 : code;
+				writeCompletionMarkerOnce(finalCode);
 				if (exitFallbackTimer) {
 					clearTimeout(exitFallbackTimer);
 					exitFallbackTimer = undefined;
@@ -424,10 +430,9 @@ async function runClaudeAgent(
 					clearTimeout(resultLingerTimer);
 					resultLingerTimer = undefined;
 				}
-				if (buffer.trim()) processLine(buffer);
 
 				if (streamState.messages.length === 0) {
-					const msg = `no assistant/tool messages captured; settleReason=${settleReason}; exitCode=${code}; resultReceived=${streamState.resultReceived}`;
+					const msg = `no assistant/tool messages captured; settleReason=${settleReason}; exitCode=${finalCode}; resultReceived=${streamState.resultReceived}`;
 					appendStderrDiagnostic({ stderr: stderrBuf } as SingleResult, msg);
 					stderrBuf += `[runner] ${msg}\n`;
 					if (unparsedStdoutCount > 0) {
@@ -435,7 +440,7 @@ async function runClaudeAgent(
 						stderrBuf += `[runner] ${tail}\n`;
 					}
 				}
-				resolve(code);
+				resolve(finalCode);
 			};
 
 			function schedulePostResultLinger() {
@@ -672,19 +677,24 @@ async function runPiAgent(
 				}
 
 				if (event.type === "agent_end") {
-					// Bug fix: agent.js catch block emits agent_end without message_end on
-					// rate-limit / abort / network errors, so stopReason is never set via
-					// the message_end path. Recover it from event.messages directly.
-					// CRITICAL: Must also add these messages to currentResult.messages,
-					// otherwise getFinalOutput() returns "" and the task fails with "Output was empty".
-					for (const msg of (event.messages ?? []) as Message[]) {
-						if (!currentResult.messages.find((m) => m === msg)) {
-							currentResult.messages.push(msg);
+					// Error paths may emit agent_end without message_end. Recover only the
+					// final terminal message: agent_end contains the whole conversation and
+					// its objects are freshly deserialized, so reference-based deduplication
+					// would append every prior message again.
+					const eventMessages = (event.messages ?? []) as Message[];
+					const terminalMessage = [...eventMessages].reverse().find((msg) => Boolean((msg as any).stopReason));
+					if (terminalMessage) {
+						const fingerprint = JSON.stringify(terminalMessage);
+						const alreadyCaptured = currentResult.messages.some((msg) => JSON.stringify(msg) === fingerprint);
+						if (!alreadyCaptured) currentResult.messages.push(terminalMessage);
+						if (!currentResult.stopReason) {
+							currentResult.stopReason = (terminalMessage as any).stopReason;
+							if ((terminalMessage as any).errorMessage) {
+								currentResult.errorMessage = (terminalMessage as any).errorMessage;
+							}
 						}
-						if ((msg as any).stopReason && !currentResult.stopReason) {
-							currentResult.stopReason = (msg as any).stopReason;
-							if ((msg as any).errorMessage) currentResult.errorMessage = (msg as any).errorMessage;
-						}
+					} else if (currentResult.messages.length === 0 && eventMessages.length > 0) {
+						currentResult.messages.push(eventMessages[eventMessages.length - 1]);
 					}
 					if (currentResult.stopReason && currentResult.stopReason !== "toolUse") {
 						writeCompletionMarkerOnce(
@@ -811,7 +821,14 @@ async function runPiAgent(
 			const resolveOnce = (code: number) => {
 				if (settled) return;
 				settled = true;
-				writeCompletionMarkerOnce(code);
+				if (buffer.trim()) {
+					const pendingLine = buffer;
+					buffer = "";
+					processLine(pendingLine);
+				}
+				syncFromPersistedSession(false);
+				const finalCode = currentResult.stopReason === "error" || currentResult.stopReason === "aborted" ? 1 : code;
+				writeCompletionMarkerOnce(finalCode);
 				if (exitFallbackTimer) {
 					clearTimeout(exitFallbackTimer);
 					exitFallbackTimer = undefined;
@@ -828,13 +845,11 @@ async function runPiAgent(
 					clearInterval(sessionPollTimer);
 					sessionPollTimer = undefined;
 				}
-				if (buffer.trim()) processLine(buffer);
-				syncFromPersistedSession(false);
 
 				if (currentResult.messages.length === 0) {
 					appendStderrDiagnostic(
 						currentResult,
-						`no assistant/tool messages captured; settleReason=${settleReason}; exitCode=${code}; sawAgentEnd=${sawAgentEnd}`,
+						`no assistant/tool messages captured; settleReason=${settleReason}; exitCode=${finalCode}; sawAgentEnd=${sawAgentEnd}`,
 					);
 					if (unparsedStdoutCount > 0) {
 						appendStderrDiagnostic(
@@ -843,7 +858,7 @@ async function runPiAgent(
 						);
 					}
 				}
-				resolve(code);
+				resolve(finalCode);
 			};
 
 			function scheduleTerminalMessageForceResolve() {

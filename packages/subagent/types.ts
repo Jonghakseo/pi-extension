@@ -91,6 +91,8 @@ export interface CommandRunState {
 	retryCount?: number;
 	/** Last transient failure reason that triggered an auto-retry. */
 	lastRetryReason?: string;
+	/** Hang detector reason preserved until the normal finalizer emits the sole completion. */
+	autoAbortReason?: string;
 	runtime?: AgentRuntime;
 	claudeSessionId?: string;
 	claudeProjectDir?: string;
@@ -143,11 +145,7 @@ export interface PendingCompletion {
 	createdAt: number;
 }
 
-/**
- * Global live run entry — tracks a running subagent process independently
- * of the session lifecycle. Lives in a module-level Map that is never
- * cleared by session switches.
- */
+/** Live child process state owned by the current Pi extension runtime. */
 export interface GlobalRunEntry {
 	runState: CommandRunState;
 	abortController: AbortController;

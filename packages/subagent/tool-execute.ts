@@ -160,7 +160,7 @@ function refreshDisplayTaskInBackground(
 		},
 	})
 		.then((displayTask) => {
-			if (!displayTask || runState.removed) return;
+			if (!displayTask || runState.removed || store.disposed) return;
 			if (!isDisplayTaskRefreshTokenCurrent(runState, refreshToken)) return;
 			if (displayTask === runState.displayTask) return;
 			runState.displayTask = displayTask;
@@ -508,6 +508,14 @@ function buildStrongWaitMessage(runId: number): string {
 function finalizeRunState(runState: CommandRunState, result: SingleResult): FinalizedRun {
 	updateRunFromResult(runState, result);
 
+	if (runState.autoAbortReason) {
+		runState.status = "error";
+		runState.elapsedMs = Date.now() - runState.startedAt;
+		runState.lastOutput = runState.autoAbortReason;
+		runState.lastLine = runState.autoAbortReason;
+		return { runState, result, isError: true, rawOutput: runState.autoAbortReason };
+	}
+
 	if (result.exitCode === ESCALATION_EXIT_CODE && runState.sessionFile) {
 		const escalation = readAndConsumeEscalation(runState.sessionFile);
 		const escalationMsg = escalation?.message ?? "Subagent escalated without a message.";
@@ -620,7 +628,8 @@ function isInteractiveTuiContext(ctx: SubagentToolExecuteContext): boolean {
 function finalizeRunError(runState: CommandRunState, error: unknown): FinalizedRun {
 	runState.status = "error";
 	runState.elapsedMs = Date.now() - runState.startedAt;
-	runState.lastLine = error instanceof Error ? error.message : "Subagent execution failed";
+	runState.lastLine =
+		runState.autoAbortReason ?? (error instanceof Error ? error.message : "Subagent execution failed");
 	runState.lastOutput = runState.lastLine;
 	return {
 		runState,
@@ -1164,7 +1173,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 					runState.pipelineStepIndex,
 					runState.abortController?.signal,
 					(partial) => {
-						if (runState.removed) return;
+						if (runState.removed || store.disposed) return;
 						const current = partial.details?.results?.[0];
 						if (!current) return;
 						updateRunFromResult(runState, current);
@@ -1317,7 +1326,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			void (async () => {
 				try {
 					const finalized = await launchRunInBackground(runState, taskForAgent);
-					if (runState.removed) return;
+					if (runState.removed || store.disposed) return;
 					updateCommandRunsWidget(store);
 
 					if (finalized.result?.exitCode === ESCALATION_EXIT_CODE) {
@@ -1349,7 +1358,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						finalized.isError ? "error" : "info",
 					);
 				} catch (error: unknown) {
-					if (runState.removed) return;
+					if (runState.removed || store.disposed) return;
 					const finalized = finalizeRunError(runState, error);
 					const errorMessage = buildRunCompletionMessage(finalized);
 					if (isInOriginSession(ctx, originSessionFile)) {
@@ -1363,14 +1372,16 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 					updateCommandRunsWidget(store);
 				} finally {
 					clearRunAbortState(runState);
-					trimCommandRunHistory(store, {
-						maxRuns: 10,
-						ctx,
-						pi,
-						updateWidget: false,
-						removalReason: "trim",
-					});
-					updateCommandRunsWidget(store);
+					if (!store.disposed) {
+						trimCommandRunHistory(store, {
+							maxRuns: 10,
+							ctx,
+							pi,
+							updateWidget: false,
+							removalReason: "trim",
+						});
+						updateCommandRunsWidget(store);
+					}
 				}
 			})();
 

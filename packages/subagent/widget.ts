@@ -72,6 +72,12 @@ function manageSpinnerTimer(store: SubagentStore): void {
 	}
 }
 
+export function cleanupCommandRunsWidgetTimer(): void {
+	if (!spinnerTimer) return;
+	clearInterval(spinnerTimer);
+	spinnerTimer = undefined;
+}
+
 function getStatusVisual(run: CommandRunState): { statusColor: ThemeColor; statusIcon: string } {
 	const statusColor: ThemeColor = run.status === "running" ? "warning" : run.status === "done" ? "success" : "error";
 	const spinnerFrame = SPINNER_FRAMES[Math.floor(Date.now() / SPINNER_INTERVAL_MS) % SPINNER_FRAMES.length];
