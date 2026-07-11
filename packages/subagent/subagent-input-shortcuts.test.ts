@@ -188,6 +188,54 @@ describe("subagent input shortcuts", () => {
 		expect(pi.sendMessage).not.toHaveBeenCalled();
 	});
 
+	it("uses a configured defaultAgent", async () => {
+		fs.writeFileSync(
+			path.join(tmpDir, ".pi", "subagent.json"),
+			JSON.stringify({ defaultAgent: "searcher", symbolMap: {} }),
+		);
+		const { registerAll } = await import("./commands.ts");
+		const store = createStore();
+		const { pi, handlers } = createPi();
+		registerAll(pi as never, store);
+		const ctx = {
+			cwd: tmpDir,
+			hasUI: true,
+			ui: { notify: vi.fn(), select: vi.fn(), getEditorText: vi.fn(() => ""), setEditorText: vi.fn() },
+			sessionManager: { getSessionFile: () => path.join(tmpDir, "main.jsonl"), getEntries: () => [] },
+		};
+
+		await dispatchInput(handlers, "> custom default work", ctx);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(mockRunSingleAgent.mock.calls[0]?.[2]).toBe("searcher");
+	});
+
+	it("rejects a missing configured defaultAgent before launch", async () => {
+		fs.writeFileSync(
+			path.join(tmpDir, ".pi", "subagent.json"),
+			JSON.stringify({ defaultAgent: "missing", symbolMap: {} }),
+		);
+		const { registerAll } = await import("./commands.ts");
+		const store = createStore();
+		const { pi, handlers } = createPi();
+		registerAll(pi as never, store);
+		const ctx = {
+			cwd: tmpDir,
+			hasUI: true,
+			ui: { notify: vi.fn(), select: vi.fn(), getEditorText: vi.fn(() => ""), setEditorText: vi.fn() },
+			sessionManager: { getSessionFile: () => path.join(tmpDir, "main.jsonl"), getEntries: () => [] },
+		};
+
+		await dispatchInput(handlers, "> implement the task", ctx);
+
+		expect(mockRunSingleAgent).not.toHaveBeenCalled();
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining('Configured defaultAgent "missing" was not found. Available agents: searcher, worker'),
+			"error",
+		);
+	});
+
 	it('does not register plain ">" as a keyboard shortcut', async () => {
 		const { registerAll } = await import("./commands.ts");
 		const store = createStore();

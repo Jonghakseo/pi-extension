@@ -1,3 +1,5 @@
+// Vendored from shared personal-extension utilities as a self-contained copy.
+// Maintained independently within this package.
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 
 type SummaryModel = Parameters<typeof completeSimple>[0];

@@ -6,19 +6,24 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { PIPELINE_PREVIOUS_STEP_MAX_CHARS } from "./constants.js";
 
-const SUBAGENT_SESSION_DIR = path.join(os.homedir(), ".pi", "agent", "sessions", "subagents");
+function getSubagentSessionDir(): string {
+	return path.join(getAgentDir(), "sessions", "subagents");
+}
 
 export function makeSubagentSessionFile(runId: number): string {
-	fs.mkdirSync(SUBAGENT_SESSION_DIR, { recursive: true });
-	return path.join(SUBAGENT_SESSION_DIR, `subagent-${runId}-${Date.now()}.jsonl`);
+	const sessionDir = getSubagentSessionDir();
+	fs.mkdirSync(sessionDir, { recursive: true });
+	return path.join(sessionDir, `subagent-${runId}-${Date.now()}.jsonl`);
 }
 
 export function makeToolSessionFile(prefix: string): string {
-	fs.mkdirSync(SUBAGENT_SESSION_DIR, { recursive: true });
+	const sessionDir = getSubagentSessionDir();
+	fs.mkdirSync(sessionDir, { recursive: true });
 	const rand = Math.random().toString(36).slice(2, 8);
-	return path.join(SUBAGENT_SESSION_DIR, `${prefix}-${Date.now()}-${rand}.jsonl`);
+	return path.join(sessionDir, `${prefix}-${Date.now()}-${rand}.jsonl`);
 }
 
 export function makeInheritedSessionCopy(sourceSessionFile: string, prefix: string): string {

@@ -15,34 +15,34 @@ import {
 
 describe("formatDuration", () => {
 	it("returns 0초 for 0ms", () => {
-		expect(formatDuration(0)).toBe("0초");
+		expect(formatDuration(0)).toBe("0s");
 	});
 
 	it("returns seconds only for < 1 min", () => {
-		expect(formatDuration(5000)).toBe("5초");
-		expect(formatDuration(59999)).toBe("59초");
+		expect(formatDuration(5000)).toBe("5s");
+		expect(formatDuration(59999)).toBe("59s");
 	});
 
 	it("returns minutes and seconds", () => {
-		expect(formatDuration(60000)).toBe("1분 0초");
-		expect(formatDuration(90000)).toBe("1분 30초");
+		expect(formatDuration(60000)).toBe("1m 0s");
+		expect(formatDuration(90000)).toBe("1m 30s");
 	});
 
 	it("returns hours, minutes, seconds", () => {
-		expect(formatDuration(3661000)).toBe("1시간 1분 1초");
-		expect(formatDuration(7200000)).toBe("2시간 0분 0초");
+		expect(formatDuration(3661000)).toBe("1h 1m 1s");
+		expect(formatDuration(7200000)).toBe("2h 0m 0s");
 	});
 
 	it("handles NaN as 0", () => {
-		expect(formatDuration(NaN)).toBe("0초");
+		expect(formatDuration(NaN)).toBe("0s");
 	});
 
 	it("handles Infinity as 0", () => {
-		expect(formatDuration(Infinity)).toBe("0초");
+		expect(formatDuration(Infinity)).toBe("0s");
 	});
 
 	it("handles negative as 0", () => {
-		expect(formatDuration(-5000)).toBe("0초");
+		expect(formatDuration(-5000)).toBe("0s");
 	});
 });
 
@@ -52,15 +52,15 @@ describe("formatDurationBetween", () => {
 	it("calculates duration between two timestamps", () => {
 		const start = new Date("2026-01-01T00:00:00Z");
 		const end = new Date("2026-01-01T00:01:30Z");
-		expect(formatDurationBetween(start, end)).toBe("1분 30초");
+		expect(formatDurationBetween(start, end)).toBe("1m 30s");
 	});
 
 	it("handles numbers", () => {
-		expect(formatDurationBetween(1000, 6000)).toBe("5초");
+		expect(formatDurationBetween(1000, 6000)).toBe("5s");
 	});
 
 	it("returns 0초 when end <= start", () => {
-		expect(formatDurationBetween(5000, 1000)).toBe("0초");
+		expect(formatDurationBetween(5000, 1000)).toBe("0s");
 	});
 });
 
@@ -70,11 +70,11 @@ describe("formatElapsedSince", () => {
 	it("calculates elapsed from a fixed now", () => {
 		const startedAt = 1000;
 		const now = 11000;
-		expect(formatElapsedSince(startedAt, now)).toBe("10초");
+		expect(formatElapsedSince(startedAt, now)).toBe("10s");
 	});
 
 	it("returns 0초 for future startedAt", () => {
-		expect(formatElapsedSince(10000, 5000)).toBe("0초");
+		expect(formatElapsedSince(10000, 5000)).toBe("0s");
 	});
 });
 

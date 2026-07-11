@@ -30,6 +30,7 @@ describe("subagent config", () => {
 
 		expect(loadSubagentConfig(tmpDir, { globalPath: null, projectPath: null })).toEqual({
 			claudeRuntime: "sdk",
+			defaultAgent: "worker",
 			symbolMap: {},
 		});
 	});
@@ -39,20 +40,28 @@ describe("subagent config", () => {
 		const configPath = path.join(tmpDir, ".pi", "subagent.json");
 		const nestedDir = path.join(tmpDir, "apps", "web", "src");
 		fs.mkdirSync(nestedDir, { recursive: true });
-		writeJson(configPath, { claudeRuntime: "cli", symbolMap: {} });
+		writeJson(configPath, { claudeRuntime: "cli", defaultAgent: "worker", symbolMap: {} });
 
 		expect(findNearestProjectSubagentConfig(nestedDir)).toBe(configPath);
-		expect(loadSubagentConfig(nestedDir, { globalPath: null })).toEqual({ claudeRuntime: "cli", symbolMap: {} });
+		expect(loadSubagentConfig(nestedDir, { globalPath: null })).toEqual({
+			claudeRuntime: "cli",
+			defaultAgent: "worker",
+			symbolMap: {},
+		});
 	});
 
 	it("reads claudeRuntime from settings.json and lets project config override it", () => {
 		const tmpDir = createTempDir();
 		const globalPath = path.join(tmpDir, "settings.json");
 		const projectPath = path.join(tmpDir, ".pi", "subagent.json");
-		writeJson(globalPath, { subagent: { claudeRuntime: "cli", symbolMap: {} } });
-		writeJson(projectPath, { claudeRuntime: "sdk", symbolMap: {} });
+		writeJson(globalPath, { subagent: { claudeRuntime: "cli", defaultAgent: "worker", symbolMap: {} } });
+		writeJson(projectPath, { claudeRuntime: "sdk", defaultAgent: "worker", symbolMap: {} });
 
-		expect(loadSubagentConfig(tmpDir, { globalPath })).toEqual({ claudeRuntime: "sdk", symbolMap: {} });
+		expect(loadSubagentConfig(tmpDir, { globalPath })).toEqual({
+			claudeRuntime: "sdk",
+			defaultAgent: "worker",
+			symbolMap: {},
+		});
 	});
 
 	it("loads symbolMap and lets project config replace the global map", () => {
@@ -64,8 +73,42 @@ describe("subagent config", () => {
 
 		expect(loadSubagentConfig(tmpDir, { globalPath })).toEqual({
 			claudeRuntime: "sdk",
+			defaultAgent: "worker",
 			symbolMap: { "!": "reviewer" },
 		});
+	});
+
+	it("loads and overrides defaultAgent", () => {
+		const tmpDir = createTempDir();
+		const globalPath = path.join(tmpDir, "settings.json");
+		const projectPath = path.join(tmpDir, ".pi", "subagent.json");
+		writeJson(globalPath, { subagent: { defaultAgent: "worker" } });
+		writeJson(projectPath, { defaultAgent: "reviewer" });
+
+		expect(loadSubagentConfig(tmpDir, { globalPath })).toMatchObject({ defaultAgent: "reviewer" });
+	});
+
+	it.each([null, [], "?", 1])("rejects non-object symbolMap %j", (symbolMap) => {
+		const tmpDir = createTempDir();
+		const projectPath = path.join(tmpDir, ".pi", "subagent.json");
+		writeJson(projectPath, { symbolMap });
+
+		expect(loadSubagentConfig(tmpDir, { globalPath: null }).symbolMap).toEqual({});
+	});
+
+	it.each([
+		{ invalid: "worker" },
+		{ "?": 42 },
+		{ "?": "   " },
+		{ "?": "searcher", invalid: "worker" },
+	])("rejects the entire malformed symbolMap %j", (symbolMap) => {
+		const tmpDir = createTempDir();
+		const globalPath = path.join(tmpDir, "settings.json");
+		const projectPath = path.join(tmpDir, ".pi", "subagent.json");
+		writeJson(globalPath, { subagent: { symbolMap: { "!": "reviewer" } } });
+		writeJson(projectPath, { symbolMap });
+
+		expect(loadSubagentConfig(tmpDir, { globalPath }).symbolMap).toEqual({ "!": "reviewer" });
 	});
 
 	it("ignores invalid config values and falls back to sdk", () => {
@@ -73,6 +116,10 @@ describe("subagent config", () => {
 		const projectPath = path.join(tmpDir, ".pi", "subagent.json");
 		writeJson(projectPath, { claudeRuntime: "weird" });
 
-		expect(loadSubagentConfig(tmpDir, { globalPath: null })).toEqual({ claudeRuntime: "sdk", symbolMap: {} });
+		expect(loadSubagentConfig(tmpDir, { globalPath: null })).toEqual({
+			claudeRuntime: "sdk",
+			defaultAgent: "worker",
+			symbolMap: {},
+		});
 	});
 });

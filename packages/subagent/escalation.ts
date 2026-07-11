@@ -1,23 +1,29 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
-const SUBAGENT_SESSION_DIR = path.join(os.homedir(), ".pi", "agent", "sessions", "subagents");
-const ESCALATIONS_DIR = path.join(os.homedir(), ".pi", "agent", "escalations");
+function getSubagentSessionDir(): string {
+	return path.join(getAgentDir(), "sessions", "subagents");
+}
+
+function getEscalationsDir(): string {
+	return path.join(getAgentDir(), "escalations");
+}
 
 function isSubagentSession(sessionFile: string | undefined): boolean {
 	if (!sessionFile) return false;
 	return (
-		sessionFile.startsWith(`${SUBAGENT_SESSION_DIR}${path.sep}`) || sessionFile.startsWith(`${SUBAGENT_SESSION_DIR}/`)
+		sessionFile.startsWith(`${getSubagentSessionDir()}${path.sep}`) ||
+		sessionFile.startsWith(`${getSubagentSessionDir()}/`)
 	);
 }
 
 export function writeEscalationRecord(sessionFile: string, message: string, context?: string): void {
-	if (!fs.existsSync(ESCALATIONS_DIR)) {
-		fs.mkdirSync(ESCALATIONS_DIR, { recursive: true });
+	const escalationsDir = getEscalationsDir();
+	if (!fs.existsSync(escalationsDir)) {
+		fs.mkdirSync(escalationsDir, { recursive: true });
 	}
 
 	const record = {
@@ -28,7 +34,7 @@ export function writeEscalationRecord(sessionFile: string, message: string, cont
 	};
 
 	const sessionBasename = path.basename(sessionFile, ".jsonl");
-	const escalationFile = path.join(ESCALATIONS_DIR, `${sessionBasename}.yaml`);
+	const escalationFile = path.join(escalationsDir, `${sessionBasename}.yaml`);
 	fs.writeFileSync(escalationFile, stringifyYaml(record), "utf-8");
 }
 
@@ -36,7 +42,7 @@ export function writeEscalationRecord(sessionFile: string, message: string, cont
  * ask_master Tool — registered only when the current session is a subagent session.
  *
  * When called:
- *   1. Writes escalation info to ~/.pi/agent/escalations/<session-basename>.yaml
+ *   1. Writes escalation info to the agent directory's escalations/<session-basename>.yaml
  *   2. Exits with code 42 (ESCALATION_EXIT_CODE)
  *
  * The subagent runner detects exit code 42 and:
@@ -128,7 +134,7 @@ export interface EscalationRecord {
  */
 export function getEscalationFilePath(sessionFile: string): string {
 	const basename = path.basename(sessionFile, ".jsonl");
-	return path.join(ESCALATIONS_DIR, `${basename}.yaml`);
+	return path.join(getEscalationsDir(), `${basename}.yaml`);
 }
 
 /**

@@ -1,3 +1,5 @@
+// Vendored from shared personal-extension utilities as a self-contained copy.
+// Maintained independently within this package.
 /**
  * Pure string utility functions extracted from various extension modules.
  * No side effects, no pi SDK dependencies.

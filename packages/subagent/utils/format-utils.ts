@@ -1,3 +1,5 @@
+// Vendored from shared personal-extension utilities as a self-contained copy.
+// Maintained independently within this package.
 /**
  * Pure formatting utility functions extracted from various extensions.
  *

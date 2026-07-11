@@ -1,3 +1,5 @@
+// Vendored from shared personal-extension utilities as a self-contained copy.
+// Maintained independently within this package.
 /**
  * Pure utility functions extracted from subagent/agents.ts and subagent/runner.ts.
  * These handle agent discovery helpers, normalization, matching, and alias computation.

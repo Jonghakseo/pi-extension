@@ -6,11 +6,13 @@ export type ClaudeRuntimeMode = "sdk" | "cli";
 
 export interface SubagentConfig {
 	claudeRuntime: ClaudeRuntimeMode;
+	defaultAgent: string;
 	symbolMap: Record<string, string>;
 }
 
 interface RawSubagentConfig {
 	claudeRuntime?: unknown;
+	defaultAgent?: unknown;
 	symbolMap?: unknown;
 }
 
@@ -25,6 +27,7 @@ interface LoadSubagentConfigOptions {
 
 const DEFAULT_CONFIG: SubagentConfig = {
 	claudeRuntime: "sdk",
+	defaultAgent: "worker",
 	symbolMap: {},
 };
 
@@ -40,13 +43,19 @@ function normalizeClaudeRuntime(value: unknown): ClaudeRuntimeMode | undefined {
 	return value === "cli" || value === "sdk" ? value : undefined;
 }
 
+function normalizeDefaultAgent(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
 function normalizeSymbolMap(value: unknown): Record<string, string> | undefined {
 	if (typeof value !== "object" || !value || Array.isArray(value)) return undefined;
-	const entries = Object.entries(value).filter(
-		(entry): entry is [string, string] =>
-			entry[0].length === 1 && typeof entry[1] === "string" && entry[1].trim().length > 0,
-	);
-	return Object.fromEntries(entries.map(([symbol, agent]) => [symbol, agent.trim()]));
+	const entries = Object.entries(value);
+	if (
+		entries.some(([symbol, agent]) => symbol.length !== 1 || typeof agent !== "string" || agent.trim().length === 0)
+	) {
+		return undefined;
+	}
+	return Object.fromEntries(entries.map(([symbol, agent]) => [symbol, (agent as string).trim()]));
 }
 
 function extractSubagentConfig(value: unknown): RawSubagentConfig {
@@ -91,11 +100,16 @@ export function loadSubagentConfig(cwd: string, options: LoadSubagentConfigOptio
 		normalizeClaudeRuntime(globalConfig.claudeRuntime) ??
 		DEFAULT_CONFIG.claudeRuntime;
 
+	const defaultAgent =
+		normalizeDefaultAgent(projectConfig.defaultAgent) ??
+		normalizeDefaultAgent(globalConfig.defaultAgent) ??
+		DEFAULT_CONFIG.defaultAgent;
 	const globalSymbolMap = normalizeSymbolMap(globalConfig.symbolMap);
 	const projectSymbolMap = normalizeSymbolMap(projectConfig.symbolMap);
 
 	return {
 		claudeRuntime,
+		defaultAgent,
 		symbolMap: projectSymbolMap ?? globalSymbolMap ?? DEFAULT_CONFIG.symbolMap,
 	};
 }

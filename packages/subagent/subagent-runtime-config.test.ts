@@ -14,6 +14,29 @@ function writeAgentFile(dir: string, filename: string, content: string): void {
 }
 
 describe("runtime frontmatter parsing", () => {
+	it("discovers user agents from PI_CODING_AGENT_DIR", () => {
+		const tmpDir = createTempAgentDir();
+		const customAgentDir = path.join(tmpDir, "custom-agent-dir");
+		const userAgentsDir = path.join(customAgentDir, "agents");
+		fs.mkdirSync(userAgentsDir, { recursive: true });
+		writeAgentFile(
+			userAgentsDir,
+			"custom-worker.md",
+			["---", "name: custom-worker", "description: Custom user agent", "---", "Do work."].join("\n"),
+		);
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = customAgentDir;
+
+		try {
+			const result = discoverAgents(path.join(tmpDir, "project"));
+			expect(result.agents.some((agent) => agent.name === "custom-worker")).toBe(true);
+		} finally {
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+
 	it("defaults to 'pi' when runtime is not specified", () => {
 		const tmpDir = createTempAgentDir();
 		const agentsDir = path.join(tmpDir, ".pi", "agents");

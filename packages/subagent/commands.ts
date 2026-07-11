@@ -958,7 +958,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 
 	const subCommand = {
 		description:
-			"Run a subagent in a dedicated sub-session: /sub:isolate <agent|alias> <task>, /sub:isolate <runId> <task>, /sub:isolate <task> (defaults to worker)",
+			"Run a subagent in a dedicated sub-session: /sub:isolate <agent|alias> <task>, /sub:isolate <runId> <task>, /sub:isolate <task> (uses configured defaultAgent)",
 		getArgumentCompletions: (argumentPrefix: string) => {
 			const trimmedStart = argumentPrefix.trimStart();
 			if (trimmedStart.includes(" ")) return null;
@@ -1023,7 +1023,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 
 			if (agents.length === 0) {
 				ctx.ui.notify(
-					"No subagents found. Checked user (~/.pi/agent/agents) + project-local (.pi/agents, .claude/agents).",
+					"No subagents found. Checked the configured agent directory plus project-local .pi/agents and .claude/agents.",
 					"error",
 				);
 				return;
@@ -1154,7 +1154,19 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 					return;
 				}
 
-				selectedAgent = resolvedAgent?.name ?? "worker";
+				const defaultAgent = loadSubagentConfig(ctx.cwd).defaultAgent;
+				selectedAgent = resolvedAgent?.name ?? defaultAgent;
+				if (!resolvedAgent && !agents.some((agent) => agent.name === defaultAgent)) {
+					const availableAgents = agents
+						.map((agent) => agent.name)
+						.sort()
+						.join(", ");
+					ctx.ui.notify(
+						`Configured defaultAgent "${defaultAgent}" was not found. Available agents: ${availableAgents}. Set subagent.defaultAgent in the global settings or defaultAgent in .pi/subagent.json.`,
+						"error",
+					);
+					return;
+				}
 				taskForDisplay = resolvedAgent ? input.slice(firstSpace + 1).trim() : input;
 
 				if (!taskForDisplay) {

@@ -7,8 +7,8 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { PendingCompletion } from "./types.js";
 
 export type PendingGroupScope = "batch" | "chain";
@@ -21,17 +21,22 @@ export interface PersistedPendingGroupCompletion {
 	pendingCompletion: PendingCompletion;
 }
 
-const SUBAGENT_STATE_DIR = path.join(os.homedir(), ".pi", "agent", "state");
-const PENDING_GROUPS_FILE = path.join(SUBAGENT_STATE_DIR, "subagent-pending-groups.json");
+function getStateDir(): string {
+	return path.join(getAgentDir(), "state");
+}
+
+function getPendingGroupsFile(): string {
+	return path.join(getStateDir(), "subagent-pending-groups.json");
+}
 
 function ensureStateDir(): void {
-	fs.mkdirSync(SUBAGENT_STATE_DIR, { recursive: true });
+	fs.mkdirSync(getStateDir(), { recursive: true });
 }
 
 function readPersistedEntries(): PersistedPendingGroupCompletion[] {
 	try {
-		if (!fs.existsSync(PENDING_GROUPS_FILE)) return [];
-		const raw = fs.readFileSync(PENDING_GROUPS_FILE, "utf-8");
+		if (!fs.existsSync(getPendingGroupsFile())) return [];
+		const raw = fs.readFileSync(getPendingGroupsFile(), "utf-8");
 		if (!raw.trim()) return [];
 		const parsed = JSON.parse(raw);
 		if (!Array.isArray(parsed)) return [];
@@ -53,7 +58,7 @@ function readPersistedEntries(): PersistedPendingGroupCompletion[] {
 
 function writePersistedEntries(entries: PersistedPendingGroupCompletion[]): void {
 	ensureStateDir();
-	fs.writeFileSync(PENDING_GROUPS_FILE, `${JSON.stringify(entries, null, 2)}\n`, "utf-8");
+	fs.writeFileSync(getPendingGroupsFile(), `${JSON.stringify(entries, null, 2)}\n`, "utf-8");
 }
 
 export function upsertPendingGroupCompletion(entry: PersistedPendingGroupCompletion): void {

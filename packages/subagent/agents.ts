@@ -3,9 +3,8 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import {
 	AGENT_THINKING_LEVELS,
 	type AgentThinkingLevel,
@@ -201,7 +200,7 @@ function findNearestClaudeAgentsDir(cwd: string): string | null {
 }
 
 export function discoverAgents(cwd: string): AgentDiscoveryResult {
-	const userDir = path.join(os.homedir(), ".pi", "agent", "agents");
+	const userDir = path.join(getAgentDir(), "agents");
 	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
 	const claudeAgentsDir = findNearestClaudeAgentsDir(cwd);
 

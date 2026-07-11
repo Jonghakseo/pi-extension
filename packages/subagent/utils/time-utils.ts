@@ -1,7 +1,9 @@
+// Vendored from shared personal-extension utilities as a self-contained copy.
+// Maintained independently within this package.
 /**
  * Shared time formatting helpers.
  *
- * Standard duration format: 시/분/초 (e.g. "1시간 2분 3초", "4분 5초", "12초").
+ * Standard duration format: h/m/s (e.g. "1h 2m 3s", "4m 5s", "12s").
  */
 
 // ─── Internal Helpers ────────────────────────────────────────────────────────
@@ -19,9 +21,9 @@ export function formatDuration(ms: number): string {
 	const minutes = Math.floor((totalSeconds % 3600) / 60);
 	const seconds = totalSeconds % 60;
 
-	if (hours > 0) return `${hours}시간 ${minutes}분 ${seconds}초`;
-	if (minutes > 0) return `${minutes}분 ${seconds}초`;
-	return `${seconds}초`;
+	if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+	if (minutes > 0) return `${minutes}m ${seconds}s`;
+	return `${seconds}s`;
 }
 
 export function formatDurationBetween(start: Date | number, end: Date | number): string {
