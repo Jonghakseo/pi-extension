@@ -62,8 +62,10 @@ subagent remove <runId|runId,runId|all>
 ## Slash commands and shortcuts
 
 - `/subagents` — list discovered agents and their settings.
-- `/sub:main [agent|alias|runId] <task>` — run or continue with main-session context.
-- `/sub:isolate [agent|alias|runId] <task>` — run or continue in a dedicated sub-session.
+- `/sub:main [agent|alias|runId] <task>` — start a new run with main-session context, or continue an existing run.
+- `/sub:isolate [agent|alias|runId] <task>` — start a new run in a dedicated sub-session, or continue an existing run.
+
+The context selection applies only when starting a new run. When a `runId` is supplied for continuation, both commands preserve that run's existing context mode and session.
 - `/sub:peek [runId]` — show the latest response; defaults to the latest run.
 - `/sub:open [runId]` — open session replay; defaults to the latest run.
 - `/sub:history` — show all run history, including removed runs.

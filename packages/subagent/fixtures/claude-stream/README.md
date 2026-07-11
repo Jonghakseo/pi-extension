@@ -28,4 +28,4 @@ Treat the raw `.ndjson` files in this directory as the parser source of truth fo
 
 This fixture set is a source of truth for the scenarios it actually contains: plain text, successful tool call flow, delayed tool completion flow, permission denial flow, and bare-mode auth failure.
 
-This fixture set is **not** currently a source of truth for abort semantics, non-zero-exit tool handling, fallback behavior, or other lifecycle outcomes that are not represented by the captured files above. Downstream work for T00d/T05 must use separate evidence for those cases unless new fixtures are added.
+This fixture set is **not** currently a source of truth for abort semantics, non-zero-exit tool handling, fallback behavior, or other lifecycle outcomes that are not represented by the captured files above. Use separate evidence for those cases unless new fixtures are added.
