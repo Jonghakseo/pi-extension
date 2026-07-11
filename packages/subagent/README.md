@@ -154,15 +154,15 @@ When an agent is omitted, launch commands use `defaultAgent`.
 
 | Shortcut | Behavior |
 | --- | --- |
-| `>> [agent|runId] <task>` | Visible run using main-session context |
-| `> [agent|runId] <task>` | Hidden run using main-session context; interactive UI only |
-| `>>> [agent|runId] <task>` | Legacy form of the hidden shortcut |
+| `>> [agent\|runId] <task>` | Visible run using main-session context |
+| `> [agent\|runId] <task>` | Hidden run using main-session context; interactive UI only |
+| `>>> [agent\|runId] <task>` | Legacy form of the hidden shortcut |
 | `#<runId> <task>` | Continue a run |
 | `>><symbol> <task>` | Visible run using the agent mapped in `symbolMap` |
 | `><symbol> <task>` | Hidden run using the mapped agent |
 | `>>><symbol> <task>` | Legacy hidden mapped-agent form |
 | `<>runId` | Compact form of `/sub:peek runId` |
-| `<< [runId|runId,runId]` | Abort selected running runs or clear selected finished runs; without arguments, abort the latest running run |
+| `<< [runId\|runId,runId]` | Abort selected running runs or clear selected finished runs; without arguments, abort the latest running run |
 | `<<< [all]` | Clear finished runs; use `all` to clear every run |
 
 Hidden runs do not add start or completion messages to the main transcript. Read their output with `/sub:peek`, `<>runId`, or `/sub:open`. A plain `>` shortcut requires a space before its task; configured symbol shortcuts do not.
