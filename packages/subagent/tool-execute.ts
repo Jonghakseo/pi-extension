@@ -50,6 +50,7 @@ import {
 	wrapTaskWithMainContext,
 	wrapTaskWithPipelineContext,
 } from "./session.js";
+import { formatStarterPackNotice, offerStarterPackIfEmpty } from "./starter-pack.js";
 import { type SubagentStore, updateRunFromResult } from "./store.js";
 import type {
 	BatchOrChainItem,
@@ -139,6 +140,7 @@ type SubagentToolExecuteContext = {
 	registerDispose?: (cb: () => void) => void;
 	ui?: {
 		setWidget: (...args: any[]) => void;
+		confirm?: (title: string, message: string) => Promise<boolean>;
 		notify?: (message: string, type?: "info" | "warning" | "error") => void;
 	};
 };
@@ -687,13 +689,15 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			};
 		}
 
-		const discovery = discoverAgents(ctx.cwd);
+		const starterPack = parsedCommand.type === "agents" ? await offerStarterPackIfEmpty(ctx) : undefined;
+		const discovery = starterPack?.discovery ?? discoverAgents(ctx.cwd);
 		const agents = discovery.agents;
 
 		if (parsedCommand.type === "agents") {
+			const starterPackNotice = starterPack ? formatStarterPackNotice(starterPack) : undefined;
 			if (agents.length === 0) {
 				return {
-					content: [{ type: "text", text: "No subagents found." }],
+					content: [{ type: "text", text: starterPackNotice ?? "No subagents found." }],
 					details: createEmptyDetails("single", false, discovery.projectAgentsDir),
 				};
 			}
@@ -707,7 +711,12 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			});
 
 			return {
-				content: [{ type: "text", text: `Available subagents\n\n${lines.join("\n")}` }],
+				content: [
+					{
+						type: "text",
+						text: `${starterPackNotice ? `${starterPackNotice}\n\n` : ""}Available subagents\n\n${lines.join("\n")}`,
+					},
+				],
 				details: createEmptyDetails("single", false, discovery.projectAgentsDir),
 			};
 		}

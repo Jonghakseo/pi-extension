@@ -19,7 +19,33 @@ pi install npm:@ryan_nookpi/pi-extension-subagent
 
 ## Quick start
 
-### 1. Create an agent
+### 1. Discover or seed agents
+
+Run this from the interactive pi UI:
+
+```text
+/subagents
+```
+
+If no agent definitions exist in any discovery location, the extension offers an optional starter pack containing:
+
+- Nine portable English agents: `browser`, `challenger`, `code-cleaner`, `reviewer`, `searcher`, `security-auditor`, `simplifier`, `verifier`, and `worker`
+- The `stress-interview` and `self-healing` skills, written in English and validated against the [Agent Skills specification](https://agentskills.io/specification)
+- Missing global `subagent` settings: `defaultAgent: "worker"`, `claudeRuntime: "cli"`, and symbol mappings for searcher, challenger, and browser
+
+Seeded agents intentionally omit model IDs and inherit the user's Pi model. Existing files and configured setting values are never overwritten. If the offer is declined, nothing is recorded or written, so the extension asks again the next time the list is still empty.
+
+Agents and subagent settings are available immediately after installation. Run `/reload` or start a new Pi session to activate the two newly copied skills. Headless sessions never install automatically; they return instructions to run `/subagents` interactively.
+
+The same offer is available from either agent-list tool:
+
+```json
+{ "command": "subagent agents" }
+```
+
+The separate `list-agents` tool behaves the same way. The `subagent ...` examples in this README are **tool command strings**, not terminal commands. Do not run them in Bash.
+
+### 2. Or create an agent manually
 
 Agents are Markdown files with YAML frontmatter. Create `~/.pi/agent/agents/worker.md` for a global agent, or `.pi/agents/worker.md` inside one project:
 
@@ -27,7 +53,6 @@ Agents are Markdown files with YAML frontmatter. Create `~/.pi/agent/agents/work
 ---
 name: worker
 description: Implements requested changes
-model: anthropic/claude-sonnet-4-6
 thinking: medium
 tools: read,bash,edit,write
 runtime: pi
@@ -44,22 +69,6 @@ Implement the requested changes and verify them.
 - `tools`: comma-separated tool names
 
 Omitted model, thinking, and tools values use that runtime's defaults.
-
-### 2. Confirm discovery
-
-From the interactive pi UI:
-
-```text
-/subagents
-```
-
-From an AI tool call, pass a command string to the `subagent` tool:
-
-```json
-{ "command": "subagent agents" }
-```
-
-The `subagent ...` examples in this README are **tool command strings**, not terminal commands. Do not run them in Bash.
 
 ### 3. Launch a run
 

@@ -53,6 +53,7 @@ import {
 	runSingleAgent,
 } from "./runner.js";
 import { buildMainContextText, makeSubagentSessionFile, wrapTaskWithMainContext } from "./session.js";
+import { formatStarterPackNotice, offerStarterPackIfEmpty } from "./starter-pack.js";
 import { type SubagentStore, truncateText, updateRunFromResult } from "./store.js";
 import { createSubagentToolExecute } from "./tool-execute.js";
 import { renderSubagentToolCall, renderSubagentToolResult } from "./tool-render.js";
@@ -897,12 +898,14 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 			"List available subagent definitions (name, source, model, thinking, tools, description). Useful before planning delegation.",
 		parameters: ListAgentsParams,
 		execute: async (_toolCallId, _params: Record<string, any>, _signal, _onUpdate, ctx) => {
-			const discovery = discoverAgents(ctx.cwd);
+			const starterPack = await offerStarterPackIfEmpty(ctx);
+			const discovery = starterPack.discovery;
 			const agents = discovery.agents;
+			const starterPackNotice = formatStarterPackNotice(starterPack);
 
 			if (agents.length === 0) {
 				return {
-					content: [{ type: "text", text: "No subagents found." }],
+					content: [{ type: "text", text: starterPackNotice ?? "No subagents found." }],
 					details: {
 						projectAgentsDir: discovery.projectAgentsDir,
 						agents: [],
@@ -919,7 +922,12 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 			});
 
 			return {
-				content: [{ type: "text", text: `Available subagents\n\n${lines.join("\n")}` }],
+				content: [
+					{
+						type: "text",
+						text: `${starterPackNotice ? `${starterPackNotice}\n\n` : ""}Available subagents\n\n${lines.join("\n")}`,
+					},
+				],
 				details: {
 					projectAgentsDir: discovery.projectAgentsDir,
 					agents: agents.map((agent) => ({
@@ -1579,15 +1587,20 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 	});
 
 	pi.registerCommand("subagents", {
-		description: "List available subagents and their model/thinking/tool settings",
+		description: "List available subagents and offer the starter pack when none are configured",
 		handler: async (_args, ctx) => {
 			captureSwitchSession(store, ctx);
-			const discovery = discoverAgents(ctx.cwd);
-			const agents = discovery.agents;
+			const starterPack = await offerStarterPackIfEmpty(ctx);
+			const agents = starterPack.discovery.agents;
+			const starterPackNotice = formatStarterPackNotice(starterPack);
 			if (agents.length === 0) {
-				ctx.ui.notify("No subagents found.", "warning");
+				ctx.ui.notify(
+					starterPackNotice ?? "No subagents found.",
+					starterPack.status === "failed" ? "error" : "warning",
+				);
 				return;
 			}
+			if (starterPackNotice) ctx.ui.notify(starterPackNotice, "info");
 
 			const lines = agents.map((a) => {
 				const tools = a.tools?.join(",") ?? "default";
