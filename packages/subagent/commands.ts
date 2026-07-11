@@ -1944,16 +1944,9 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 
 	// Only actual keyboard shortcuts appear in the /hotkeys Extensions section.
 	// NOTE: plain ">" is a real keybinding and hijacks editor text input,
-	// so hidden subagent prefixes are documented via footer/status hints instead.
+	// so the hidden subagent prefix is documented via footer/status hints instead.
 	pi.registerShortcut(">>" as any, {
 		description: "Run subagent task",
-		handler: async () => {
-			// Documentation-only entry.
-		},
-	});
-
-	pi.registerShortcut(">>>" as any, {
-		description: "Run hidden subagent (legacy alias, interactive UI only, supports symbols)",
 		handler: async () => {
 			// Documentation-only entry.
 		},
@@ -1965,19 +1958,18 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		}
 
 		const text = event.text ?? "";
-		if (!text.startsWith(">")) return { action: "continue" as const };
+		if (!text.startsWith(">") || text.startsWith(">>>")) return { action: "continue" as const };
 
 		const symbolMap = loadSubagentConfig(ctx.cwd).symbolMap;
-		const legacySymbol = text.length > 3 && text[3] !== " " ? symbolMap[text[3]] : undefined;
 		const hiddenSymbol = text.length > 1 && text[1] !== " " && text[1] !== "<" ? symbolMap[text[1]] : undefined;
-		const isLegacyHiddenShortcut = text === ">>>" || text.startsWith(">>> ") || Boolean(legacySymbol);
-		const isVisibleShortcut = text.startsWith(">>") && !isLegacyHiddenShortcut;
+		const isVisibleShortcut = text.startsWith(">>");
 		const isHiddenShortcut = !isVisibleShortcut && (text === ">" || text.startsWith("> ") || Boolean(hiddenSymbol));
-		if (!isLegacyHiddenShortcut && !isVisibleShortcut && !isHiddenShortcut) {
+		if (!isVisibleShortcut && !isHiddenShortcut) {
 			return { action: "continue" as const };
 		}
 
-		const handleHiddenShortcut = async (prefix: ">" | ">>>") => {
+		const handleHiddenShortcut = async () => {
+			const prefix = ">";
 			if (!ctx.hasUI) {
 				pi.sendMessage(
 					{
@@ -2021,12 +2013,8 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 			await subCommand.handler(forwardedArgs, ctx, true, true);
 		};
 
-		if (isLegacyHiddenShortcut) {
-			await handleHiddenShortcut(">>>");
-			return { action: "handled" as const };
-		}
 		if (isHiddenShortcut) {
-			await handleHiddenShortcut(">");
+			await handleHiddenShortcut();
 			return { action: "handled" as const };
 		}
 

@@ -156,7 +156,7 @@ describe("subagent input shortcuts", () => {
 		expect(mockRunSingleAgent).not.toHaveBeenCalled();
 	});
 
-	it("leaves ordinary Markdown blockquotes for the main agent", async () => {
+	it("leaves ordinary Markdown blockquotes and removed legacy prefixes for the main agent", async () => {
 		const { registerAll } = await import("./commands.ts");
 		const store = createStore();
 		const { pi, handlers } = createPi();
@@ -169,10 +169,12 @@ describe("subagent input shortcuts", () => {
 		};
 
 		const single = await dispatchInput(handlers, ">quoted context", ctx);
-		const legacy = await dispatchInput(handlers, ">>>quoted context", ctx);
+		const legacy = await dispatchInput(handlers, ">>> worker do hidden work", ctx);
+		const legacySymbol = await dispatchInput(handlers, ">>>? search this", ctx);
 
 		expect(single.action).toBe("continue");
 		expect(legacy.action).toBe("continue");
+		expect(legacySymbol.action).toBe("continue");
 		expect(mockRunSingleAgent).not.toHaveBeenCalled();
 	});
 
@@ -264,5 +266,6 @@ describe("subagent input shortcuts", () => {
 
 		const shortcuts = pi.registerShortcut.mock.calls.map(([shortcut]) => shortcut);
 		expect(shortcuts).not.toContain(">");
+		expect(shortcuts).not.toContain(">>>");
 	});
 });

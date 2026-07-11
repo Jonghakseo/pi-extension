@@ -62,7 +62,7 @@ describe("subagent constants", () => {
 
 	it("subagentFormatSymbolHints is the same function", () => {
 		expect(subagentFormatSymbolHints({})).toBe(formatSymbolHints({}));
-		expect(subagentFormatSymbolHints({ "?": "searcher" }, ">>>")).toBe(formatSymbolHints({ "?": "searcher" }, ">>>"));
+		expect(subagentFormatSymbolHints({ "?": "searcher" }, ">")).toBe(formatSymbolHints({ "?": "searcher" }, ">"));
 	});
 });
 

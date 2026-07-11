@@ -92,7 +92,7 @@ Project `.claude/agents` files are discovered recursively. Project `.pi/agents` 
 - `--isolated` starts a dedicated child session without copying the main conversation. It is the default for `subagent` tool launches.
 - `--main` adds selected main-session context to the child task.
 - `/sub:isolate` selects isolated context; `/sub:main` selects main context.
-- `>>`, `>`, and `>>>` use main-session context.
+- `>>` and `>` use main-session context.
 - Continuing a run preserves its original context mode and child session. Supplying `--main` or `--isolated` to `continue` does not retroactively change it.
 
 Pi replaces and invalidates extension runtimes during `/new`, `/resume`, `/fork`, and reload. Active child processes are therefore aborted during `session_shutdown`, and the old session records why they stopped. Wait for active runs before replacing the parent session. This follows pi's [official extension lifecycle guidance](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#long-lived-resources-and-shutdown).
@@ -156,11 +156,9 @@ When an agent is omitted, launch commands use `defaultAgent`.
 | --- | --- |
 | `>> [agent\|runId] <task>` | Visible run using main-session context |
 | `> [agent\|runId] <task>` | Hidden run using main-session context; interactive UI only |
-| `>>> [agent\|runId] <task>` | Legacy form of the hidden shortcut |
 | `#<runId> <task>` | Continue a run |
 | `>><symbol> <task>` | Visible run using the agent mapped in `symbolMap` |
 | `><symbol> <task>` | Hidden run using the mapped agent |
-| `>>><symbol> <task>` | Legacy hidden mapped-agent form |
 | `<>runId` | Compact form of `/sub:peek runId` |
 | `<< [runId\|runId,runId]` | Abort selected running runs or clear selected finished runs; without arguments, abort the latest running run |
 | `<<< [all]` | Clear finished runs; use `all` to clear every run |
@@ -225,7 +223,7 @@ Confirm the environment used to start pi has valid Anthropic authentication, suc
 
 ### Hidden shortcut produces no transcript message
 
-That is intentional. Hidden `>` and `>>>` runs are human-only UI jobs. Inspect them with `/sub:peek`, `<>runId`, or `/sub:open`.
+That is intentional. Hidden `>` runs are human-only UI jobs. Inspect them with `/sub:peek`, `<>runId`, or `/sub:open`.
 
 ## Security and trust boundary
 
