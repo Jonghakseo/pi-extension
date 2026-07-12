@@ -2,6 +2,8 @@
 
 Asynchronous subagent delegation for [pi](https://github.com/earendil-works/pi). Run specialist agents in dedicated child sessions, optionally pass selected main-session context, and receive results as follow-up messages.
 
+The primary interface is **CLI-style**: one `subagent` tool accepts a command string with verbs, options, and a `--` task separator, such as `subagent run worker --isolated -- review this change`. This provides one consistent grammar for single runs, continuation, parallel batches, sequential chains, inspection, and cleanup. These strings are tool input, not shell commands.
+
 > [!WARNING]
 > Subagents run headlessly without approval prompts. Claude-runtime agents use permission bypass, and pi-runtime agents can use every tool listed in their agent definition. This extension is not a sandbox. Use it only in trusted repositories with trusted prompts and agent definitions.
 
@@ -106,7 +108,9 @@ Project `.claude/agents` files are discovered recursively. Project `.pi/agents` 
 
 Pi replaces and invalidates extension runtimes during `/new`, `/resume`, `/fork`, and reload. Active child processes are therefore aborted during `session_shutdown`, and the old session records why they stopped. Wait for active runs before replacing the parent session. This follows pi's [official extension lifecycle guidance](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#long-lived-resources-and-shutdown).
 
-## Tool interface
+## CLI-style tool interface
+
+Instead of registering a separate tool for every operation, the extension exposes a compact CLI-style grammar through one `subagent` tool. The model passes the full command as the tool's `command` parameter; it must not invoke `subagent` from Bash or another shell.
 
 The extension registers two main-session tools:
 
