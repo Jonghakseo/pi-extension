@@ -20,7 +20,7 @@ export interface AgentAliasMatch<T extends AgentConfigLike = AgentConfigLike> {
 	ambiguousAgents: T[];
 }
 
-export const AGENT_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export const AGENT_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type AgentThinkingLevel = (typeof AGENT_THINKING_LEVELS)[number];
 
 // ── Constants ────────────────────────────────────────────────────────────────

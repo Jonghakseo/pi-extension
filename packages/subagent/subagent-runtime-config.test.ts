@@ -101,6 +101,31 @@ describe("runtime frontmatter parsing", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
+	it("accepts max thinking from frontmatter", () => {
+		const tmpDir = createTempAgentDir();
+		const agentsDir = path.join(tmpDir, ".pi", "agents");
+		fs.mkdirSync(agentsDir, { recursive: true });
+
+		writeAgentFile(
+			agentsDir,
+			"max-thinker.md",
+			[
+				"---",
+				"name: max-thinker",
+				"description: An agent that uses maximum reasoning",
+				"thinking: max",
+				"---",
+				"Think deeply.",
+			].join("\n"),
+		);
+
+		const result = discoverAgents(tmpDir);
+		const agent = result.agents.find((a) => a.name === "max-thinker");
+		expect(agent?.thinking).toBe("max");
+
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
 	it("treats unknown runtime values as 'pi'", () => {
 		const tmpDir = createTempAgentDir();
 		const agentsDir = path.join(tmpDir, ".pi", "agents");

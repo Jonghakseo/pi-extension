@@ -67,7 +67,7 @@ Implement the requested changes and verify them.
 
 - `runtime`: `pi` (default) or `claude`
 - `model`: runtime-compatible model ID
-- `thinking`: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`
+- `thinking`: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`
 - `tools`: comma-separated tool names
 
 Omitted model, thinking, and tools values use that runtime's defaults.
