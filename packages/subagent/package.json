@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-subagent",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Asynchronous subagent delegation for pi with run, batch, chain, and continuation workflows.",
 	"license": "MIT",
 	"repository": {
