@@ -39,6 +39,7 @@ function createInput(overrides: Partial<RenderFormInput> = {}): RenderFormInput 
 		currentTab: 0,
 		cursorIdx: 0,
 		otherMode: false,
+		dismissPending: false,
 		width: 80,
 		theme,
 		editorLines: ["editor line"],

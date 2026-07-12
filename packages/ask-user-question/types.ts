@@ -68,6 +68,7 @@ export interface EditorAdapter {
 	setText(text: string): void;
 	handleInput(data: string): void;
 	render(width: number): string[];
+	isShowingAutocomplete?(): boolean;
 }
 
 export interface RenderFormInput {
@@ -78,6 +79,7 @@ export interface RenderFormInput {
 	currentTab: number;
 	cursorIdx: number;
 	otherMode: boolean;
+	dismissPending: boolean;
 	width: number;
 	theme: RenderTheme;
 	editorLines: string[];

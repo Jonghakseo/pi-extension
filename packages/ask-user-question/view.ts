@@ -167,6 +167,12 @@ export function renderQuestion(input: RenderFormInput, add: (text: string) => vo
 	}
 }
 
+export function renderDismissNotice(input: RenderFormInput, add: (text: string) => void): void {
+	if (!input.dismissPending) return;
+	add("");
+	add(` ${input.theme.fg("warning", "저장되지 않은 응답이 있습니다. 취소하려면 Esc를 한 번 더 누르세요.")}`);
+}
+
 export function renderFooter(input: RenderFormInput, add: (text: string) => void): void {
 	const question = input.questions[input.currentTab];
 	if (!question) return;
@@ -202,6 +208,7 @@ export function renderForm(input: RenderFormInput): string[] {
 
 	if (input.questions.length > 1 && input.currentTab === input.questions.length) {
 		renderSubmitTab(input, add);
+		renderDismissNotice(input, add);
 		hr();
 		return lines;
 	}
@@ -213,6 +220,7 @@ export function renderForm(input: RenderFormInput): string[] {
 
 	renderQuestion(input, add, maxWidth);
 	renderFooter(input, add);
+	renderDismissNotice(input, add);
 	hr();
 	return lines;
 }

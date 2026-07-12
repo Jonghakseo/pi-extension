@@ -25,7 +25,7 @@ describe("ask-user-question extension", () => {
 		expect(buildRenderResultText({ content: [{ type: "text", text: "plain" }] }, theme)).toBe("plain");
 	});
 
-	it("returns errors when UI is unavailable or no questions are provided", async () => {
+	it("UI가 없으면 질문 목록을 담은 비대화형 fallback 응답을 반환한다", async () => {
 		const apiMock = createExtensionApiMock();
 		askUserQuestionExtension(apiMock.api);
 		const tool = apiMock.getTool("ask_user_question");
@@ -33,11 +33,34 @@ describe("ask-user-question extension", () => {
 
 		const noUi = await tool.execute(
 			"call-1",
-			{ title: "Title", questions: [{ id: "x", type: "text", prompt: "Q" }] },
+			{
+				title: "Title",
+				questions: [
+					{ id: "env", type: "radio", prompt: "환경?", options: [{ value: "prod", label: "프로덕션" }] },
+					{ id: "note", type: "text", prompt: "메모", placeholder: "선택 사항" },
+				],
+			},
 			undefined,
 			undefined,
 			{ hasUI: false } as unknown as ExtensionContext,
 		);
+
+		const text = (noUi as { content: { text: string }[] }).content[0].text;
+		expect(text).toContain("사용자 입력 필요");
+		expect(text).toContain("1. Q1: 환경? [단일 선택]");
+		expect(text).toContain("- 프로덕션 [prod]");
+		expect(text).toContain("기타 (직접 입력)");
+		expect(text).toContain("2. Q2: 메모 [자유 입력]");
+		expect(noUi).toMatchObject({ details: { cancelled: true, answers: [] } });
+		expect((noUi as { details: { questions: unknown[] } }).details.questions).toHaveLength(2);
+	});
+
+	it("returns errors when no questions are provided", async () => {
+		const apiMock = createExtensionApiMock();
+		askUserQuestionExtension(apiMock.api);
+		const tool = apiMock.getTool("ask_user_question");
+		if (!tool.execute) throw new Error("execute is missing");
+
 		const noQuestions = await tool.execute("call-2", { title: "Title", questions: [] }, undefined, undefined, {
 			hasUI: true,
 			ui: { custom: vi.fn() },
@@ -50,9 +73,6 @@ describe("ask-user-question extension", () => {
 			{ hasUI: true, ui: { custom: vi.fn() } } as unknown as ExtensionContext,
 		);
 
-		expect(noUi).toMatchObject({
-			content: [{ type: "text", text: "오류: UI를 사용할 수 없습니다. 현재 비대화형 모드에서 실행 중입니다." }],
-		});
 		expect(noQuestions).toMatchObject({ content: [{ type: "text", text: "오류: 질문이 제공되지 않았습니다." }] });
 		expect(invalidQuestions).toMatchObject({ content: [{ type: "text", text: "오류: 질문이 제공되지 않았습니다." }] });
 	});

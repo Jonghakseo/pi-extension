@@ -7,6 +7,7 @@ import type { EditorAdapter, FormResult, RenderTheme } from "./types.ts";
 class FakeEditor implements EditorAdapter {
 	text = "";
 	onSubmit?: (value: string) => void;
+	isShowingAutocomplete?: () => boolean;
 	handledInputs: string[] = [];
 
 	getText(): string {
@@ -133,6 +134,8 @@ describe("ask-user-question/controller", () => {
 
 		setup.controller.handleInput("\u001b[Z");
 		expect(setup.controller.getState().currentTab).toBe(0);
+		setup.controller.handleInput("\u001b");
+		expect(setup.done).not.toHaveBeenCalled();
 		setup.controller.handleInput("\u001b");
 		expect(setup.done).toHaveBeenCalledWith({
 			title: "Title",
@@ -289,5 +292,108 @@ describe("ask-user-question/controller", () => {
 		otherEscape.controller.handleInput("\u001b");
 		expect(otherEscape.controller.getState()).toMatchObject({ otherMode: false, otherQuestionId: null });
 		expect(otherEscape.editor.getText()).toBe("");
+	});
+
+	it("입력이 없으면 Esc 한 번에 바로 취소한다", () => {
+		const clean = createController([
+			{ id: "radio", type: "radio", prompt: "Pick one", options: [{ value: "a", label: "Alpha" }] },
+		]);
+		clean.controller.handleInput("\u001b");
+		expect(clean.done).toHaveBeenCalledWith(expect.objectContaining({ cancelled: true }));
+	});
+
+	it("응답이 있으면 Esc 두 번을 눌러야 취소된다", () => {
+		const guarded = createController([
+			{
+				id: "check",
+				type: "checkbox",
+				prompt: "Pick many",
+				options: [{ value: "a", label: "Alpha" }],
+			},
+		]);
+		guarded.controller.handleInput(" ");
+		guarded.controller.handleInput("\u001b");
+		expect(guarded.done).not.toHaveBeenCalled();
+		expect(guarded.controller.getState().dismissPending).toBe(true);
+		expect(guarded.controller.render(80).join("\n")).toContain("저장되지 않은 응답이 있습니다");
+		guarded.controller.handleInput("\u001b");
+		expect(guarded.done).toHaveBeenCalledWith(expect.objectContaining({ cancelled: true }));
+	});
+
+	it("Esc 확인 대기 중 다른 키를 누르면 취소 확인이 해제된다", () => {
+		const guarded = createController([
+			{
+				id: "check",
+				type: "checkbox",
+				prompt: "Pick many",
+				options: [
+					{ value: "a", label: "Alpha" },
+					{ value: "b", label: "Beta" },
+				],
+			},
+		]);
+		guarded.controller.handleInput(" ");
+		guarded.controller.handleInput("\u001b");
+		expect(guarded.controller.getState().dismissPending).toBe(true);
+		guarded.controller.handleInput("\u001b[B");
+		expect(guarded.controller.getState().dismissPending).toBe(false);
+		expect(guarded.done).not.toHaveBeenCalled();
+		guarded.controller.handleInput("\u001b");
+		expect(guarded.controller.getState().dismissPending).toBe(true);
+	});
+
+	it("텍스트 입력 후 Esc는 dismiss guard를 거친다", () => {
+		const typed = createController([{ id: "text", type: "text", prompt: "Explain" }]);
+		typed.controller.handleInput("h");
+		typed.controller.handleInput("\u001b");
+		expect(typed.done).not.toHaveBeenCalled();
+		typed.controller.handleInput("\u001b");
+		expect(typed.done).toHaveBeenCalledWith(expect.objectContaining({ cancelled: true }));
+	});
+
+	it("커서 이동만으로는 dirty가 되지 않는다", () => {
+		const moved = createController([{ id: "text", type: "text", prompt: "Explain" }]);
+		moved.controller.handleInput("\u001b[A");
+		moved.controller.handleInput("\u001b");
+		expect(moved.done).toHaveBeenCalledWith(expect.objectContaining({ cancelled: true }));
+	});
+
+	it("공백만 제출된 onSubmit은 dirty를 설정하지 않는다", () => {
+		const blank = createController([{ id: "text", type: "text", prompt: "Explain", required: false }]);
+		blank.editor.onSubmit?.("   ");
+		expect(blank.done).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cancelled: false,
+				answers: [{ id: "text", type: "text", value: "", wasCustom: true }],
+			}),
+		);
+	});
+
+	it("자동완성 팝업이 열려 있으면 키 입력을 에디터로 위임한다", () => {
+		const withAutocomplete = createController([{ id: "text", type: "text", prompt: "Explain" }]);
+		withAutocomplete.editor.isShowingAutocomplete = () => true;
+		withAutocomplete.controller.handleInput("\r");
+		expect(withAutocomplete.done).not.toHaveBeenCalled();
+		expect(withAutocomplete.editor.handledInputs).toContain("\r");
+		withAutocomplete.controller.handleInput("\u001b");
+		expect(withAutocomplete.done).not.toHaveBeenCalled();
+		expect(withAutocomplete.editor.handledInputs).toContain("\u001b");
+	});
+
+	it("기타 입력 중 자동완성 팝업이 열려 있으면 키 입력을 에디터로 위임한다", () => {
+		const other = createController([
+			{ id: "radio", type: "radio", prompt: "Pick one", options: [{ value: "a", label: "Alpha" }] },
+		]);
+		other.controller.handleInput("\u001b[B");
+		other.controller.handleInput("\r");
+		expect(other.controller.getState().otherMode).toBe(true);
+		other.editor.isShowingAutocomplete = () => true;
+		other.controller.handleInput("\r");
+		expect(other.controller.getState().otherMode).toBe(true);
+		expect(other.editor.handledInputs).toContain("\r");
+		other.editor.isShowingAutocomplete = () => false;
+		other.controller.handleInput("\u001b");
+		expect(other.controller.getState().otherMode).toBe(false);
+		expect(other.done).not.toHaveBeenCalled();
 	});
 });

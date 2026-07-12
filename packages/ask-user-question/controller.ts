@@ -13,6 +13,7 @@ export interface FormController {
 		cursorIdx: number;
 		otherMode: boolean;
 		otherQuestionId: string | null;
+		dismissPending: boolean;
 	};
 }
 
@@ -36,6 +37,8 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 	let cursorIdx = 0;
 	let otherMode = false;
 	let otherQuestionId: string | null = null;
+	let dirty = false;
+	let dismissPending = false;
 	let cachedLines: string[] | undefined;
 	let cachedWidth: number | undefined;
 
@@ -85,6 +88,22 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 		});
 	}
 
+	function requestCancel(): void {
+		if (dirty && !dismissPending) {
+			dismissPending = true;
+			refresh();
+			return;
+		}
+		finish(true);
+	}
+
+	function forwardEditorInput(data: string): void {
+		const before = editor.getText();
+		editor.handleInput(data);
+		if (editor.getText() !== before) dirty = true;
+		refresh();
+	}
+
 	function advanceTab(): void {
 		if (!isMulti) {
 			finish(false);
@@ -95,6 +114,7 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 
 	editor.onSubmit = (value) => {
 		const trimmed = value.trim();
+		if (trimmed) dirty = true;
 		if (otherMode && otherQuestionId) {
 			saveOtherAnswer(answerState, questions, otherQuestionId, trimmed);
 			otherMode = false;
@@ -128,6 +148,7 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 				currentTab,
 				cursorIdx,
 				otherMode,
+				dismissPending,
 				width,
 				theme,
 				editorLines: editor.render(Math.min(width, 120) - (otherMode ? 6 : 4)),
@@ -140,8 +161,18 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 			cachedWidth = undefined;
 		},
 		handleInput(data) {
+			const isEscape = matchesKey(data, Key.escape);
+			if (dismissPending && !isEscape) {
+				dismissPending = false;
+				refresh();
+			}
+
 			if (otherMode) {
-				if (matchesKey(data, Key.escape)) {
+				if (editor.isShowingAutocomplete?.()) {
+					forwardEditorInput(data);
+					return;
+				}
+				if (isEscape) {
 					otherMode = false;
 					otherQuestionId = null;
 					editor.setText("");
@@ -158,13 +189,16 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 					switchTab(currentTab + (matchesKey(data, Key.shift("tab")) ? -1 : 1));
 					return;
 				}
-				editor.handleInput(data);
-				refresh();
+				forwardEditorInput(data);
 				return;
 			}
 
 			const question = getCurrentQuestion();
 			if (question?.type === "text") {
+				if (editor.isShowingAutocomplete?.()) {
+					forwardEditorInput(data);
+					return;
+				}
 				if (matchesKey(data, Key.enter)) {
 					saveCurrentTextQuestion();
 					advanceTab();
@@ -175,12 +209,11 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 					switchTab(currentTab + (matchesKey(data, Key.shift("tab")) ? -1 : 1));
 					return;
 				}
-				if (matchesKey(data, Key.escape)) {
-					finish(true);
+				if (isEscape) {
+					requestCancel();
 					return;
 				}
-				editor.handleInput(data);
-				refresh();
+				forwardEditorInput(data);
 				return;
 			}
 
@@ -197,8 +230,8 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 					switchTab(currentTab - 1);
 					return;
 				}
-				if (matchesKey(data, Key.escape)) {
-					finish(true);
+				if (isEscape) {
+					requestCancel();
 					return;
 				}
 				return;
@@ -228,8 +261,8 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 				refresh();
 				return;
 			}
-			if (matchesKey(data, Key.escape)) {
-				finish(true);
+			if (isEscape) {
+				requestCancel();
 				return;
 			}
 
@@ -246,6 +279,7 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 
 				const option = question.options[cursorIdx];
 				if (option) {
+					dirty = true;
 					answerState.radioAnswers.set(question.id, { value: option.value, label: option.label, wasCustom: false });
 					advanceTab();
 				}
@@ -264,6 +298,7 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 
 				const option = question.options[cursorIdx];
 				if (option) {
+					dirty = true;
 					const selected = answerState.checkAnswers.get(question.id) ?? new Set<string>();
 					if (selected.has(option.value)) selected.delete(option.value);
 					else selected.add(option.value);
@@ -278,7 +313,7 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 			}
 		},
 		getState() {
-			return { currentTab, cursorIdx, otherMode, otherQuestionId };
+			return { currentTab, cursorIdx, otherMode, otherQuestionId, dismissPending };
 		},
 	};
 }

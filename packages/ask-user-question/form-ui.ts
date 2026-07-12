@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Editor, type EditorTheme } from "@earendil-works/pi-tui";
 
+import { createFileAutocompleteProvider } from "./autocomplete.ts";
 import { createFormController } from "./controller.ts";
 import { createAnswerState } from "./state.ts";
 import type { Answer, FormResult, NormalizedQuestion, RenderTheme } from "./types.ts";
@@ -117,12 +118,14 @@ export async function runAskUserQuestionForm(
 	}
 
 	return ctx.ui.custom<FormResult>((tui, theme, _keybindings, done) => {
+		const editor = new Editor(tui, createEditorTheme(theme));
+		editor.setAutocompleteProvider(createFileAutocompleteProvider(ctx.cwd));
 		return createFormController({
 			title: params.title,
 			description: params.description,
 			questions,
 			answerState: createAnswerState(questions),
-			editor: new Editor(tui, createEditorTheme(theme)),
+			editor,
 			theme,
 			requestRender: () => tui.requestRender(),
 			done,

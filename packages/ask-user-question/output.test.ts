@@ -5,6 +5,7 @@ import {
 	buildRenderResultText,
 	errorResult,
 	formatResultContent,
+	nonInteractiveResult,
 	renderCall,
 	renderResult,
 } from "./output.ts";
@@ -98,5 +99,54 @@ describe("ask-user-question/output", () => {
 			),
 		).toBe("✓ Two: solo");
 		expect(renderResult({ details: formResult }, theme)).toBeTruthy();
+	});
+
+	it("nonInteractiveResult는 질문 목록을 텍스트로 포함한다", () => {
+		const result = nonInteractiveResult("배포 확인", [
+			{
+				id: "env",
+				type: "radio",
+				prompt: "어느 환경?",
+				label: "Q1",
+				options: [{ value: "prod", label: "프로덕션", description: "운영" }],
+				allowOther: true,
+				required: true,
+			},
+			{
+				id: "targets",
+				type: "checkbox",
+				prompt: "반영 항목?",
+				label: "Q2",
+				options: [{ value: "web", label: "웹" }],
+				allowOther: false,
+				required: true,
+			},
+			{
+				id: "note",
+				type: "text",
+				prompt: "메모",
+				label: "Q3",
+				options: [],
+				allowOther: false,
+				required: false,
+				placeholder: "선택 사항",
+			},
+		]);
+
+		const text = result.content[0].text;
+		expect(text).toContain("사용자 입력 필요");
+		expect(text).toContain("제목: 배포 확인");
+		expect(text).toContain("1. Q1: 어느 환경? [단일 선택]");
+		expect(text).toContain("- 프로덕션 [prod] — 운영");
+		expect(text).toContain("기타 (직접 입력)");
+		expect(text).toContain("2. Q2: 반영 항목? [복수 선택]");
+		expect(text).toContain("3. Q3: 메모 [자유 입력]");
+		expect(text).toContain("(선택 사항)");
+		expect(result.details).toMatchObject({ title: "배포 확인", cancelled: true, answers: [] });
+		expect(result.details.questions).toHaveLength(3);
+
+		const untitled = nonInteractiveResult(undefined, []);
+		expect(untitled.content[0].text).not.toContain("제목:");
+		expect(untitled.details.title).toBeUndefined();
 	});
 });
