@@ -2226,83 +2226,90 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		ctx.ui.notify(parts.join(", ") || "Nothing to do.", parts.length ? (aborted ? "warning" : "info") : "info");
 		return { action: "handled" as const };
 	});
+}
 
-	// ── onTerminalInput hack: auto-redirect <>7 to /sub:peek 7 ───────────
-	let unsubTerminalInput: (() => void) | null = null;
+// ── onTerminalInput hack: auto-redirect <>7 to /sub:peek 7 ───────────
+let unsubTerminalInput: (() => void) | null = null;
 
-	function registerTerminalInputRedirect(ctx: any): void {
-		// Unsubscribe previous listener to avoid duplicates on session change.
-		unsubTerminalInput?.();
-		unsubTerminalInput = null;
+function registerTerminalInputRedirect(ctx: any): void {
+	// Unsubscribe previous listener to avoid duplicates on session change.
+	unsubTerminalInput?.();
+	unsubTerminalInput = null;
 
-		unsubTerminalInput = ctx.ui.onTerminalInput((data: string) => {
-			// Only intercept Enter key (all terminal variants).
-			if (!matchesKey(data, "enter")) return undefined;
+	unsubTerminalInput = ctx.ui.onTerminalInput((data: string) => {
+		// Only intercept Enter key (all terminal variants).
+		if (!matchesKey(data, "enter")) return undefined;
 
-			const editorText = (ctx.ui.getEditorText() ?? "").trim();
+		const editorText = (ctx.ui.getEditorText() ?? "").trim();
 
-			// <>7  →  /sub:peek 7
-			const compactPeekMatch = /^<>(\d+)$/.exec(editorText);
-			if (compactPeekMatch?.[1]) {
-				ctx.ui.setEditorText(`/sub:peek ${compactPeekMatch[1]}`);
-				return undefined; // let Enter proceed with rewritten text
+		// <>7  →  /sub:peek 7
+		const compactPeekMatch = /^<>(\d+)$/.exec(editorText);
+		if (compactPeekMatch?.[1]) {
+			ctx.ui.setEditorText(`/sub:peek ${compactPeekMatch[1]}`);
+			return undefined; // let Enter proceed with rewritten text
+		}
+
+		return undefined;
+	});
+}
+
+// ── Persona injection for sub-trans child sessions ──────────────────
+// When the user switches into a subagent session via <> / /sub:trans
+// and sends normal chat prompts, prepend the subagent's system prompt
+// so the main agent responds with that persona.
+const PERSONA_MARKER = "<!-- subagent-persona-injected -->";
+
+/** before_agent_start handler; index.ts registers the wrapper that awaits the lazy core. */
+export async function handleBeforeAgentStart(
+	event: { systemPrompt: string },
+	ctx: ExtensionContext,
+	store: SubagentStore,
+): Promise<{ systemPrompt: string } | undefined> {
+	// Skip if persona marker already present (avoid double-inject)
+	if (event.systemPrompt.includes(PERSONA_MARKER)) return;
+
+	// Find latest PARENT_ENTRY_TYPE entry to determine if this is a sub-trans child session
+	let latestEntry: any = null;
+	try {
+		const entries = ctx.sessionManager?.getEntries?.() ?? [];
+		for (const entry of entries) {
+			if ((entry as any).type === "custom" && (entry as any).customType === PARENT_ENTRY_TYPE) {
+				latestEntry = entry;
 			}
-
-			return undefined;
-		});
+		}
+	} catch {
+		return;
 	}
 
-	// ── Persona injection for sub-trans child sessions ──────────────────
-	// When the user switches into a subagent session via <> / /sub:trans
-	// and sends normal chat prompts, prepend the subagent's system prompt
-	// so the main agent responds with that persona.
-	const PERSONA_MARKER = "<!-- subagent-persona-injected -->";
+	if (!latestEntry?.data) return;
 
-	pi.on("before_agent_start", async (event, ctx) => {
-		// Skip if persona marker already present (avoid double-inject)
-		if (event.systemPrompt.includes(PERSONA_MARKER)) return;
+	// Resolve agent name: data.agent (new entries) or fallback via runId (legacy entries)
+	let agentName: string | undefined = latestEntry.data.agent;
+	if (!agentName && latestEntry.data.runId != null) {
+		agentName = store.commandRuns.get(latestEntry.data.runId)?.agent;
+	}
+	if (!agentName) return;
 
-		// Find latest PARENT_ENTRY_TYPE entry to determine if this is a sub-trans child session
-		let latestEntry: any = null;
-		try {
-			const entries = ctx.sessionManager?.getEntries?.() ?? [];
-			for (const entry of entries) {
-				if ((entry as any).type === "custom" && (entry as any).customType === PARENT_ENTRY_TYPE) {
-					latestEntry = entry;
-				}
-			}
-		} catch {
-			return;
-		}
+	// Discover agents and find exact match
+	const discovery = discoverAgents(ctx.cwd);
+	const agentConfig = discovery.agents.find((a) => a.name.toLowerCase() === agentName?.toLowerCase());
+	if (!agentConfig?.systemPrompt?.trim()) return;
 
-		if (!latestEntry?.data) return;
+	// Prepend persona block with marker
+	const personaBlock = `${PERSONA_MARKER}\n${agentConfig.systemPrompt}`;
+	return {
+		systemPrompt: `${personaBlock}\n\n${event.systemPrompt}`,
+	};
+}
 
-		// Resolve agent name: data.agent (new entries) or fallback via runId (legacy entries)
-		let agentName: string | undefined = latestEntry.data.agent;
-		if (!agentName && latestEntry.data.runId != null) {
-			agentName = store.commandRuns.get(latestEntry.data.runId)?.agent;
-		}
-		if (!agentName) return;
+/** session_start handler; index.ts invokes this once the lazy core is loaded. */
+export function handleSessionStart(pi: ExtensionAPI, store: SubagentStore, ctx: ExtensionContext): void {
+	restoreRunsFromSession(store, ctx, pi);
+	registerTerminalInputRedirect(ctx);
+}
 
-		// Discover agents and find exact match
-		const discovery = discoverAgents(ctx.cwd);
-		const agentConfig = discovery.agents.find((a) => a.name.toLowerCase() === agentName?.toLowerCase());
-		if (!agentConfig?.systemPrompt?.trim()) return;
-
-		// Prepend persona block with marker
-		const personaBlock = `${PERSONA_MARKER}\n${agentConfig.systemPrompt}`;
-		return {
-			systemPrompt: `${personaBlock}\n\n${event.systemPrompt}`,
-		};
-	});
-
-	pi.on("session_start", async (_event, ctx) => {
-		restoreRunsFromSession(store, ctx, pi);
-		registerTerminalInputRedirect(ctx);
-	});
-
-	pi.on("session_shutdown", () => {
-		unsubTerminalInput?.();
-		unsubTerminalInput = null;
-	});
+/** session_shutdown handler; index.ts invokes this after shutting down runs. */
+export function handleSessionShutdown(): void {
+	unsubTerminalInput?.();
+	unsubTerminalInput = null;
 }

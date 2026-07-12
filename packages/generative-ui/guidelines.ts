@@ -791,4 +791,7 @@ export function getGuidelines(modules: string[]): string {
 	return `${content}\n`;
 }
 
-export const AVAILABLE_MODULES = Object.keys(MODULE_SECTIONS);
+export { AVAILABLE_MODULES } from "./modules.js";
+
+/** Test hook: guards against drift between modules.ts and MODULE_SECTIONS. */
+export const MODULE_SECTION_KEYS = Object.keys(MODULE_SECTIONS);

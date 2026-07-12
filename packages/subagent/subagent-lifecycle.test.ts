@@ -1,6 +1,7 @@
 /** biome-ignore-all lint/suspicious/noExplicitAny: tests use lightweight runtime-shaped fixtures and mocks. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import subagentExtension, { shutdownSubagentRuns } from "./index.ts";
+import subagentExtension from "./index.ts";
+import { shutdownSubagentRuns } from "./lifecycle.ts";
 import { createStore } from "./store.ts";
 import type { CommandRunState } from "./types.ts";
 
@@ -47,6 +48,9 @@ describe("subagent extension lifecycle", () => {
 		const { pi, handlers } = createPi();
 		subagentExtension(pi as never);
 
+		// Factory schedules one deferred background-load timer; fire it.
+		expect(vi.getTimerCount()).toBe(1);
+		await vi.advanceTimersByTimeAsync(0);
 		expect(vi.getTimerCount()).toBe(0);
 
 		const unsubscribeTerminalInput = vi.fn();

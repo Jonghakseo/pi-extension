@@ -4,8 +4,8 @@ import type { ExtensionAPI, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { AVAILABLE_MODULES, getGuidelines } from "./guidelines.js";
 import { escapeJS, shellHTML, wrapHTML } from "./html-utils.js";
+import { AVAILABLE_MODULES } from "./modules.js";
 
 interface WidgetHistoryEntry {
 	title: string;
@@ -197,6 +197,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params) {
 			const modules = params.modules.filter((module): module is string => typeof module === "string");
+			const { getGuidelines } = await import("./guidelines.js");
 			const content = getGuidelines(modules);
 			return {
 				content: [{ type: "text" as const, text: content }],

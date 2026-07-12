@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createExtensionApiMock } from "../../tests/mock-extension-api.ts";
-import { AVAILABLE_MODULES, getGuidelines } from "./guidelines.ts";
+import { AVAILABLE_MODULES, getGuidelines, MODULE_SECTION_KEYS } from "./guidelines.ts";
 import { escapeJS, shellHTML, wrapHTML } from "./html-utils.ts";
 import generativeUi, { shouldApplyFinalStreamingHTML } from "./index.ts";
 
 describe("generative-ui helpers", () => {
+	it("keeps modules.ts in sync with MODULE_SECTIONS", () => {
+		expect([...AVAILABLE_MODULES].sort()).toEqual([...MODULE_SECTION_KEYS].sort());
+	});
+
 	it("returns guideline content for requested modules", () => {
 		const guidelines = getGuidelines([AVAILABLE_MODULES[0], AVAILABLE_MODULES[1] ?? AVAILABLE_MODULES[0]]);
 		expect(guidelines).toContain("Imagine — Visual Creation Suite");

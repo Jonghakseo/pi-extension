@@ -9,183 +9,86 @@
  * Uses JSON mode to capture structured output from subagents.
  *
  * Architecture:
- *   types.ts    — Type definitions, interfaces, Typebox schemas
- *   store.ts    — Shared state (SubagentStore) and state-mutation helpers
- *   format.ts   — Token/usage/tool-call formatting utilities
- *   session.ts  — Session file management and context helpers
- *   runner.ts   — Subagent process execution, agent matching, concurrency
- *   replay.ts   — Session replay viewer (TUI overlay)
- *   widget.ts   — Run status widget (above-editor display)
- *   commands.ts — Tool handler, slash-commands, event handlers
- *   index.ts    — Orchestrator (this file)
+ *   types.ts     — Type definitions, interfaces, Typebox schemas
+ *   store.ts     — Shared state (SubagentStore) and state-mutation helpers
+ *   format.ts    — Token/usage/tool-call formatting utilities
+ *   session.ts   — Session file management and context helpers
+ *   runner.ts    — Subagent process execution, agent matching, concurrency
+ *   replay.ts    — Session replay viewer (TUI overlay)
+ *   widget.ts    — Run status widget (above-editor display)
+ *   commands.ts  — Tool handler, slash-commands, event handlers
+ *   lifecycle.ts — Hang detection sweeps and shutdown cleanup
+ *   index.ts     — Thin boot orchestrator (this file)
+ *
+ * Boot strategy: this entrypoint imports only constants and registers thin
+ * event wrappers, then loads the heavy module graph lazily in the background.
+ * before_agent_start awaits the lazy core so tools (subagent, list-agents,
+ * ask_master) are always registered before the first agent turn — including
+ * headless (`pi -p`) runs.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { cleanupPixelTimer } from "./above-widget.js";
-import { registerAll } from "./commands.js";
-import { HANG_CHECK_INTERVAL_MS, HANG_TIMEOUT_MS } from "./constants.js";
-import { registerAskMasterTool } from "./escalation.js";
-import { getSessionFileMtimeMs, readPersistedSessionSnapshot } from "./persisted-session.js";
-import { getLastNonEmptyLine } from "./runner.js";
-import { createStore, type SubagentStore } from "./store.js";
-import type { CommandRunState } from "./types.js";
-import { cleanupCommandRunsWidgetTimer, updateCommandRunsWidget } from "./widget.js";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { HANG_CHECK_INTERVAL_MS } from "./constants.js";
 
-function reconcileRunWithPersistedSession(run: CommandRunState): void {
-	if (!run.sessionFile) return;
-
-	const mtimeMs = getSessionFileMtimeMs(run.sessionFile);
-	if (mtimeMs && mtimeMs > run.lastActivityAt) {
-		run.lastActivityAt = mtimeMs;
-	}
-
-	const snapshot = readPersistedSessionSnapshot(run.sessionFile, {
-		startOffset: run.persistedSessionBaseOffset,
-	});
-	if (snapshot.latestActivityAt && snapshot.latestActivityAt > run.lastActivityAt) {
-		run.lastActivityAt = snapshot.latestActivityAt;
-	}
-	if (!snapshot.isTerminal) return;
-
-	const exitCode =
-		snapshot.completionMarker?.exitCode ??
-		(snapshot.terminalStopReason === "error" || snapshot.terminalStopReason === "aborted" ? 1 : 0);
-	run.status = exitCode === 0 ? "done" : "error";
-	if (snapshot.finalOutput) {
-		run.lastOutput = snapshot.finalOutput;
-		run.lastLine = getLastNonEmptyLine(snapshot.finalOutput) || run.lastLine;
-	}
-	if (snapshot.latestActivityAt) {
-		run.elapsedMs = Math.max(run.elapsedMs, snapshot.latestActivityAt - run.startedAt);
-	}
-}
-
-/**
- * Abort all session-scoped child processes before Pi invalidates this
- * extension runtime. A non-triggering failure entry is persisted so returning
- * to the old session explains why the run stopped.
- */
-type SessionShutdownReason = "quit" | "reload" | "new" | "resume" | "fork";
-
-export function shutdownSubagentRuns(store: SubagentStore, pi: ExtensionAPI, reason: SessionShutdownReason): void {
-	if (store.disposed) return;
-	store.disposed = true;
-
-	const activeRuns = new Map<number, CommandRunState>();
-	for (const [runId, run] of store.commandRuns) activeRuns.set(runId, run);
-	for (const [runId, entry] of store.globalLiveRuns) activeRuns.set(runId, entry.runState);
-
-	for (const [runId, run] of activeRuns) {
-		if (run.status !== "running") continue;
-		const message = `Aborted because the parent pi session ${reason} is shutting down.`;
-		run.status = "error";
-		run.elapsedMs = Date.now() - run.startedAt;
-		run.lastActivityAt = Date.now();
-		run.lastLine = message;
-		run.lastOutput = message;
-		run.removed = true;
-
-		const controller = run.abortController ?? store.globalLiveRuns.get(runId)?.abortController;
-		controller?.abort();
-		run.abortController = undefined;
-
-		if (run.deliveryMode === "humanOnly") continue;
-		try {
-			pi.sendMessage(
-				{
-					customType: run.source === "tool" ? "subagent-tool" : "subagent-command",
-					content: `[subagent:${run.agent}#${runId}] failed\n\n${message}`,
-					display: false,
-					details: {
-						runId,
-						agent: run.agent,
-						task: run.task,
-						displayTask: run.displayTask,
-						status: "error",
-						error: message,
-						startedAt: run.startedAt,
-						elapsedMs: run.elapsedMs,
-						lastActivityAt: run.lastActivityAt,
-						sessionFile: run.sessionFile,
-					},
-				},
-				{ deliverAs: "followUp", triggerTurn: false },
-			);
-		} catch {
-			// The runtime may already be closing; aborting the child remains the priority.
-		}
-	}
-
-	store.globalLiveRuns.clear();
-	store.batchGroups.clear();
-	store.pipelines.clear();
-	store.recentLaunchTimestamps.clear();
-	store.commandRuns.clear();
-	store.commandWidgetCtx = null;
-	store.pixelWidgetCtx = null;
-	cleanupCommandRunsWidgetTimer();
-}
-
-/**
- * Sweep active runs for inactivity. The normal run finalizer owns completion
- * delivery so an auto-abort cannot emit two follow-up messages.
- */
-export function checkForHungRuns(store: SubagentStore, _pi: ExtensionAPI): void {
-	if (store.disposed) return;
-	const now = Date.now();
-	const processed = new Set<number>();
-
-	function tryAbort(runId: number, run: CommandRunState): void {
-		reconcileRunWithPersistedSession(run);
-		// Skip if already completed/aborted or not running
-		if (run.status !== "running") return;
-		if (!run.lastActivityAt) return;
-		// Guard: skip runs already auto-aborted (prevents duplicate abort/followUp)
-		if (run.lastLine?.startsWith("Auto-aborted:")) return;
-
-		const idleMs = now - run.lastActivityAt;
-		if (idleMs < HANG_TIMEOUT_MS) return;
-
-		// Try to abort via run's own controller, then globalLiveRuns fallback
-		const globalEntry = store.globalLiveRuns.get(runId);
-		const controller = run.abortController ?? globalEntry?.abortController;
-
-		const reason = `Auto-aborted: no activity for ${Math.round(idleMs / 1000)}s`;
-		run.lastLine = reason;
-		run.lastOutput = reason;
-		run.status = "error";
-		run.autoAbortReason = reason;
-
-		if (controller) {
-			controller.abort();
-		}
-	}
-
-	// Sweep commandRuns first
-	for (const [runId, run] of store.commandRuns) {
-		processed.add(runId);
-		tryAbort(runId, run);
-	}
-
-	// Sweep registry-only runs that are not present in the current widget view.
-	for (const [runId, entry] of store.globalLiveRuns) {
-		if (processed.has(runId)) continue;
-		tryAbort(runId, entry.runState);
-	}
-
-	updateCommandRunsWidget(store);
+interface SubagentCore {
+	store: import("./store.js").SubagentStore;
+	commands: typeof import("./commands.js");
+	escalation: typeof import("./escalation.js");
+	lifecycle: typeof import("./lifecycle.js");
 }
 
 export default function (pi: ExtensionAPI) {
-	const store = createStore();
-	registerAskMasterTool(pi);
-	registerAll(pi, store);
+	let core: SubagentCore | null = null;
+	let corePromise: Promise<SubagentCore> | null = null;
+	/** Serializes session lifecycle work so events apply in dispatch order. */
+	let chain: Promise<void> = Promise.resolve();
+
+	const loadCore = (): Promise<SubagentCore> => {
+		corePromise ??= (async () => {
+			const [commands, escalation, lifecycle, storeMod] = await Promise.all([
+				import("./commands.js"),
+				import("./escalation.js"),
+				import("./lifecycle.js"),
+				import("./store.js"),
+			]);
+			const store = storeMod.createStore();
+			commands.registerAll(pi, store);
+			core = { store, commands, escalation, lifecycle };
+			return core;
+		})();
+		return corePromise;
+	};
+
+	const enqueue = (fn: (core: SubagentCore) => void): Promise<void> => {
+		chain = chain
+			.then(() => loadCore())
+			.then(fn)
+			.catch((err) => {
+				process.stderr.write(`[subagent] deferred init failed: ${err instanceof Error ? err.message : err}\n`);
+			});
+		return chain;
+	};
+
+	// Start loading in the background without blocking extension boot.
+	// setTimeout keeps the load out of the boot path's microtask drains.
+	setTimeout(() => {
+		void loadCore().catch(() => {
+			// Reported when the first enqueue/await surfaces the failure.
+		});
+	}, 0);
 
 	let hangCheckTimer: ReturnType<typeof setInterval> | undefined;
-	pi.on("session_start", () => {
-		store.disposed = false;
+
+	pi.on("session_start", (_event, ctx) => {
+		enqueue((c) => {
+			c.store.disposed = false;
+			c.commands.handleSessionStart(pi, c.store, ctx as unknown as ExtensionContext);
+			c.escalation.maybeRegisterAskMaster(pi, ctx);
+		});
 		if (!hangCheckTimer) {
-			hangCheckTimer = setInterval(() => checkForHungRuns(store, pi), HANG_CHECK_INTERVAL_MS);
+			hangCheckTimer = setInterval(() => {
+				if (core) core.lifecycle.checkForHungRuns(core.store, pi);
+			}, HANG_CHECK_INTERVAL_MS);
 		}
 	});
 
@@ -194,7 +97,25 @@ export default function (pi: ExtensionAPI) {
 			clearInterval(hangCheckTimer);
 			hangCheckTimer = undefined;
 		}
-		shutdownSubagentRuns(store, pi, event.reason);
-		cleanupPixelTimer();
+		// Wait for any queued session_start work so its loadCore() is visible here.
+		await chain;
+		if (!corePromise) return;
+		const c = await loadCore();
+		c.lifecycle.shutdownSubagentRuns(c.store, pi, event.reason);
+		c.commands.handleSessionShutdown();
+		c.lifecycle.cleanupPixelTimer();
+	});
+
+	pi.on("before_agent_start", async (event, ctx) => {
+		const c = await loadCore();
+		await chain;
+		return c.commands.handleBeforeAgentStart(event, ctx, c.store);
+	});
+
+	// If input arrives while the core is still loading, awaiting here lets the
+	// live handler-array dispatch reach the shortcut handlers registerAll adds.
+	pi.on("input", async () => {
+		if (!core) await loadCore().catch(() => {});
+		return { action: "continue" as const };
 	});
 }

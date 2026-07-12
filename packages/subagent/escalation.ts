@@ -49,70 +49,71 @@ export function writeEscalationRecord(sessionFile: string, message: string, cont
  *   - Reads + deletes the escalation file (IPC)
  *   - Surfaces the message to the master
  */
-export function registerAskMasterTool(pi: ExtensionAPI): void {
-	pi.on("session_start", (_event, ctx) => {
-		const sessionFile = ctx.sessionManager.getSessionFile();
-		if (!isSubagentSession(sessionFile)) return;
+export function maybeRegisterAskMaster(
+	pi: ExtensionAPI,
+	ctx: { sessionManager: { getSessionFile(): string | undefined } },
+): void {
+	const sessionFile = ctx.sessionManager.getSessionFile();
+	if (!isSubagentSession(sessionFile)) return;
 
-		pi.registerTool({
-			name: "ask_master",
-			label: "Ask Master",
-			description: [
-				"Calling this tool terminates the process immediately. No further work can be performed afterward.",
-				"Sends a message to the master and terminates the current process.",
-				"The master will review the message and respond appropriately.",
-				"",
-				"Use when:",
-				"- A decision about how to proceed is required",
-				"- Confirmation is needed before a risky operation such as deletion, deployment, or migration",
-				"- An unexpected situation requires the master’s judgment",
-			].join("\n"),
-			promptSnippet: "Ask the master for a decision. WARNING: calling this tool terminates your session immediately.",
-			promptGuidelines: [
-				"ask_master terminates your process — only call when you truly cannot proceed without the master's decision.",
-				"Exhaust available tools and context first before resorting to ask_master.",
-				"When calling, always include actionable options and your recommendation in the message.",
-			],
-			parameters: Type.Object({
-				message: Type.String({
-					description:
-						"Message for the master. Explain why a decision is needed, what must be decided, the available options, and your recommendation.",
-				}),
-				context: Type.Optional(
-					Type.String({
-						description: "Additional context, such as current progress, discovered issues, and options",
-					}),
-				),
+	pi.registerTool({
+		name: "ask_master",
+		label: "Ask Master",
+		description: [
+			"Calling this tool terminates the process immediately. No further work can be performed afterward.",
+			"Sends a message to the master and terminates the current process.",
+			"The master will review the message and respond appropriately.",
+			"",
+			"Use when:",
+			"- A decision about how to proceed is required",
+			"- Confirmation is needed before a risky operation such as deletion, deployment, or migration",
+			"- An unexpected situation requires the master’s judgment",
+		].join("\n"),
+		promptSnippet: "Ask the master for a decision. WARNING: calling this tool terminates your session immediately.",
+		promptGuidelines: [
+			"ask_master terminates your process — only call when you truly cannot proceed without the master's decision.",
+			"Exhaust available tools and context first before resorting to ask_master.",
+			"When calling, always include actionable options and your recommendation in the message.",
+		],
+		parameters: Type.Object({
+			message: Type.String({
+				description:
+					"Message for the master. Explain why a decision is needed, what must be decided, the available options, and your recommendation.",
 			}),
-			execute: async (_toolCallId, rawParams) => {
-				const params = rawParams as { message: string; context?: string };
-				const activeSessionFile = sessionFile;
-				if (!activeSessionFile) {
-					return {
-						content: [
-							{
-								type: "text" as const,
-								text: "[ask_master] Error: Missing subagent session file. Escalation not written.",
-							},
-						],
-						details: { message: params.message, context: params.context, error: true },
-						terminate: true,
-					};
-				}
-
-				try {
-					writeEscalationRecord(activeSessionFile, params.message, params.context);
-				} catch (err) {
-					process.stderr.write(`[ask_master] Failed to write escalation file: ${err}\n`);
-				}
-
+			context: Type.Optional(
+				Type.String({
+					description: "Additional context, such as current progress, discovered issues, and options",
+				}),
+			),
+		}),
+		execute: async (_toolCallId, rawParams) => {
+			const params = rawParams as { message: string; context?: string };
+			const activeSessionFile = sessionFile;
+			if (!activeSessionFile) {
 				return {
-					content: [{ type: "text" as const, text: `Escalated to master: ${params.message}` }],
-					details: { message: params.message, context: params.context, error: false },
+					content: [
+						{
+							type: "text" as const,
+							text: "[ask_master] Error: Missing subagent session file. Escalation not written.",
+						},
+					],
+					details: { message: params.message, context: params.context, error: true },
 					terminate: true,
 				};
-			},
-		});
+			}
+
+			try {
+				writeEscalationRecord(activeSessionFile, params.message, params.context);
+			} catch (err) {
+				process.stderr.write(`[ask_master] Failed to write escalation file: ${err}\n`);
+			}
+
+			return {
+				content: [{ type: "text" as const, text: `Escalated to master: ${params.message}` }],
+				details: { message: params.message, context: params.context, error: false },
+				terminate: true,
+			};
+		},
 	});
 }
 

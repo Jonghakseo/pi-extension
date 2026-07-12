@@ -18,6 +18,7 @@
 	],
 	"files": [
 		"index.ts",
+		"main.ts",
 		"types.ts",
 		"storage.ts",
 		"inject.ts",

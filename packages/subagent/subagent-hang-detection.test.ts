@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HANG_TIMEOUT_MS } from "./constants.ts";
-import { checkForHungRuns } from "./index.ts";
+import { checkForHungRuns } from "./lifecycle.ts";
 import { createStore } from "./store.ts";
 import type { CommandRunState } from "./types.ts";
 
