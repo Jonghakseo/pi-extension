@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-todo-write",
-	"version": "0.2.3",
+	"version": "0.2.4",
 	"description": "Todo write tool extension for pi.",
 	"license": "MIT",
 	"repository": {

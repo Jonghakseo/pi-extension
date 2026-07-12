@@ -14,18 +14,18 @@ packages/
   claude-spinner/
   clipboard/
   codex-fast-mode/
-  codex-large-context/
+  codex-large-context/   (deprecated)
   cross-agent/
   delayed-action/
   diff-review/
   generative-ui/
-  headroom/
+  headroom/              (deprecated)
   idle-screensaver/
   memory-layer/
   open-pr/
   setup-sh/
   subagent/
-  todo-write/
+  todo-write/            (deprecated, use todo-write-overlay)
   todo-write-overlay/
   until/
 ```
@@ -95,7 +95,6 @@ pi install npm:@ryan_nookpi/pi-extension-claude-mcp-bridge
 pi install npm:@ryan_nookpi/pi-extension-claude-spinner
 pi install npm:@ryan_nookpi/pi-extension-clipboard
 pi install npm:@ryan_nookpi/pi-extension-codex-fast-mode
-pi install npm:@ryan_nookpi/pi-extension-codex-large-context
 pi install npm:@ryan_nookpi/pi-extension-cross-agent
 pi install npm:@ryan_nookpi/pi-extension-delayed-action
 pi install npm:@ryan_nookpi/pi-extension-diff-review
@@ -105,7 +104,6 @@ pi install npm:@ryan_nookpi/pi-extension-memory-layer
 pi install npm:@ryan_nookpi/pi-extension-open-pr
 pi install npm:@ryan_nookpi/pi-extension-setup-sh
 pi install npm:@ryan_nookpi/pi-extension-subagent
-pi install npm:@ryan_nookpi/pi-extension-todo-write
 pi install npm:@ryan_nookpi/pi-extension-todo-write-overlay
 pi install npm:@ryan_nookpi/pi-extension-until
 ```

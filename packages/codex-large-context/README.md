@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-codex-large-context
 
+> **⚠️ Deprecated.** This package is no longer maintained and will not receive updates.
+
 This extension raises the pi context window metadata for newer OpenAI Codex models.
 
 It is intended for `gpt-5.4` and `gpt-5.5` model IDs when pi reports a smaller context window than the model can actually handle.

@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-todo-write
 
+> **⚠️ Deprecated.** 이 패키지는 더 이상 유지보수되지 않습니다. 대신 [`@ryan_nookpi/pi-extension-todo-write-overlay`](https://github.com/Jonghakseo/pi-extension/tree/main/packages/todo-write-overlay)를 사용하세요.
+
 pi가 현재 세션에서 구조화된 작업 목록을 만들고 갱신할 수 있게 해주는 `todo_write` 익스텐션입니다.
 
 ## 설치

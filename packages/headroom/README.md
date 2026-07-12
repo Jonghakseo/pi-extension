@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-headroom
 
+> **⚠️ Deprecated.** This package is no longer maintained and will not receive updates.
+
 This extension reclaims context window in pi by compressing large tool results through a [Headroom](https://github.com/headroom-ai/headroom) proxy before each LLM call.
 
 Headroom runs locally, compresses only oversized `toolResult` payloads, and leaves your prompts, assistant turns, and tool-call metadata untouched. Compression is applied only when the proxy is online and the change passes strict alignment guards, so it never silently rewrites your conversation.
