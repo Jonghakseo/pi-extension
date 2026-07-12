@@ -7,7 +7,6 @@ import {
 	buildRenderResultText,
 	errorResult,
 	formatResultContent,
-	nonInteractiveResult,
 	renderCall,
 	renderResult,
 } from "./output.ts";
@@ -52,7 +51,6 @@ export {
 	buildRenderResultText,
 	coerceAskUserQuestionParams,
 	errorResult,
-	nonInteractiveResult,
 	normalizeQuestions,
 };
 
@@ -65,16 +63,16 @@ export default function askUserQuestion(pi: ExtensionAPI) {
 		promptGuidelines: PROMPT_GUIDELINES,
 		parameters: AskUserQuestionParams,
 		async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
+			if (!ctx.hasUI) {
+				return errorResult("오류: UI를 사용할 수 없습니다. 현재 비대화형 모드에서 실행 중입니다.");
+			}
+
 			const params = coerceAskUserQuestionParams(rawParams);
 			if (!params.questions.length) {
 				return errorResult("오류: 질문이 제공되지 않았습니다.");
 			}
 
 			const questions = normalizeQuestions(params.questions);
-			if (!ctx.hasUI) {
-				return nonInteractiveResult(params.title, questions);
-			}
-
 			const result = await runAskUserQuestionForm(
 				ctx,
 				{ title: params.title, description: params.description },
