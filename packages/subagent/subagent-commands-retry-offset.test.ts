@@ -86,8 +86,8 @@ describe("commands retry persisted-session offset refresh", () => {
 	it("refreshes persistedSessionBaseOffset before each retry attempt", async () => {
 		const { registerAll } = await import("./commands.ts");
 		const store = createStore();
-		const { pi, commands } = createPi();
-		registerAll(pi as never, store);
+		const { pi } = createPi();
+		const registrations = registerAll(pi as never, store);
 
 		let firstCallConfig: any;
 		let secondCallConfig: any;
@@ -115,7 +115,7 @@ describe("commands retry persisted-session offset refresh", () => {
 				return makeResult();
 			});
 
-		const handler = commands.get("sub:isolate")?.handler;
+		const handler = registrations.commands.get("sub:isolate")?.handler;
 		expect(handler).toBeTypeOf("function");
 
 		const ctx = {
@@ -133,7 +133,7 @@ describe("commands retry persisted-session offset refresh", () => {
 			},
 		};
 
-		await handler("worker do work", ctx);
+		await handler?.("worker do work", ctx as never);
 		await vi.runAllTicks();
 		expect(mockRunSingleAgent).toHaveBeenCalledTimes(1);
 		expect(firstCallConfig.persistedSessionBaseOffset).toBe(0);

@@ -42,6 +42,7 @@ import {
 } from "./group-pending.js";
 import { enqueueSubagentInvocation } from "./invocation-queue.js";
 import { appendDisplayTaskUpdate, getSessionFileSize } from "./persisted-session.js";
+import { SUBAGENT_COMMANDS, type SubagentCommandName } from "./registration-manifest.js";
 import { readSessionReplayItems, SubagentSessionReplayOverlay } from "./replay.js";
 import { invokeWithAutoRetry, MAX_SUBAGENT_AUTO_RETRIES } from "./retry.js";
 import { getLatestRun, removeRun, trimCommandRunHistory } from "./run-utils.js";
@@ -890,7 +891,18 @@ function finalizeHumanOnlyCompletion(
 	store.globalLiveRuns.delete(runId);
 }
 
-export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
+export type SubagentCommandDefinition = Parameters<ExtensionAPI["registerCommand"]>[1];
+
+export interface SubagentRegistrations {
+	commands: ReadonlyMap<SubagentCommandName, SubagentCommandDefinition>;
+}
+
+export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentRegistrations {
+	const commandDefinitions = new Map<SubagentCommandName, SubagentCommandDefinition>();
+	const defineCommand = (name: SubagentCommandName, definition: SubagentCommandDefinition): void => {
+		commandDefinitions.set(name, definition);
+	};
+
 	pi.registerTool({
 		name: "list-agents",
 		label: "List Agents",
@@ -958,8 +970,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 	});
 
 	const subCommand = {
-		description:
-			"Run a subagent in a dedicated sub-session: /sub:isolate <agent|alias> <task>, /sub:isolate <runId> <task>, /sub:isolate <task> (uses configured defaultAgent)",
+		description: SUBAGENT_COMMANDS["sub:isolate"],
 		getArgumentCompletions: (argumentPrefix: string) => {
 			const trimmedStart = argumentPrefix.trimStart();
 			if (trimmedStart.includes(" ")) return null;
@@ -1574,10 +1585,10 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		},
 	};
 
-	pi.registerCommand("sub:isolate", subCommand);
+	defineCommand("sub:isolate", subCommand);
 
-	pi.registerCommand("sub:main", {
-		description: "Run a subagent with main-session context inheritance: /sub:main <agent|alias> <task>",
+	defineCommand("sub:main", {
+		description: SUBAGENT_COMMANDS["sub:main"],
 		getArgumentCompletions: subCommand.getArgumentCompletions,
 		handler: async (args, ctx) => {
 			captureSwitchSession(store, ctx);
@@ -1586,8 +1597,8 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		},
 	});
 
-	pi.registerCommand("subagents", {
-		description: "List available subagents and offer the starter pack when none are configured",
+	defineCommand("subagents", {
+		description: SUBAGENT_COMMANDS.subagents,
 		handler: async (_args, ctx) => {
 			captureSwitchSession(store, ctx);
 			const starterPack = await offerStarterPackIfEmpty(ctx);
@@ -1619,8 +1630,8 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		},
 	});
 
-	pi.registerCommand("sub:peek", {
-		description: "Show the latest response from a subagent in an overlay: /sub:peek [runId]",
+	defineCommand("sub:peek", {
+		description: SUBAGENT_COMMANDS["sub:peek"],
 		getArgumentCompletions: (argumentPrefix) => {
 			const trimmedStart = argumentPrefix.trimStart();
 			if (trimmedStart.includes(" ")) return null;
@@ -1643,8 +1654,8 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		},
 	});
 
-	pi.registerCommand("sub:open", {
-		description: "Open a subagent session replay overlay: /sub:open [runId]",
+	defineCommand("sub:open", {
+		description: SUBAGENT_COMMANDS["sub:open"],
 		getArgumentCompletions: (argumentPrefix) => {
 			const trimmedStart = argumentPrefix.trimStart();
 			if (trimmedStart.includes(" ")) return null;
@@ -1735,8 +1746,8 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		},
 	});
 
-	pi.registerCommand("sub:history", {
-		description: "Show all subagent run history (including removed) in an overlay: /sub:history",
+	defineCommand("sub:history", {
+		description: SUBAGENT_COMMANDS["sub:history"],
 		handler: async (_args, ctx) => {
 			captureSwitchSession(store, ctx);
 
@@ -1787,8 +1798,8 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		},
 	});
 
-	pi.registerCommand("sub:rm", {
-		description: "Remove one /sub job entry (aborts it if running): /sub:rm [runId]",
+	defineCommand("sub:rm", {
+		description: SUBAGENT_COMMANDS["sub:rm"],
 		handler: async (args, ctx) => {
 			captureSwitchSession(store, ctx);
 			const raw = (args ?? "").trim();
@@ -1871,8 +1882,8 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		ctx.ui.notify(`Cleared ${removed} finished subagent job(s).`, "info");
 	};
 
-	pi.registerCommand("sub:clear", {
-		description: "Clear /sub job widget entries. /sub:clear (finished only) or /sub:clear all",
+	defineCommand("sub:clear", {
+		description: SUBAGENT_COMMANDS["sub:clear"],
 		handler: async (args, ctx) => {
 			await handleSubClear(args, ctx);
 		},
@@ -1947,23 +1958,16 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		ctx.ui.notify("Usage: /sub:abort [runId|all]", "info");
 	};
 
-	pi.registerCommand("sub:abort", {
-		description: "Abort running subagent job(s). /sub:abort [runId|all]",
+	defineCommand("sub:abort", {
+		description: SUBAGENT_COMMANDS["sub:abort"],
 		handler: async (args, ctx) => {
 			captureSwitchSession(store, ctx);
 			await handleSubAbort(args, ctx);
 		},
 	});
 
-	// Only actual keyboard shortcuts appear in the /hotkeys Extensions section.
-	// NOTE: plain ">" is a real keybinding and hijacks editor text input,
-	// so the hidden subagent prefix is documented via footer/status hints instead.
-	pi.registerShortcut(">>" as any, {
-		description: "Run subagent task",
-		handler: async () => {
-			// Documentation-only entry.
-		},
-	});
+	// Text-prefix shortcuts are registered synchronously in index.ts for
+	// /hotkeys visibility. Their actual routing remains in the input handlers below.
 
 	pi.on("input", async (event, ctx) => {
 		if (event.source === "extension") {
@@ -2073,13 +2077,6 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 	});
 
 	// #<runId> shortcut: resume a subagent run (e.g. #42 keep going)
-	pi.registerShortcut("#<runId>" as any, {
-		description: "Resume subagent run: #<runId> <task>",
-		handler: async () => {
-			// Documentation-only entry.
-		},
-	});
-
 	pi.on("input", async (event, ctx) => {
 		if (event.source === "extension") {
 			return { action: "continue" as const };
@@ -2126,20 +2123,6 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 	});
 
 	// << shortcut: abort running jobs or clear finished jobs
-	pi.registerShortcut("<<" as any, {
-		description: "Abort or clear subagent runs",
-		handler: async () => {
-			// Documentation-only entry.
-		},
-	});
-
-	pi.registerShortcut("<<<" as any, {
-		description: "Clear finished subagent jobs (= /sub:clear). <<< all to clear all",
-		handler: async () => {
-			// Documentation-only entry.
-		},
-	});
-
 	pi.on("input", async (event, ctx) => {
 		if (event.source === "extension") {
 			return { action: "continue" as const };
@@ -2226,6 +2209,15 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): void {
 		ctx.ui.notify(parts.join(", ") || "Nothing to do.", parts.length ? (aborted ? "warning" : "info") : "info");
 		return { action: "handled" as const };
 	});
+
+	const missingCommands = (Object.keys(SUBAGENT_COMMANDS) as SubagentCommandName[]).filter(
+		(name) => !commandDefinitions.has(name),
+	);
+	if (missingCommands.length > 0) {
+		throw new Error(`Missing subagent command definitions: ${missingCommands.join(", ")}`);
+	}
+
+	return { commands: commandDefinitions };
 }
 
 // ── onTerminalInput hack: auto-redirect <>7 to /sub:peek 7 ───────────

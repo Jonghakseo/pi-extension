@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerAll } from "./commands.ts";
+import { SUBAGENT_COMMANDS } from "./registration-manifest.ts";
 import { createStore } from "./store.ts";
 
 function createPi() {
@@ -55,6 +56,15 @@ describe("starter pack list entrypoints", () => {
 		};
 	}
 
+	it("returns command definitions without registering commands or shortcuts twice", () => {
+		const { pi } = createPi();
+		const registrations = registerAll(pi as never, createStore());
+
+		expect([...registrations.commands.keys()]).toEqual(Object.keys(SUBAGENT_COMMANDS));
+		expect(pi.registerCommand).not.toHaveBeenCalled();
+		expect(pi.registerShortcut).not.toHaveBeenCalled();
+	});
+
 	it("offers the starter pack from the list-agents tool", async () => {
 		const { pi, tools } = createPi();
 		registerAll(pi as never, createStore());
@@ -97,11 +107,11 @@ describe("starter pack list entrypoints", () => {
 	});
 
 	it("offers the starter pack from /subagents", async () => {
-		const { pi, commands } = createPi();
-		registerAll(pi as never, createStore());
+		const { pi } = createPi();
+		const registrations = registerAll(pi as never, createStore());
 		const ctx = makeCtx();
 
-		await commands.get("subagents").handler("", ctx);
+		await registrations.commands.get("subagents")?.handler("", ctx as never);
 
 		expect(ctx.ui.confirm).toHaveBeenCalledTimes(1);
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Starter pack installed"), "info");

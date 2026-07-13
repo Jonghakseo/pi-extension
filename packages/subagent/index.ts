@@ -29,10 +29,12 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { HANG_CHECK_INTERVAL_MS } from "./constants.js";
+import { SUBAGENT_COMMANDS, SUBAGENT_SHORTCUTS, type SubagentCommandName } from "./registration-manifest.js";
 
 interface SubagentCore {
 	store: import("./store.js").SubagentStore;
 	commands: typeof import("./commands.js");
+	registrations: import("./commands.js").SubagentRegistrations;
 	escalation: typeof import("./escalation.js");
 	lifecycle: typeof import("./lifecycle.js");
 }
@@ -52,10 +54,13 @@ export default function (pi: ExtensionAPI) {
 				import("./store.js"),
 			]);
 			const store = storeMod.createStore();
-			commands.registerAll(pi, store);
-			core = { store, commands, escalation, lifecycle };
+			const registrations = commands.registerAll(pi, store);
+			core = { store, commands, registrations, escalation, lifecycle };
 			return core;
-		})();
+		})().catch((error) => {
+			corePromise = null;
+			throw error;
+		});
 		return corePromise;
 	};
 
@@ -68,6 +73,39 @@ export default function (pi: ExtensionAPI) {
 			});
 		return chain;
 	};
+
+	const getCommandDefinition = async (name: SubagentCommandName) => {
+		const loaded = await loadCore();
+		await chain;
+		const definition = loaded.registrations.commands.get(name);
+		if (!definition) throw new Error(`Subagent command definition not found: ${name}`);
+		return definition;
+	};
+
+	// Register lightweight proxies synchronously so Pi's initial autocomplete
+	// and command registry contain every subagent command before lazy core load.
+	for (const [name, description] of Object.entries(SUBAGENT_COMMANDS) as Array<[SubagentCommandName, string]>) {
+		pi.registerCommand(name, {
+			description,
+			getArgumentCompletions: async (prefix) => {
+				const definition = await getCommandDefinition(name);
+				return definition.getArgumentCompletions?.(prefix) ?? null;
+			},
+			handler: async (args, ctx) => {
+				const definition = await getCommandDefinition(name);
+				return definition.handler(args, ctx);
+			},
+		});
+	}
+
+	// These entries document text-prefix shortcuts in /hotkeys. Actual routing
+	// remains in commands.ts input handlers after the lazy core is loaded.
+	for (const [shortcut, description] of Object.entries(SUBAGENT_SHORTCUTS)) {
+		pi.registerShortcut(shortcut as never, {
+			description,
+			handler: async () => {},
+		});
+	}
 
 	// Start loading in the background without blocking extension boot.
 	// setTimeout keeps the load out of the boot path's microtask drains.
