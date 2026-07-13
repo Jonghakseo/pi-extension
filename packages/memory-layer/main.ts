@@ -267,6 +267,8 @@ async function executeForgetByTitle(
 // ── Extension Entry Point ────────────────────────────────────────────────────
 
 export interface MemoryLayerHandlers {
+	onRememberCommand: (args: string, ctx: ExtensionContext) => Promise<void>;
+	onMemoryCommand: (args: string, ctx: ExtensionContext) => Promise<void>;
 	onSessionStart: (event: unknown, ctx: ExtensionContext) => Promise<void>;
 	onBeforeAgentStart: (
 		event: { systemPrompt: string },
@@ -344,166 +346,160 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 		}
 	}
 
-	// ── /remember Command ─────────────────────────────────────────────────
-
-	pi.registerCommand("remember", {
-		description: "Store a memory. Usage: /remember [user|project] <content>",
-		handler: async (args, ctx) => {
-			const raw = args.trim();
-			if (!raw) {
-				ctx.ui.notify("사용법: /remember [user|project] <기억할 내용>", "warning");
-				return;
-			}
-			const { scope, content } = parseRememberArgs(raw);
-			const result = await saveContent(content, undefined, scope, ctx);
-			if ("cancelled" in result) {
-				ctx.ui.notify("기억 저장을 취소했습니다.", "info");
-			} else if ("error" in result) {
-				ctx.ui.notify(result.error, "error");
-			} else {
-				ctx.ui.notify(
-					`📝 저장: "${result.title}" → ${result.topic}.md (scope: ${result.scope}) — /memory에서 이동/정리 가능`,
-					"info",
-				);
-			}
-		},
-	});
+	// Command handlers are returned to index.ts, where lightweight command
+	// proxies are registered synchronously for slash-command autocomplete.
+	const onRememberCommand = async (args: string, ctx: ExtensionContext): Promise<void> => {
+		const raw = args.trim();
+		if (!raw) {
+			ctx.ui.notify("사용법: /remember [user|project] <기억할 내용>", "warning");
+			return;
+		}
+		const { scope, content } = parseRememberArgs(raw);
+		const result = await saveContent(content, undefined, scope, ctx);
+		if ("cancelled" in result) {
+			ctx.ui.notify("기억 저장을 취소했습니다.", "info");
+		} else if ("error" in result) {
+			ctx.ui.notify(result.error, "error");
+		} else {
+			ctx.ui.notify(
+				`📝 저장: "${result.title}" → ${result.topic}.md (scope: ${result.scope}) — /memory에서 이동/정리 가능`,
+				"info",
+			);
+		}
+	};
 
 	// ── /memory Command (Overlay UI) ──────────────────────────────────────
 
-	pi.registerCommand("memory", {
-		description: "Browse and manage stored memories",
-		handler: async (args, ctx) => {
-			currentProjectId = resolveCurrentProjectId(ctx.cwd);
+	const onMemoryCommand = async (args: string, ctx: ExtensionContext): Promise<void> => {
+		currentProjectId = resolveCurrentProjectId(ctx.cwd);
 
-			// Collect all entries for display
-			const displayEntries = await collectDisplayEntries(currentProjectId);
+		// Collect all entries for display
+		const displayEntries = await collectDisplayEntries(currentProjectId);
 
-			if (!ctx.hasUI) {
-				if (!displayEntries.length) {
-					ctx.ui.notify("No memories stored.", "info");
-					return;
-				}
-				for (const e of displayEntries) {
-					ctx.ui.notify(`[${e.scope}] ${e.topic}/${e.title}`, "info");
-				}
+		if (!ctx.hasUI) {
+			if (!displayEntries.length) {
+				ctx.ui.notify("No memories stored.", "info");
 				return;
 			}
+			for (const e of displayEntries) {
+				ctx.ui.notify(`[${e.scope}] ${e.topic}/${e.title}`, "info");
+			}
+			return;
+		}
 
-			await ctx.ui.custom<void>((tui, theme, _kb, done) => {
-				let selector: MemorySelectorComponent | null = null;
-				let actionMenu: MemoryActionMenuComponent | null = null;
-				let deleteConfirm: MemoryDeleteConfirmComponent | null = null;
-				let activeComponent: {
-					render: (width: number) => string[];
+		await ctx.ui.custom<void>((tui, theme, _kb, done) => {
+			let selector: MemorySelectorComponent | null = null;
+			let actionMenu: MemoryActionMenuComponent | null = null;
+			let deleteConfirm: MemoryDeleteConfirmComponent | null = null;
+			let activeComponent: {
+				render: (width: number) => string[];
+				invalidate: () => void;
+				handleInput?: (data: string) => void;
+				focused?: boolean;
+			} | null = null;
+			let wrapperFocused = false;
+
+			const setActive = (
+				c: {
+					render: (w: number) => string[];
 					invalidate: () => void;
 					handleInput?: (data: string) => void;
 					focused?: boolean;
-				} | null = null;
-				let wrapperFocused = false;
+				} | null,
+			) => {
+				if (activeComponent && "focused" in activeComponent) activeComponent.focused = false;
+				activeComponent = c;
+				if (activeComponent && "focused" in activeComponent) activeComponent.focused = wrapperFocused;
+				tui.requestRender();
+			};
 
-				const setActive = (
-					c: {
-						render: (w: number) => string[];
-						invalidate: () => void;
-						handleInput?: (data: string) => void;
-						focused?: boolean;
-					} | null,
-				) => {
-					if (activeComponent && "focused" in activeComponent) activeComponent.focused = false;
-					activeComponent = c;
-					if (activeComponent && "focused" in activeComponent) activeComponent.focused = wrapperFocused;
-					tui.requestRender();
-				};
+			const refresh = async () => {
+				const updated = await collectDisplayEntries(currentProjectId);
+				selector?.setEntries(updated);
+			};
 
-				const refresh = async () => {
-					const updated = await collectDisplayEntries(currentProjectId);
-					selector?.setEntries(updated);
-				};
-
-				const deleteEntry = async (entry: SearchResult) => {
-					try {
-						const ok = await removeMemory(entry.scope, entry.projectId, entry.topic, entry.title);
-						ctx.ui.notify(ok ? `Deleted: "${entry.title}"` : "Not found", ok ? "info" : "error");
-					} catch (e) {
-						ctx.ui.notify(`Error: ${e instanceof Error ? e.message : "unknown"}`, "error");
-					}
-					await refresh();
-					setActive(selector);
-				};
-
-				const handleAction = async (entry: SearchResult, action: MemoryMenuAction) => {
-					switch (action) {
-						case "view":
-							await openMemoryDetail(ctx, entry);
-							if (actionMenu) setActive(actionMenu);
-							return;
-						case "viewTopic":
-							await openMemoryTopicDetail(ctx, entry);
-							if (actionMenu) setActive(actionMenu);
-							return;
-						case "copyContent":
-							copyMemoryEntry(ctx, entry);
-							setActive(selector);
-							return;
-						case "delete":
-							deleteConfirm = new MemoryDeleteConfirmComponent(
-								theme,
-								`삭제하시겠습니까?\n[${entry.scope}] ${entry.topic} / "${entry.title}"`,
-								(confirmed) => {
-									if (!confirmed) {
-										setActive(actionMenu);
-										return;
-									}
-									void deleteEntry(entry);
-								},
-							);
-							setActive(deleteConfirm);
-							return;
-					}
-				};
-
-				selector = new MemorySelectorComponent(
-					tui,
-					theme,
-					displayEntries,
-					(entry) => showActionMenu(entry),
-					() => done(),
-					(args ?? "").trim() || undefined,
-				);
+			const deleteEntry = async (entry: SearchResult) => {
+				try {
+					const ok = await removeMemory(entry.scope, entry.projectId, entry.topic, entry.title);
+					ctx.ui.notify(ok ? `Deleted: "${entry.title}"` : "Not found", ok ? "info" : "error");
+				} catch (e) {
+					ctx.ui.notify(`Error: ${e instanceof Error ? e.message : "unknown"}`, "error");
+				}
+				await refresh();
 				setActive(selector);
+			};
 
-				const showActionMenu = (entry: SearchResult) => {
-					actionMenu = new MemoryActionMenuComponent(
-						theme,
-						entry,
-						(action) => void handleAction(entry, action),
-						() => setActive(selector),
-					);
-					setActive(actionMenu);
-				};
+			const handleAction = async (entry: SearchResult, action: MemoryMenuAction) => {
+				switch (action) {
+					case "view":
+						await openMemoryDetail(ctx, entry);
+						if (actionMenu) setActive(actionMenu);
+						return;
+					case "viewTopic":
+						await openMemoryTopicDetail(ctx, entry);
+						if (actionMenu) setActive(actionMenu);
+						return;
+					case "copyContent":
+						copyMemoryEntry(ctx, entry);
+						setActive(selector);
+						return;
+					case "delete":
+						deleteConfirm = new MemoryDeleteConfirmComponent(
+							theme,
+							`삭제하시겠습니까?\n[${entry.scope}] ${entry.topic} / "${entry.title}"`,
+							(confirmed) => {
+								if (!confirmed) {
+									setActive(actionMenu);
+									return;
+								}
+								void deleteEntry(entry);
+							},
+						);
+						setActive(deleteConfirm);
+						return;
+				}
+			};
 
-				return {
-					get focused() {
-						return wrapperFocused;
-					},
-					set focused(value: boolean) {
-						wrapperFocused = value;
-						if (activeComponent && "focused" in activeComponent) activeComponent.focused = value;
-					},
-					render(width: number) {
-						return activeComponent ? activeComponent.render(width) : [];
-					},
-					invalidate() {
-						activeComponent?.invalidate();
-					},
-					handleInput(data: string) {
-						activeComponent?.handleInput?.(data);
-					},
-				};
-			});
-		},
-	});
+			selector = new MemorySelectorComponent(
+				tui,
+				theme,
+				displayEntries,
+				(entry) => showActionMenu(entry),
+				() => done(),
+				(args ?? "").trim() || undefined,
+			);
+			setActive(selector);
+
+			const showActionMenu = (entry: SearchResult) => {
+				actionMenu = new MemoryActionMenuComponent(
+					theme,
+					entry,
+					(action) => void handleAction(entry, action),
+					() => setActive(selector),
+				);
+				setActive(actionMenu);
+			};
+
+			return {
+				get focused() {
+					return wrapperFocused;
+				},
+				set focused(value: boolean) {
+					wrapperFocused = value;
+					if (activeComponent && "focused" in activeComponent) activeComponent.focused = value;
+				},
+				render(width: number) {
+					return activeComponent ? activeComponent.render(width) : [];
+				},
+				invalidate() {
+					activeComponent?.invalidate();
+				},
+				handleInput(data: string) {
+					activeComponent?.handleInput?.(data);
+				},
+			};
+		});
+	};
 
 	// ── remember Tool (LLM-callable, fully non-interactive) ───────────────
 
@@ -704,7 +700,7 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 		return undefined;
 	};
 
-	return { onSessionStart, onBeforeAgentStart };
+	return { onRememberCommand, onMemoryCommand, onSessionStart, onBeforeAgentStart };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
