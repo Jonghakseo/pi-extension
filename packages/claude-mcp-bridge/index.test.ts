@@ -1,16 +1,24 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+	buildConfigFingerprint,
 	buildPiToolName,
 	buildToolVisibilityKey,
 	createParameterSchema,
 	expandEnvVars,
 	extractRawServers,
 	formatToolResult,
+	loadMcpToolCache,
+	type McpToolCache,
+	mergeAndSaveMcpToolCache,
 	mimeToExt,
 	normalizeServer,
 	parseDisabledToolKeys,
 	parseToolVisibilityKey,
 	sanitizeName,
+	saveMcpToolCache,
 	serializeToolVisibilitySettings,
 	TOOL_VISIBILITY_KEY_SEPARATOR,
 } from "./index.ts";
@@ -734,5 +742,153 @@ describe("tool visibility settings round-trip", () => {
 		const serialized = serializeToolVisibilitySettings(keys);
 		const reparsed = parseDisabledToolKeys(serialized.disabledTools);
 		expect(reparsed).toEqual(keys);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// MCP tool cache — fingerprinting, validation, and atomic persistence
+// ---------------------------------------------------------------------------
+
+describe("MCP tool cache", () => {
+	function createTempCachePath(): { dir: string; cachePath: string } {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-mcp-cache-test-"));
+		return { dir, cachePath: path.join(dir, "cache", "tools-v1.json") };
+	}
+
+	function createCache(configFingerprint = "fingerprint"): McpToolCache {
+		return {
+			version: 1,
+			configFingerprint,
+			servers: {
+				Sentry: {
+					updatedAt: "2026-07-14T00:00:00.000Z",
+					tools: [
+						{
+							name: "search_issues",
+							description: "Search issues",
+							inputSchema: { type: "object", properties: { query: { type: "string" } } },
+						},
+					],
+				},
+			},
+		};
+	}
+
+	it("loads a matching cache and ignores a mismatched fingerprint", () => {
+		const { dir, cachePath } = createTempCachePath();
+		try {
+			saveMcpToolCache(createCache("matching"), cachePath);
+			expect(loadMcpToolCache("matching", cachePath)?.servers.Sentry?.tools[0]?.name).toBe("search_issues");
+			expect(loadMcpToolCache("different", cachePath)).toBeNull();
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("silently ignores malformed cache files", () => {
+		const { dir, cachePath } = createTempCachePath();
+		try {
+			fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+			fs.writeFileSync(cachePath, "{not-json", "utf-8");
+			expect(loadMcpToolCache("fingerprint", cachePath)).toBeNull();
+			fs.writeFileSync(cachePath, JSON.stringify({ version: 1, configFingerprint: "fingerprint", servers: [] }));
+			expect(loadMcpToolCache("fingerprint", cachePath)).toBeNull();
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects cached schemas that would crash parameter conversion", () => {
+		const { dir, cachePath } = createTempCachePath();
+		try {
+			const malformed = createCache();
+			const cachedTool = malformed.servers.Sentry?.tools[0];
+			if (!cachedTool) throw new Error("test cache tool missing");
+			cachedTool.inputSchema = { type: "object", properties: { value: null } };
+			fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+			fs.writeFileSync(cachePath, JSON.stringify(malformed), "utf-8");
+			expect(loadMcpToolCache("fingerprint", cachePath)).toBeNull();
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("writes atomically without leaving temporary files", () => {
+		const { dir, cachePath } = createTempCachePath();
+		try {
+			saveMcpToolCache(createCache(), cachePath);
+			expect(fs.existsSync(cachePath)).toBe(true);
+			expect(fs.readdirSync(path.dirname(cachePath))).toEqual(["tools-v1.json"]);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("serializes concurrent read-merge-write updates without losing servers", async () => {
+		const { dir, cachePath } = createTempCachePath();
+		try {
+			const alpha = createCache("shared");
+			alpha.servers = {
+				Alpha: { updatedAt: "2026-07-14T00:00:02.000Z", tools: [{ name: "alpha", inputSchema: {} }] },
+				Shared: { updatedAt: "2026-07-14T00:00:02.000Z", tools: [{ name: "new", inputSchema: {} }] },
+			};
+			const beta = createCache("shared");
+			beta.servers = {
+				Beta: { updatedAt: "2026-07-14T00:00:01.000Z", tools: [{ name: "beta", inputSchema: {} }] },
+				Shared: { updatedAt: "2026-07-14T00:00:01.000Z", tools: [{ name: "old", inputSchema: {} }] },
+			};
+
+			await Promise.all([mergeAndSaveMcpToolCache(alpha, cachePath), mergeAndSaveMcpToolCache(beta, cachePath)]);
+			const merged = loadMcpToolCache("shared", cachePath);
+			expect(Object.keys(merged?.servers ?? {}).sort()).toEqual(["Alpha", "Beta", "Shared"]);
+			expect(merged?.servers.Shared?.tools[0]?.name).toBe("new");
+			expect(fs.readdirSync(path.dirname(cachePath))).toEqual(["tools-v1.json"]);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("fingerprints only secret-free server structure", () => {
+		const firstStdio = normalizeServer("stdio", {
+			command: "/usr/bin/npx",
+			args: ["server-package", "--token=first-secret", "--mode", "safe"],
+			env: { ACCESS_TOKEN: "first-secret" },
+		});
+		const secondStdio = normalizeServer("stdio", {
+			command: "/usr/bin/npx",
+			args: ["another-package", "--token=second-secret", "--mode", "other"],
+			env: { ACCESS_TOKEN: "second-secret" },
+		});
+		const firstHttp = normalizeServer("http", {
+			url: "https://mcp.example.com/one?token=first-secret",
+			headers: { Authorization: "Bearer first-secret" },
+		});
+		const secondHttp = normalizeServer("http", {
+			url: "https://mcp.example.com/two?token=second-secret",
+			headers: { Authorization: "Bearer second-secret" },
+		});
+		if (!firstStdio || !secondStdio || !firstHttp || !secondHttp) throw new Error("normalization failed");
+
+		expect(buildConfigFingerprint([firstStdio, firstHttp])).toBe(buildConfigFingerprint([secondStdio, secondHttp]));
+	});
+
+	it("never serializes MCP config secrets into the tool cache", () => {
+		const { dir, cachePath } = createTempCachePath();
+		try {
+			const secret = "super-secret-access-token";
+			const server = normalizeServer("Sentry", {
+				url: `https://mcp.example.com/sse?access_token=${secret}`,
+				headers: { Authorization: `Bearer ${secret}` },
+			});
+			if (!server) throw new Error("normalization failed");
+			const cache = createCache(buildConfigFingerprint([server]));
+			saveMcpToolCache(cache, cachePath);
+			const raw = fs.readFileSync(cachePath, "utf-8");
+			expect(raw).not.toContain(secret);
+			expect(raw).not.toContain("Authorization");
+			expect(raw).not.toContain("access_token");
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
