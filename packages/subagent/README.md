@@ -238,6 +238,28 @@ Confirm the environment used to start pi has valid Anthropic authentication, suc
 
 That is intentional. Hidden `>` runs are human-only UI jobs. Inspect them with `/sub:peek`, `<>runId`, or `/sub:open`.
 
+### Debug runner termination
+
+The extension records process lifecycle diagnostics as `subagent-runner-diagnostic` custom entries in the parent session JSONL. They include run/batch IDs, parent and child PID/PGID, abort reason, internal kill cause, `exit`/`close` code and signal, settle reason, shutdown reason, and process-error stacks. Custom entries are not sent to the LLM and remain hidden unless an entry renderer is registered, as documented by pi's [`appendEntry` API](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#piappendentrycustomtype-data).
+
+Run `/session` to find the current session file, set `SESSION_FILE` to that path, then extract only the diagnostic entries:
+
+```bash
+jq -c 'select(.type == "custom" and .customType == "subagent-runner-diagnostic") | {timestamp, data}' "$SESSION_FILE"
+```
+
+For batch failures, compare entries by `batchId` and `runId`, then follow each run from `spawn` through `kill_intent`, `exit`, `close`, and `settled`. Share only the selected diagnostic lines—not the full session file, which may contain prompts or tool output.
+
+To report a reproducible extension bug, create `subagent-issue.md` with the pi and extension versions, OS and Node version, launch mode/command, reproduction steps, expected and actual behavior, and the sanitized diagnostic lines. Then submit it with:
+
+```bash
+gh issue create --repo Jonghakseo/pi-extension \
+  --title "subagent: unexpected child termination" \
+  --body-file subagent-issue.md
+```
+
+Without GitHub CLI, use the repository's [new issue page](https://github.com/Jonghakseo/pi-extension/issues/new). Remove secrets and sensitive paths before attaching diagnostics.
+
 ## Security and trust boundary
 
 - Claude SDK execution uses `permissionMode: "bypassPermissions"` with `allowDangerouslySkipPermissions`; Claude CLI execution uses `--dangerously-skip-permissions`.
