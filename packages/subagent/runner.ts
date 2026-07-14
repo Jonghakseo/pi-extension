@@ -17,6 +17,13 @@ import {
 } from "./claude-stream-parser.js";
 import { resolveClaudeRuntimeMode } from "./config.js";
 import { CONTEXT_GUARD_SIGNATURE, resolveContextGuardCeiling, shouldTripContextGuard } from "./context-limits.js";
+import {
+	emitRunnerDiagnostic,
+	type RunnerDiagnosticSink,
+	readProcessIdentity,
+	serializeDiagnosticValue,
+	toDiagnosticError,
+} from "./diagnostics.js";
 import { formatToolCallPlain } from "./format.js";
 import {
 	extractActivityPreviewFromTextDelta,
@@ -39,6 +46,7 @@ export interface RunSingleAgentSessionConfig {
 	resumeSessionId?: string;
 	sidecarSessionFile?: string;
 	persistedSessionBaseOffset?: number;
+	onDiagnostic?: RunnerDiagnosticSink;
 }
 
 function isUuidLikeSessionId(value: string | undefined): boolean {
@@ -199,6 +207,7 @@ export async function runSingleAgent(
 	const resumeSessionId = normalizedSessionConfig.resumeSessionId;
 	const sidecarSessionFile = normalizedSessionConfig.sidecarSessionFile ?? sessionFile;
 	const persistedSessionBaseOffset = normalizedSessionConfig.persistedSessionBaseOffset ?? 0;
+	const onDiagnostic = normalizedSessionConfig.onDiagnostic;
 	const agent = agents.find((a) => a.name === agentName);
 
 	if (!agent) {
@@ -240,6 +249,7 @@ export async function runSingleAgent(
 			makeDetails,
 			resumeSessionId,
 			sidecarSessionFile,
+			onDiagnostic,
 		);
 	}
 
@@ -254,6 +264,7 @@ export async function runSingleAgent(
 		makeDetails,
 		sessionFile,
 		persistedSessionBaseOffset,
+		onDiagnostic,
 	);
 }
 
@@ -267,6 +278,7 @@ async function runClaudeAgent(
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
 	resumeSessionId?: string,
 	sidecarSessionFile?: string,
+	onDiagnostic?: RunnerDiagnosticSink,
 ): Promise<SingleResult> {
 	try {
 		validateClaudeRuntimeModel(agent.model);
@@ -315,6 +327,10 @@ async function runClaudeAgent(
 	let completionMarkerWritten = false;
 	let wasAborted = false;
 
+	const diagnose = (event: Parameters<RunnerDiagnosticSink>[0]) => {
+		emitRunnerDiagnostic(onDiagnostic, { runtime: "claude", ...event });
+	};
+
 	const emitUpdate = () => {
 		if (!onUpdate) return;
 		const text = streamState.liveText ?? getFinalOutput(streamState.messages) ?? "(running...)";
@@ -362,9 +378,57 @@ async function runClaudeAgent(
 			let exitFallbackTimer: ReturnType<typeof setTimeout> | undefined;
 			let resultLingerTimer: ReturnType<typeof setTimeout> | undefined;
 			let lastExitCode = 0;
+			let lastProcessSignal: NodeJS.Signals | null = null;
 			let settleReason = "unknown";
 			let unparsedStdoutCount = 0;
 			const unparsedStdoutTail: string[] = [];
+			const parentIdentity = onDiagnostic ? readProcessIdentity(process.pid) : undefined;
+			const childIdentity = onDiagnostic ? readProcessIdentity(proc.pid) : undefined;
+
+			diagnose({
+				event: "spawn",
+				parentPid: process.pid,
+				parentProcessGroupId: parentIdentity?.processGroupId,
+				childPid: proc.pid,
+				childParentPid: childIdentity?.parentPid,
+				childProcessGroupId: childIdentity?.processGroupId,
+				processGroupMode: "inherited",
+			});
+
+			const terminateProcess = (terminationSignal: NodeJS.Signals, cause: string): boolean => {
+				diagnose({
+					event: "kill_intent",
+					childPid: proc.pid,
+					signal: terminationSignal,
+					cause,
+					stopReason: streamState.stopReason,
+				});
+				try {
+					const killSent = proc.kill(terminationSignal);
+					diagnose({
+						event: "kill_result",
+						childPid: proc.pid,
+						signal: terminationSignal,
+						cause,
+						killSent,
+					});
+					return killSent;
+				} catch (error) {
+					diagnose({
+						event: "process_error",
+						childPid: proc.pid,
+						cause: `kill:${cause}`,
+						error: toDiagnosticError(error),
+					});
+					return false;
+				}
+			};
+
+			const scheduleKillEscalation = (cause: string) => {
+				setTimeout(() => {
+					if (!procExited && proc.exitCode === null) terminateProcess("SIGKILL", `${cause}:grace_timeout`);
+				}, 5000);
+			};
 
 			const processLine = (line: string) => {
 				if (!line.trim()) return;
@@ -440,6 +504,14 @@ async function runClaudeAgent(
 						stderrBuf += `[runner] ${tail}\n`;
 					}
 				}
+				diagnose({
+					event: "settled",
+					childPid: proc.pid,
+					code: finalCode,
+					signal: lastProcessSignal,
+					settleReason,
+					stopReason: wasAborted ? "aborted" : streamState.stopReason,
+				});
 				resolve(finalCode);
 			};
 
@@ -452,10 +524,8 @@ async function runClaudeAgent(
 				if (resultLingerTimer) clearTimeout(resultLingerTimer);
 				resultLingerTimer = setTimeout(() => {
 					if (settled || procExited) return;
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!procExited && proc.exitCode === null) proc.kill("SIGKILL");
-					}, 5000);
+					terminateProcess("SIGTERM", "result_linger_timeout");
+					scheduleKillEscalation("result_linger_timeout");
 					settleReason = "result_linger_timeout";
 					resolveOnce(0);
 				}, 3000);
@@ -472,9 +542,11 @@ async function runClaudeAgent(
 				stderrBuf += data.toString();
 			});
 
-			proc.on("exit", (code) => {
+			proc.on("exit", (code, terminationSignal) => {
 				procExited = true;
 				lastExitCode = code ?? 0;
+				lastProcessSignal = terminationSignal;
+				diagnose({ event: "exit", childPid: proc.pid, code, signal: terminationSignal });
 				if (streamState.resultReceived) {
 					settleReason = "exit_after_result";
 					resolveOnce(0);
@@ -486,8 +558,10 @@ async function runClaudeAgent(
 				}, 1500);
 			});
 
-			proc.on("close", (code) => {
+			proc.on("close", (code, terminationSignal) => {
 				procExited = true;
+				lastProcessSignal = terminationSignal ?? lastProcessSignal;
+				diagnose({ event: "close", childPid: proc.pid, code, signal: terminationSignal });
 				if (!settled) {
 					settleReason = "close";
 					resolveOnce(streamState.resultReceived ? 0 : (code ?? lastExitCode ?? 0));
@@ -497,6 +571,12 @@ async function runClaudeAgent(
 			proc.on("error", (error) => {
 				procExited = true;
 				stderrBuf += `[runner] process error: ${error?.message || String(error)}\n`;
+				diagnose({
+					event: "process_error",
+					childPid: proc.pid,
+					cause: "child_process_event",
+					error: toDiagnosticError(error),
+				});
 				settleReason = "process_error";
 				resolveOnce(1);
 			});
@@ -505,10 +585,13 @@ async function runClaudeAgent(
 				const killProc = () => {
 					wasAborted = true;
 					settleReason = "aborted_by_signal";
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!procExited && proc.exitCode === null) proc.kill("SIGKILL");
-					}, 5000);
+					diagnose({
+						event: "abort_received",
+						childPid: proc.pid,
+						abortReason: serializeDiagnosticValue(signal.reason),
+					});
+					terminateProcess("SIGTERM", "abort_signal");
+					scheduleKillEscalation("abort_signal");
 				};
 				if (signal.aborted) killProc();
 				else signal.addEventListener("abort", killProc, { once: true });
@@ -549,6 +632,7 @@ async function runPiAgent(
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
 	sessionFile?: string,
 	persistedSessionBaseOffset = 0,
+	onDiagnostic?: RunnerDiagnosticSink,
 ): Promise<SingleResult> {
 	const args: string[] = ["--mode", "json", "-p"];
 	if (sessionFile) args.push("--session", sessionFile);
@@ -577,6 +661,10 @@ async function runPiAgent(
 	const contextGuardCeiling = resolveContextGuardCeiling(agent.model, "pi");
 	let contextGuardTripped = false;
 	let peakContextTokens = 0;
+
+	const diagnose = (event: Parameters<RunnerDiagnosticSink>[0]) => {
+		emitRunnerDiagnostic(onDiagnostic, { runtime: "pi", ...event });
+	};
 
 	const emitUpdate = () => {
 		if (onUpdate) {
@@ -617,11 +705,59 @@ async function runPiAgent(
 			let terminalMessageFallbackTimer: ReturnType<typeof setTimeout> | undefined;
 			let sessionPollTimer: ReturnType<typeof setInterval> | undefined;
 			let lastExitCode = 0;
+			let lastProcessSignal: NodeJS.Signals | null = null;
 			let lastEventAt = Date.now();
 			let sawAgentEnd = false;
 			let settleReason = "unknown";
 			let unparsedStdoutCount = 0;
 			const unparsedStdoutTail: string[] = [];
+			const parentIdentity = onDiagnostic ? readProcessIdentity(process.pid) : undefined;
+			const childIdentity = onDiagnostic ? readProcessIdentity(proc.pid) : undefined;
+
+			diagnose({
+				event: "spawn",
+				parentPid: process.pid,
+				parentProcessGroupId: parentIdentity?.processGroupId,
+				childPid: proc.pid,
+				childParentPid: childIdentity?.parentPid,
+				childProcessGroupId: childIdentity?.processGroupId,
+				processGroupMode: "inherited",
+			});
+
+			const terminateProcess = (terminationSignal: NodeJS.Signals, cause: string): boolean => {
+				diagnose({
+					event: "kill_intent",
+					childPid: proc.pid,
+					signal: terminationSignal,
+					cause,
+					stopReason: currentResult.stopReason,
+				});
+				try {
+					const killSent = proc.kill(terminationSignal);
+					diagnose({
+						event: "kill_result",
+						childPid: proc.pid,
+						signal: terminationSignal,
+						cause,
+						killSent,
+					});
+					return killSent;
+				} catch (error) {
+					diagnose({
+						event: "process_error",
+						childPid: proc.pid,
+						cause: `kill:${cause}`,
+						error: toDiagnosticError(error),
+					});
+					return false;
+				}
+			};
+
+			const scheduleKillEscalation = (cause: string) => {
+				setTimeout(() => {
+					if (!procExited && proc.exitCode === null) terminateProcess("SIGKILL", `${cause}:grace_timeout`);
+				}, 5000);
+			};
 
 			const syncFromPersistedSession = (allowResolve: boolean): boolean => {
 				if (!sessionFile) return false;
@@ -640,11 +776,12 @@ async function runPiAgent(
 					snapshot.completionMarker?.exitCode ??
 					(snapshot.terminalStopReason === "error" || snapshot.terminalStopReason === "aborted" ? 1 : 0);
 				writeCompletionMarkerOnce(forcedCode);
-				proc.kill("SIGTERM");
-				setTimeout(() => {
-					if (!procExited && proc.exitCode === null) proc.kill("SIGKILL");
-				}, 5000);
-				settleReason = snapshot.completionMarker ? "session_done_marker_fallback" : "session_terminal_message_fallback";
+				const fallbackReason = snapshot.completionMarker
+					? "session_done_marker_fallback"
+					: "session_terminal_message_fallback";
+				terminateProcess("SIGTERM", fallbackReason);
+				scheduleKillEscalation(fallbackReason);
+				settleReason = fallbackReason;
 				resolveOnce(forcedCode);
 				return true;
 			};
@@ -776,10 +913,8 @@ async function runPiAgent(
 							currentResult.errorMessage =
 								`${CONTEXT_GUARD_SIGNATURE} stopped at ${peakContextTokens} tokens ` +
 								`(ceiling ${contextGuardCeiling}) to preserve partial findings before provider context overflow.`;
-							proc.kill("SIGTERM");
-							setTimeout(() => {
-								if (!procExited && proc.exitCode === null) proc.kill("SIGKILL");
-							}, 5000);
+							terminateProcess("SIGTERM", "context_guard");
+							scheduleKillEscalation("context_guard");
 							settleReason = "context_guard";
 							resolveOnce(1);
 							return;
@@ -858,6 +993,14 @@ async function runPiAgent(
 						);
 					}
 				}
+				diagnose({
+					event: "settled",
+					childPid: proc.pid,
+					code: finalCode,
+					signal: lastProcessSignal,
+					settleReason,
+					stopReason: wasAborted ? "aborted" : currentResult.stopReason,
+				});
 				resolve(finalCode);
 			};
 
@@ -870,10 +1013,8 @@ async function runPiAgent(
 
 					const forcedCode = currentResult.stopReason === "error" || currentResult.stopReason === "aborted" ? 1 : 0;
 
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!procExited && proc.exitCode === null) proc.kill("SIGKILL");
-					}, 5000);
+					terminateProcess("SIGTERM", "terminal_message_fallback_timeout");
+					scheduleKillEscalation("terminal_message_fallback_timeout");
 
 					settleReason = "terminal_message_fallback_timeout";
 					resolveOnce(forcedCode);
@@ -894,10 +1035,8 @@ async function runPiAgent(
 
 					const forcedCode = currentResult.stopReason === "error" || currentResult.stopReason === "aborted" ? 1 : 0;
 
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!procExited && proc.exitCode === null) proc.kill("SIGKILL");
-					}, 5000);
+					terminateProcess("SIGTERM", "agent_end_fallback_timeout");
+					scheduleKillEscalation("agent_end_fallback_timeout");
 
 					settleReason = "agent_end_fallback_timeout";
 					resolveOnce(forcedCode);
@@ -921,9 +1060,11 @@ async function runPiAgent(
 				currentResult.stderr += data.toString();
 			});
 
-			proc.on("exit", (code) => {
+			proc.on("exit", (code, terminationSignal) => {
 				procExited = true;
 				lastExitCode = code ?? 0;
+				lastProcessSignal = terminationSignal;
+				diagnose({ event: "exit", childPid: proc.pid, code, signal: terminationSignal });
 				// In rare cases stdout/stderr pipes may stay open after process exit.
 				// Use a short fallback so runs cannot stay "running" forever.
 				exitFallbackTimer = setTimeout(() => {
@@ -932,8 +1073,10 @@ async function runPiAgent(
 				}, 1500);
 			});
 
-			proc.on("close", (code) => {
+			proc.on("close", (code, terminationSignal) => {
 				procExited = true;
+				lastProcessSignal = terminationSignal ?? lastProcessSignal;
+				diagnose({ event: "close", childPid: proc.pid, code, signal: terminationSignal });
 				settleReason = "close";
 				resolveOnce(code ?? lastExitCode ?? 0);
 			});
@@ -941,6 +1084,12 @@ async function runPiAgent(
 			proc.on("error", (error) => {
 				procExited = true;
 				appendStderrDiagnostic(currentResult, `process error: ${error?.message || String(error)}`);
+				diagnose({
+					event: "process_error",
+					childPid: proc.pid,
+					cause: "child_process_event",
+					error: toDiagnosticError(error),
+				});
 				settleReason = "process_error";
 				resolveOnce(1);
 			});
@@ -949,10 +1098,13 @@ async function runPiAgent(
 				const killProc = () => {
 					wasAborted = true;
 					settleReason = "aborted_by_signal";
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!procExited && proc.exitCode === null) proc.kill("SIGKILL");
-					}, 5000);
+					diagnose({
+						event: "abort_received",
+						childPid: proc.pid,
+						abortReason: serializeDiagnosticValue(signal.reason),
+					});
+					terminateProcess("SIGTERM", "abort_signal");
+					scheduleKillEscalation("abort_signal");
 				};
 				if (signal.aborted) killProc();
 				else signal.addEventListener("abort", killProc, { once: true });

@@ -31,6 +31,7 @@
 		"config.ts",
 		"constants.ts",
 		"context-limits.ts",
+		"diagnostics.ts",
 		"display-task.ts",
 		"escalation.ts",
 		"format.ts",

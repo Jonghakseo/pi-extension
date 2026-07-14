@@ -7,6 +7,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { HANG_TIMEOUT_MS } from "./constants.js";
+import { appendRunnerDiagnostic } from "./diagnostics.js";
 import { getSessionFileMtimeMs, readPersistedSessionSnapshot } from "./persisted-session.js";
 import { getLastNonEmptyLine } from "./runner.js";
 import type { SubagentStore } from "./store.js";
@@ -59,6 +60,16 @@ export function shutdownSubagentRuns(store: SubagentStore, pi: ExtensionAPI, rea
 	for (const [runId, run] of store.commandRuns) activeRuns.set(runId, run);
 	for (const [runId, entry] of store.globalLiveRuns) activeRuns.set(runId, entry.runState);
 
+	const activeRunIds = Array.from(activeRuns)
+		.filter(([, run]) => run.status === "running")
+		.map(([runId]) => runId);
+	appendRunnerDiagnostic(pi, {
+		event: "session_shutdown",
+		parentPid: process.pid,
+		sessionShutdownReason: reason,
+		activeRunIds,
+	});
+
 	for (const [runId, run] of activeRuns) {
 		if (run.status !== "running") continue;
 		const message = `Aborted because the parent pi session ${reason} is shutting down.`;
@@ -70,7 +81,7 @@ export function shutdownSubagentRuns(store: SubagentStore, pi: ExtensionAPI, rea
 		run.removed = true;
 
 		const controller = run.abortController ?? store.globalLiveRuns.get(runId)?.abortController;
-		controller?.abort();
+		controller?.abort({ source: "session_shutdown", reason, runId, activeRunIds });
 		run.abortController = undefined;
 
 		if (run.deliveryMode === "humanOnly") continue;
@@ -141,7 +152,7 @@ export function checkForHungRuns(store: SubagentStore, _pi: ExtensionAPI): void 
 		run.autoAbortReason = reason;
 
 		if (controller) {
-			controller.abort();
+			controller.abort({ source: "hang_timeout", runId, idleMs, reason });
 		}
 	}
 

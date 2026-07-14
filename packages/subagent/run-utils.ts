@@ -92,7 +92,7 @@ export function removeRun(store: SubagentStore, runId: number, options: RemoveRu
 		const reason = options.reason ?? "Aborting by remove...";
 		run.lastLine = reason;
 		run.lastOutput = reason;
-		controller.abort();
+		controller.abort({ source: "remove_run", runId, reason, removalReason: options.removalReason });
 		aborted = true;
 	}
 

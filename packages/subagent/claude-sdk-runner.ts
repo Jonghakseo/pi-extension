@@ -115,7 +115,7 @@ export async function runClaudeAgentViaSdk(
 
 	const forwardAbort = () => {
 		externalAbortRequested = true;
-		abortController.abort();
+		abortController.abort(signal?.reason);
 	};
 
 	if (signal?.aborted) {

@@ -331,6 +331,7 @@ describe("T09: command/tool runtime metadata integration", () => {
 					resumeSessionId: "sess-123",
 					sidecarSessionFile: "/tmp/session-1.jsonl",
 					persistedSessionBaseOffset: 0,
+					onDiagnostic: expect.any(Function),
 				},
 			);
 		});

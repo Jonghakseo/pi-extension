@@ -26,6 +26,7 @@ import {
 	SUBVIEW_OVERLAY_MAX_HEIGHT,
 	SUBVIEW_OVERLAY_WIDTH,
 } from "./constants.js";
+import { createRunDiagnosticSink } from "./diagnostics.js";
 import {
 	buildSubagentDisplayTaskFallback,
 	createDisplayTaskRefreshToken,
@@ -1434,6 +1435,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 										resumeSessionId: runState.claudeSessionId,
 										sidecarSessionFile: runState.sessionFile,
 										persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
+										onDiagnostic: createRunDiagnosticSink(pi, runState),
 									},
 								),
 							);
@@ -1907,7 +1909,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 			if (!controller) return false;
 			run.lastLine = "Aborting by user...";
 			run.lastOutput = run.lastLine;
-			controller.abort();
+			controller.abort({ source: "sub_abort_command", runId: run.id });
 			return true;
 		};
 
@@ -2187,7 +2189,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 			if (run.status === "running" && shortcutController) {
 				run.lastLine = "Aborting by user...";
 				run.lastOutput = run.lastLine;
-				shortcutController.abort();
+				shortcutController.abort({ source: "sub_abort_shortcut", runId: id });
 				aborted++;
 			} else if (run.status !== "running") {
 				const result = removeRun(store, id, {

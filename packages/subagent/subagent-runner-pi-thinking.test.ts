@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RunnerDiagnosticEvent } from "./diagnostics.ts";
 
 vi.setConfig({ testTimeout: 20_000 });
 
@@ -440,6 +441,7 @@ describe("runSingleAgent pi terminal message fallback", () => {
 	it("force-resolves after a terminal assistant message even if the pi child never exits", async () => {
 		vi.useFakeTimers();
 		const { runSingleAgent } = await import("./runner.ts");
+		const diagnostics: RunnerDiagnosticEvent[] = [];
 		spawnMock.mockImplementationOnce(() =>
 			makeHangingProcess([
 				JSON.stringify({ type: "agent_start" }),
@@ -464,6 +466,7 @@ describe("runSingleAgent pi terminal message fallback", () => {
 			undefined,
 			undefined,
 			makeDetails,
+			{ onDiagnostic: (event) => diagnostics.push(event) },
 		);
 
 		await vi.runAllTicks();
@@ -477,6 +480,14 @@ describe("runSingleAgent pi terminal message fallback", () => {
 		expect(spawnMock).toHaveBeenCalledTimes(1);
 		const proc = spawnMock.mock.results[0]?.value as MockProc;
 		expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+		expect(diagnostics).toContainEqual(
+			expect.objectContaining({
+				event: "kill_intent",
+				runtime: "pi",
+				signal: "SIGTERM",
+				cause: "terminal_message_fallback_timeout",
+			}),
+		);
 	});
 
 	it("still force-resolves when cleanup events arrive after the terminal assistant message", async () => {
@@ -633,9 +644,73 @@ describe("runSingleAgent pi terminal message fallback", () => {
 		expect(persisted).toContain('"type":"subagent_done"');
 	});
 
+	it("records the child signal on exit and close without adding it to the result", async () => {
+		const { runSingleAgent } = await import("./runner.ts");
+		const diagnostics: RunnerDiagnosticEvent[] = [];
+		spawnMock.mockImplementationOnce(() => {
+			const proc = new EventEmitter() as MockProc;
+			proc.stdout = new EventEmitter();
+			proc.stderr = new EventEmitter();
+			proc.exitCode = null;
+			proc.kill = vi.fn(() => true);
+			(proc as MockProc & { pid: number }).pid = 4321;
+			queueMicrotask(() => {
+				proc.stdout.emit(
+					"data",
+					Buffer.from(
+						`${JSON.stringify({
+							type: "message_end",
+							message: {
+								role: "assistant",
+								model: "test-model",
+								content: [{ type: "toolCall", name: "bash", arguments: { command: "true" } }],
+								stopReason: "toolUse",
+							},
+						})}\n`,
+						"utf8",
+					),
+				);
+				proc.emit("exit", null, "SIGTERM");
+				proc.emit("close", null, "SIGTERM");
+			});
+			return proc;
+		});
+
+		const result = await runSingleAgent(
+			"/tmp/project",
+			[makePiAgent()],
+			"pi-worker",
+			"signal task",
+			undefined,
+			undefined,
+			undefined,
+			makeDetails,
+			{ onDiagnostic: (event) => diagnostics.push(event) },
+		);
+
+		expect(diagnostics).toContainEqual(
+			expect.objectContaining({ event: "exit", runtime: "pi", childPid: 4321, code: null, signal: "SIGTERM" }),
+		);
+		expect(diagnostics).toContainEqual(
+			expect.objectContaining({ event: "close", runtime: "pi", childPid: 4321, code: null, signal: "SIGTERM" }),
+		);
+		expect(diagnostics).toContainEqual(
+			expect.objectContaining({
+				event: "settled",
+				runtime: "pi",
+				signal: "SIGTERM",
+				settleReason: "close",
+				stopReason: "toolUse",
+			}),
+		);
+		expect(result).not.toHaveProperty("signal");
+		expect(result.stderr).not.toContain("SIGTERM");
+	});
+
 	it("writes aborted marker with non-zero exitCode on signal abort", async () => {
 		vi.useFakeTimers();
 		const { runSingleAgent } = await import("./runner.ts");
+		const diagnostics: RunnerDiagnosticEvent[] = [];
 		spawnMock.mockImplementationOnce(() => makeAbortableProcess([JSON.stringify({ type: "agent_start" })]));
 		const ac = new AbortController();
 
@@ -648,12 +723,12 @@ describe("runSingleAgent pi terminal message fallback", () => {
 			ac.signal,
 			undefined,
 			makeDetails,
-			sessionFile,
+			{ sessionFile, onDiagnostic: (event) => diagnostics.push(event) },
 		);
 		const rejection = resultPromise.catch((error) => error);
 
 		await vi.runAllTicks();
-		ac.abort();
+		ac.abort({ source: "test_abort", runId: 9 });
 		await vi.runOnlyPendingTimersAsync();
 		const error = await rejection;
 		expect(error).toBeInstanceOf(Error);
@@ -663,5 +738,12 @@ describe("runSingleAgent pi terminal message fallback", () => {
 		expect(persisted).toContain('"type":"subagent_done"');
 		expect(persisted).toContain('"exitCode":1');
 		expect(persisted).toContain('"stopReason":"aborted"');
+		expect(diagnostics).toContainEqual(
+			expect.objectContaining({
+				event: "abort_received",
+				runtime: "pi",
+				abortReason: { source: "test_abort", runId: 9 },
+			}),
+		);
 	});
 });

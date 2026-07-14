@@ -22,6 +22,7 @@ import {
 	SUBAGENT_STRONG_WAIT_MESSAGE,
 } from "./constants.js";
 import { isContextOverflowText } from "./context-limits.js";
+import { createRunDiagnosticSink } from "./diagnostics.js";
 import {
 	buildSubagentDisplayTaskFallback,
 	createDisplayTaskRefreshToken,
@@ -956,7 +957,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 
 					run.lastLine = "Aborting by subagent tool...";
 					run.lastOutput = run.lastLine;
-					abortCtrl.abort();
+					abortCtrl.abort({ source: "subagent_tool_abort", runId });
 					aborting.push(runId);
 				}
 
@@ -1080,7 +1081,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			clearParentAbortListener(runId);
 			if (!signal || shouldRunAsync) return;
 
-			const abortFromParent = () => abortController.abort();
+			const abortFromParent = () => abortController.abort({ source: "parent_tool_abort", runId });
 			if (signal.aborted) {
 				abortFromParent();
 				return;
@@ -1201,6 +1202,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						resumeSessionId: runState.claudeSessionId,
 						sidecarSessionFile: runState.sessionFile,
 						persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
+						onDiagnostic: createRunDiagnosticSink(pi, runState),
 					},
 				),
 			).then((result) => finalizeRunState(runState, result));

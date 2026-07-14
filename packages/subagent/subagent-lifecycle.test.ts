@@ -1,5 +1,6 @@
 /** biome-ignore-all lint/suspicious/noExplicitAny: tests use lightweight runtime-shaped fixtures and mocks. */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RUNNER_DIAGNOSTIC_CUSTOM_TYPE } from "./diagnostics.ts";
 import subagentExtension from "./index.ts";
 import { shutdownSubagentRuns } from "./lifecycle.ts";
 import { SUBAGENT_COMMANDS, SUBAGENT_SHORTCUTS } from "./registration-manifest.ts";
@@ -13,6 +14,7 @@ function createPi() {
 		pi: {
 			registerTool: vi.fn(),
 			registerCommand: vi.fn(),
+			appendEntry: vi.fn(),
 			registerShortcut: vi.fn(),
 			on: vi.fn((event: string, handler: any) => {
 				handlers.set(event, [...(handlers.get(event) ?? []), handler]);
@@ -112,7 +114,7 @@ describe("subagent extension lifecycle", () => {
 			createdAt: Date.now(),
 			pendingResults: new Map(),
 		});
-		const pi = { sendMessage: vi.fn() };
+		const pi = { appendEntry: vi.fn(), sendMessage: vi.fn() };
 
 		shutdownSubagentRuns(store, pi as never, "reload");
 
@@ -123,6 +125,19 @@ describe("subagent extension lifecycle", () => {
 		expect(run.lastLine).toContain("session reload");
 		expect(store.globalLiveRuns.size).toBe(0);
 		expect(store.batchGroups.size).toBe(0);
+		expect(pi.appendEntry).toHaveBeenCalledWith(
+			RUNNER_DIAGNOSTIC_CUSTOM_TYPE,
+			expect.objectContaining({
+				event: "session_shutdown",
+				sessionShutdownReason: "reload",
+				activeRunIds: [1],
+			}),
+		);
+		expect(abortController.signal.reason).toMatchObject({
+			source: "session_shutdown",
+			reason: "reload",
+			runId: 1,
+		});
 		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 		expect(pi.sendMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
