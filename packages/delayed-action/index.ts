@@ -66,13 +66,14 @@ function formatTask(task: DelayTask, now = Date.now()): string {
 	return `${task.id} · ${formatKoreanDuration(remaining)} 후 (${dueTime}) · ${preview(task.prompt)}`;
 }
 
+function sortedTasks(): DelayTask[] {
+	return [...tasks.values()].sort((a, b) => a.dueAt - b.dueAt);
+}
+
 function listTasks(): string {
 	if (tasks.size === 0) return "예약된 delay가 없어요.";
 	const now = Date.now();
-	return [
-		"예약된 delay:",
-		...[...tasks.values()].sort((a, b) => a.dueAt - b.dueAt).map((task) => `- ${formatTask(task, now)}`),
-	].join("\n");
+	return ["예약된 delay:", ...sortedTasks().map((task) => `- ${formatTask(task, now)}`)].join("\n");
 }
 
 function paintStatus(ctx: ExtensionContext, text: string): string {
@@ -107,30 +108,42 @@ function stopStatusTickerIfIdle(): void {
 	statusInterval = undefined;
 }
 
-function injectPrompt(task: DelayTask): void {
+type SubmitReason = "due" | "manual";
+
+function removeTask(task: DelayTask): boolean {
+	if (tasks.get(task.id) !== task) return false;
+	clearTimeout(task.timer);
+	tasks.delete(task.id);
+	refreshStatus();
+	stopStatusTickerIfIdle();
+	return true;
+}
+
+function submitTask(task: DelayTask, reason: SubmitReason): boolean {
+	if (!removeTask(task)) return false;
 	try {
 		if (!api) throw new Error("delay runtime is not initialized.");
 		const idle = task.ctx.isIdle();
 		// idle이면 즉시 턴을 트리거하고, 작업 중이면 현재 턴 종료 후 실행되도록 followUp으로 큐잉한다.
 		api.sendUserMessage(task.prompt, idle ? undefined : { deliverAs: "followUp" });
 		if (task.ctx.hasUI) {
-			task.ctx.ui.notify(
-				idle
-					? `⏰ ${task.id} 시간이 되어 프롬프트를 실행했어요.`
-					: `⏰ ${task.id} 작업 중이라 followUp으로 예약했어요.`,
-				"info",
-			);
+			const message =
+				reason === "manual"
+					? idle
+						? `▶ ${task.id} 프롬프트를 바로 실행했어요.`
+						: `▶ ${task.id} 프롬프트를 followUp으로 바로 보냈어요.`
+					: idle
+						? `⏰ ${task.id} 시간이 되어 프롬프트를 실행했어요.`
+						: `⏰ ${task.id} 작업 중이라 followUp으로 예약했어요.`;
+			task.ctx.ui.notify(message, "info");
 		}
 	} catch (err) {
 		if (task.ctx.hasUI) {
 			const message = err instanceof Error ? err.message : String(err);
 			task.ctx.ui.notify(`⏰ ${task.id} 프롬프트 실행 실패: ${message}`, "error");
 		}
-	} finally {
-		tasks.delete(task.id);
-		refreshStatus();
-		stopStatusTickerIfIdle();
 	}
+	return true;
 }
 
 function scheduleDelay(ctx: ExtensionContext, delayMs: number, prompt: string, requestedId?: string): DelayTask {
@@ -143,13 +156,30 @@ function scheduleDelay(ctx: ExtensionContext, delayMs: number, prompt: string, r
 		prompt,
 		createdAt,
 		dueAt: createdAt + delayMs,
-		timer: setTimeout(() => injectPrompt(task), delayMs),
+		timer: setTimeout(() => submitTask(task, "due"), delayMs),
 		ctx,
 	};
 	tasks.set(id, task);
 	ensureStatusTicker();
 	refreshStatus();
 	return task;
+}
+
+function rescheduleTask(task: DelayTask, delayMs: number, prompt: string): boolean {
+	if (tasks.get(task.id) !== task) return false;
+	clearTimeout(task.timer);
+	const createdAt = Date.now();
+	const updatedTask: DelayTask = {
+		id: task.id,
+		prompt,
+		createdAt,
+		dueAt: createdAt + delayMs,
+		timer: setTimeout(() => submitTask(updatedTask, "due"), delayMs),
+		ctx: task.ctx,
+	};
+	tasks.set(updatedTask.id, updatedTask);
+	refreshStatus();
+	return true;
 }
 
 function cancelTask(id: string): boolean {
@@ -175,7 +205,8 @@ function helpText(): string {
 	return [
 		"Usage:",
 		"  /delay <duration> <prompt>     지연 후 프롬프트를 제출하고 턴을 트리거",
-		"  /delay list                    예약 목록 보기",
+		"  /delay list                    예약 목록을 텍스트로 보기",
+		"  /delay-list                    예약을 골라 바로 보내기/수정/취소",
 		"  /delay-cancel [id|all]         예약 취소 (id 생략 시 전체 취소)",
 		"",
 		"Examples:",
@@ -208,6 +239,84 @@ function handleDelayCancelCommand(args: string): string {
 	return cancelTask(target) ? `✓ ${target} 예약을 취소했어요.` : `예약을 찾을 수 없어요: ${target}`;
 }
 
+function notifyTaskUnavailable(ctx: ExtensionContext, id: string): void {
+	ctx.ui.notify(`예약이 변경되었거나 이미 실행/취소되었어요: ${id}`, "warning");
+}
+
+async function handleDelayListCommand(ctx: ExtensionContext): Promise<void> {
+	if (!ctx.hasUI) {
+		ctx.ui.notify("/delay-list는 대화형 UI에서만 사용할 수 있어요.", "warning");
+		return;
+	}
+
+	const availableTasks = sortedTasks();
+	if (availableTasks.length === 0) {
+		ctx.ui.notify("예약된 delay가 없어요.", "info");
+		return;
+	}
+
+	const now = Date.now();
+	const taskOptions = availableTasks.map((task) => formatTask(task, now));
+	const selectedTaskLabel = await ctx.ui.select("예약된 delay를 선택하세요", taskOptions);
+	if (selectedTaskLabel === undefined) return;
+	const selectedTask = availableTasks[taskOptions.indexOf(selectedTaskLabel)];
+	if (!selectedTask || tasks.get(selectedTask.id) !== selectedTask) {
+		notifyTaskUnavailable(ctx, selectedTask?.id ?? selectedTaskLabel);
+		return;
+	}
+
+	const action = await ctx.ui.select(`${selectedTask.id} · ${preview(selectedTask.prompt)}`, [
+		"지금 보내기",
+		"수정",
+		"예약 취소",
+	]);
+	if (action === undefined) return;
+	if (tasks.get(selectedTask.id) !== selectedTask) {
+		notifyTaskUnavailable(ctx, selectedTask.id);
+		return;
+	}
+
+	if (action === "지금 보내기") {
+		submitTask(selectedTask, "manual");
+		return;
+	}
+	if (action === "예약 취소") {
+		cancelTask(selectedTask.id);
+		ctx.ui.notify(`✓ ${selectedTask.id} 예약을 취소했어요.`, "info");
+		return;
+	}
+	if (action !== "수정") return;
+
+	const remaining = Math.max(0, selectedTask.dueAt - Date.now());
+	const delayText = await ctx.ui.input(
+		`새 지연 시간 · 현재 약 ${formatKoreanDuration(remaining)} 남음`,
+		"예: 30s, 5m, 1h30m, 2시간",
+	);
+	if (delayText === undefined) return;
+	const delayMs = parseDurationMs(delayText);
+	if (delayMs === undefined) {
+		ctx.ui.notify("지연 시간을 해석할 수 없어요. 예: 30s, 5m, 1h30m, 2시간", "warning");
+		return;
+	}
+	if (tasks.get(selectedTask.id) !== selectedTask) {
+		notifyTaskUnavailable(ctx, selectedTask.id);
+		return;
+	}
+
+	const editedPrompt = await ctx.ui.editor(`메시지 수정 · ${selectedTask.id}`, selectedTask.prompt);
+	if (editedPrompt === undefined) return;
+	const prompt = editedPrompt.trim();
+	if (!prompt) {
+		ctx.ui.notify("메시지는 비워둘 수 없어요.", "warning");
+		return;
+	}
+	if (!rescheduleTask(selectedTask, delayMs, prompt)) {
+		notifyTaskUnavailable(ctx, selectedTask.id);
+		return;
+	}
+	ctx.ui.notify(`✓ ${selectedTask.id} 수정됨: 지금부터 ${formatKoreanDuration(delayMs)} 후 제출`, "info");
+}
+
 function clearAllTimers(): void {
 	for (const task of tasks.values()) clearTimeout(task.timer);
 	tasks.clear();
@@ -236,6 +345,14 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerCommand("delay-list", {
+		description: "예약된 delay를 골라 바로 보내기, 수정 또는 취소",
+		handler: async (_args, ctx) => {
+			latestCtx = ctx;
+			await handleDelayListCommand(ctx);
+		},
+	});
+
 	pi.registerCommand("delay-cancel", {
 		description: "delay 예약 취소. 사용법: /delay-cancel [id|all] (인자 생략 시 전체 취소)",
 		getArgumentCompletions: (prefix) => {
@@ -257,13 +374,13 @@ export default function (pi: ExtensionAPI) {
 		name: "delay",
 		label: "Delay",
 		description:
-			"Schedule a prompt to be submitted to the agent after a short delay, triggering a new turn when it fires. Use for one-shot reminders like 5m, 1h, or 2시간. The user can cancel with /delay-cancel <id> or /delay-cancel for all.",
+			"Schedule a prompt to be submitted to the agent after a short delay, triggering a new turn when it fires. Use for one-shot reminders like 5m, 1h, or 2시간. The user can manage scheduled prompts with /delay-list or cancel directly with /delay-cancel <id>.",
 		promptSnippet: "Submit a prompt to the agent after a delay, e.g. delay=5m prompt='check status'.",
 		promptGuidelines: [
 			"Use delay only when the user explicitly asks to run a prompt later in the same interactive session.",
 			"When the delay fires the prompt is submitted as a user message and triggers a turn (followUp-queued if the agent is busy), not just inserted into the editor.",
 			"For recurring or persistent headless scheduled jobs, use cron instead of delay.",
-			"Tell the user the returned id so they can cancel it with `/delay-cancel <id>`; `/delay-cancel` without an id cancels all.",
+			"Tell the user the returned id. They can manage it interactively with `/delay-list`, cancel it with `/delay-cancel <id>`, or cancel all with `/delay-cancel`.",
 		],
 		parameters: DelayParamsSchema,
 		executionMode: "parallel",

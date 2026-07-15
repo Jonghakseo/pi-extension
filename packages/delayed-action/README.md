@@ -34,9 +34,16 @@ pi install npm:@ryan_nookpi/pi-extension-delayed-action
 
 ```text
 /delay <duration> <prompt>     지연 후 프롬프트 제출
-/delay list                    예약 목록 보기
+/delay list                    예약 목록을 텍스트로 보기
+/delay-list                    예약을 골라 바로 보내기/수정/취소
 /delay-cancel [id|all]         예약 취소, id 생략 시 전체 취소
 ```
+
+`/delay-list`를 실행하면 예약된 메시지를 선택한 뒤 다음 작업을 할 수 있습니다.
+
+- **지금 보내기**: 타이머를 제거하고 메시지를 즉시 제출합니다. 에이전트가 작업 중이면 follow-up으로 보냅니다.
+- **수정**: 새 지연 시간과 메시지를 입력합니다. 지연 시간은 수정 완료 시점부터 다시 계산됩니다.
+- **예약 취소**: 선택한 예약을 취소합니다.
 
 ## Tool
 
