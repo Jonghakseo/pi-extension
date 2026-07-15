@@ -9,7 +9,7 @@ The primary interface is **CLI-style**: one `subagent` tool accepts a command st
 
 ## Requirements
 
-- pi 0.80.6 or later (tested with 0.80.6)
+- pi 0.80.6 or later (tested with 0.80.7)
 - For `runtime: claude` with the default `claudeRuntime: "sdk"`: supported Anthropic authentication such as `ANTHROPIC_API_KEY`; see the [official Claude Agent SDK documentation](https://platform.claude.com/docs/en/agent-sdk/overview)
 - For `runtime: claude` with `claudeRuntime: "cli"`: the `claude` executable on `PATH` and an authenticated Claude Code installation
 
@@ -270,7 +270,7 @@ Without GitHub CLI, use the repository's [new issue page](https://github.com/Jon
 
 ## Stability
 
-This is a `0.1.x` release. The commands, configuration keys, agent frontmatter, and behaviors documented here are the supported surface. Internal TypeScript modules included in the npm tarball are implementation details and may change during the `0.x` series. Compatibility is currently tested against pi 0.80.6.
+This is a `0.1.x` release. The commands, configuration keys, agent frontmatter, and behaviors documented here are the supported surface. Internal TypeScript modules included in the npm tarball are implementation details and may change during the `0.x` series. Compatibility is currently tested against pi 0.80.7.
 
 ## License
 
