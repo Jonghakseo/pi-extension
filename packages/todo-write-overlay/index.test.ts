@@ -8,6 +8,7 @@ import {
 	renderTodoOverlayPlainLines,
 	renderTodoWriteSummary,
 	restoreTodoWriteState,
+	shouldIncrementTodoTurn,
 } from "./index.ts";
 
 describe("todo-write-overlay helpers", () => {
@@ -47,6 +48,13 @@ describe("todo-write-overlay helpers", () => {
 		]);
 
 		expect(renderTodoOverlayPlainLines(applied.state)).toEqual(["✓ Design", "→ Implementing", "○ Verify"]);
+	});
+
+	it("increments turns only for final assistant messages", () => {
+		expect(shouldIncrementTodoTurn({ role: "assistant", stopReason: "stop" })).toBe(true);
+		expect(shouldIncrementTodoTurn({ role: "assistant", stopReason: "toolUse" })).toBe(false);
+		expect(shouldIncrementTodoTurn({ role: "toolResult" })).toBe(false);
+		expect(shouldIncrementTodoTurn({ role: "user" })).toBe(false);
 	});
 
 	it("hides fully completed overlays after the grace period", () => {

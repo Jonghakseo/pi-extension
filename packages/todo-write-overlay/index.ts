@@ -322,6 +322,10 @@ function incrementTodoTurn(ctx: Pick<ExtensionContext, "cwd" | "sessionManager">
 	todoTurnStore.set(key, getTodoTurn(key) + 1);
 }
 
+export function shouldIncrementTodoTurn(message: { role: string; stopReason?: string }): boolean {
+	return message.role === "assistant" && message.stopReason !== "toolUse";
+}
+
 function setTodoOverlayAgentRunning(ctx: Pick<ExtensionContext, "cwd" | "sessionManager">, running: boolean): void {
 	const key = getTodoStateKey(ctx);
 	todoOverlayAgentRunningStore.set(key, running);
@@ -686,7 +690,8 @@ export default function todoWriteOverlayExtension(pi: ExtensionAPI): void {
 		);
 	});
 
-	pi.on("message_end", async (_event, ctx) => {
+	pi.on("message_end", async (event, ctx) => {
+		if (!shouldIncrementTodoTurn(event.message)) return;
 		incrementTodoTurn(ctx);
 		await syncTodoOverlay(ctx, pi);
 	});
