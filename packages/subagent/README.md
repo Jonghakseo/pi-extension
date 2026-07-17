@@ -1,19 +1,13 @@
 # subagent
 
-Asynchronous subagent delegation for [pi](https://github.com/earendil-works/pi). Run specialist agents in dedicated child sessions, optionally pass selected main-session context, and receive results as follow-up messages.
-
-The primary interface is **CLI-style**: one `subagent` tool accepts a command string with verbs, options, and a `--` task separator, such as `subagent run worker --isolated -- review this change`. This provides one consistent grammar for single runs, continuation, parallel batches, sequential chains, inspection, and cleanup. These strings are tool input, not shell commands.
+Asynchronous subagent delegation for [pi](https://github.com/earendil-works/pi). Run specialist agents in dedicated child sessions, share main-session context when needed, and receive results as follow-up messages.
 
 > [!WARNING]
-> Subagents run headlessly without approval prompts. Claude-runtime agents use permission bypass, and pi-runtime agents can use every tool listed in their agent definition. This extension is not a sandbox. Use it only in trusted repositories with trusted prompts and agent definitions.
-
-## Requirements
-
-- pi 0.80.6 or later (tested with 0.80.7)
-- For `runtime: claude` with the default `claudeRuntime: "sdk"`: supported Anthropic authentication such as `ANTHROPIC_API_KEY`; see the [official Claude Agent SDK documentation](https://platform.claude.com/docs/en/agent-sdk/overview)
-- For `runtime: claude` with `claudeRuntime: "cli"`: the `claude` executable on `PATH` and an authenticated Claude Code installation
+> Subagents run headlessly without approval prompts. Claude-runtime agents bypass permissions, and pi-runtime agents can use every tool declared by their agent definition. This extension is not a sandbox. Use trusted repositories, prompts, and agent definitions only.
 
 ## Install
+
+Requires pi 0.80.6 or later. Compatibility is tested with pi 0.80.7.
 
 ```bash
 pi install npm:@ryan_nookpi/pi-extension-subagent
@@ -21,35 +15,7 @@ pi install npm:@ryan_nookpi/pi-extension-subagent
 
 ## Quick start
 
-### 1. Discover or seed agents
-
-Run this from the interactive pi UI:
-
-```text
-/subagents
-```
-
-If no agent definitions exist in any discovery location, the extension offers an optional starter pack containing:
-
-- Nine portable English agents: `browser`, `challenger`, `code-cleaner`, `reviewer`, `searcher`, `security-auditor`, `simplifier`, `verifier`, and `worker`
-- The `stress-interview` and `self-healing` skills, written in English and validated against the [Agent Skills specification](https://agentskills.io/specification)
-- Missing global `subagent` settings: `defaultAgent: "worker"`, `claudeRuntime: "cli"`, and symbol mappings for searcher, challenger, and browser
-
-Seeded agents intentionally omit model IDs and inherit the user's Pi model. Existing files and configured setting values are never overwritten. If the offer is declined, nothing is recorded or written, so the extension asks again the next time the list is still empty.
-
-Agents and subagent settings are available immediately after installation. Run `/reload` or start a new Pi session to activate the two newly copied skills. Headless sessions never install automatically; they return instructions to run `/subagents` interactively.
-
-The same offer is available from either agent-list tool:
-
-```json
-{ "command": "subagent agents" }
-```
-
-The separate `list-agents` tool behaves the same way. The `subagent ...` examples in this README are **tool command strings**, not terminal commands. Do not run them in Bash.
-
-### 2. Or create an agent manually
-
-Agents are Markdown files with YAML frontmatter. Create `~/.pi/agent/agents/worker.md` for a global agent, or `.pi/agents/worker.md` inside one project:
+Create a global agent at `~/.pi/agent/agents/worker.md`, or a project agent at `.pi/agents/worker.md`:
 
 ```markdown
 ---
@@ -63,18 +29,7 @@ runtime: pi
 Implement the requested changes and verify them.
 ```
 
-`name` and `description` are required. Optional fields are:
-
-- `runtime`: `pi` (default) or `claude`
-- `model`: runtime-compatible model ID
-- `thinking`: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`
-- `tools`: comma-separated tool names
-
-Omitted model, thinking, and tools values use that runtime's defaults.
-
-### 3. Launch a run
-
-Interactive user command:
+Then launch it from pi:
 
 ```text
 /sub:isolate worker implement the requested change and run tests
@@ -86,36 +41,54 @@ Equivalent AI tool call:
 { "command": "subagent run worker --isolated -- implement the requested change and run tests" }
 ```
 
-Runs are asynchronous in interactive mode. Wait for the automatic completion or failure follow-up instead of immediately polling `status` or `detail`.
+Tool launches are asynchronous. Wait for the automatic completion or failure follow-up instead of polling immediately.
 
-## Agent discovery
+## Agent definitions
 
-Definitions are loaded from the following locations. Later sources override earlier agents with the same name:
+Agent files use YAML frontmatter followed by the system prompt. `name` and `description` are required.
+
+| Field | Description |
+| --- | --- |
+| `runtime` | `pi` (default) or `claude` |
+| `model` | Runtime-compatible model ID |
+| `thinking` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
+| `tools` | Comma-separated tool names |
+
+Omitted optional fields use runtime defaults.
+
+Agents are discovered in this order; later definitions override earlier agents with the same name:
 
 1. `$PI_CODING_AGENT_DIR/agents/*.md` (normally `~/.pi/agent/agents/*.md`)
 2. Nearest `.claude/agents/**/*.md`
 3. Nearest `.pi/agents/*.md`
 
-Project `.claude/agents` files are discovered recursively. Project `.pi/agents` files are discovered only in the selected directory.
+`.claude/agents` is searched recursively. `.pi/agents` is not.
 
-## Context modes and lifecycle
+Run `/subagents`, `subagent agents`, or the `list-agents` tool to inspect discovered agents.
 
-- `--isolated` starts a dedicated child session without copying the main conversation. It is the default for `subagent` tool launches.
-- `--main` adds selected main-session context to the child task.
-- `/sub:isolate` selects isolated context; `/sub:main` selects main context.
-- `>>` and `>` use main-session context.
-- Continuing a run preserves its original context mode and child session. Supplying `--main` or `--isolated` to `continue` does not retroactively change it.
+### Optional starter pack
 
-Pi replaces and invalidates extension runtimes during `/new`, `/resume`, `/fork`, and reload. Active child processes are therefore aborted during `session_shutdown`, and the old session records why they stopped. Wait for active runs before replacing the parent session. This follows pi's [official extension lifecycle guidance](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#long-lived-resources-and-shutdown).
+If no agents are found, `/subagents` can offer an optional, opinionated starter pack. It copies nine agent templates, two example workflow skills, and missing global `subagent` settings. Existing files and configured values are not overwritten.
 
-## CLI-style tool interface
+The starter pack is not required. Decline it if you prefer to define agents manually. It fills a missing `claudeRuntime` setting with `cli`; without that setting, the extension default is `sdk`.
 
-Instead of registering a separate tool for every operation, the extension exposes a compact CLI-style grammar through one `subagent` tool. The model passes the full command as the tool's `command` parameter; it must not invoke `subagent` from Bash or another shell.
+## Context modes
 
-The extension registers two main-session tools:
+- `--isolated` starts without copying the main conversation. It is the default for tool launches.
+- `--main` passes selected main-session context to the child.
+- `/sub:isolate` and `/sub:main` provide the same choice for interactive commands.
+- Continuing a run preserves its original child session and context mode.
 
-- `list-agents`: return discovered agent definitions and runtime settings
-- `subagent`: accept one CLI-style command string
+Active child processes stop when pi replaces or reloads the parent extension runtime. This follows pi's [official extension lifecycle guidance](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#long-lived-resources-and-shutdown).
+
+## Tool interface
+
+The extension registers two tools:
+
+- `list-agents` — list discovered agents and runtime settings
+- `subagent` — execute a CLI-style command string
+
+These strings are tool input, not shell commands. Do not run them in Bash.
 
 ```text
 subagent help
@@ -123,15 +96,15 @@ subagent agents
 subagent runs
 subagent run <agent> [--main|--isolated] -- <task>
 subagent continue <runId> [--agent <agent>] [--main|--isolated] -- <task>
-subagent batch [--main|--isolated] --agent <agent> --task <task> [--agent <agent> --task <task> ...]
-subagent chain [--main|--isolated] --agent <agent> --task <task> [--agent <agent> --task <task> ...]
+subagent batch [--main|--isolated] --agent <agent> --task <task> ...
+subagent chain [--main|--isolated] --agent <agent> --task <task> ...
 subagent status <runId>
 subagent detail <runId>
 subagent abort <runId|runId,runId|all>
 subagent remove <runId|runId,runId|all>
 ```
 
-`batch` runs independent tasks in parallel. Quote tasks containing spaces:
+`batch` runs independent tasks in parallel:
 
 ```json
 {
@@ -147,64 +120,51 @@ subagent remove <runId|runId,runId|all>
 }
 ```
 
-Use `status` and `detail` only for explicit, one-off inspection. Repeated polling is unnecessary because completion is delivered automatically.
+Use `status` and `detail` for one-off inspection, not polling loops.
 
-## Slash commands
+## Interactive commands
 
-- `/subagents` — list discovered agents and settings
-- `/sub:main [agent|alias|runId] <task>` — launch with main-session context or continue a run
-- `/sub:isolate [agent|alias|runId] <task>` — launch in isolated context or continue a run
-- `/sub:peek [runId]` — show the latest response; defaults to the latest run
-- `/sub:open [runId]` — open session replay; defaults to the latest run
-- `/sub:history` — show all run history, including removed runs
-- `/sub:rm [runId]` — remove a run; defaults to the latest and aborts it if necessary
-- `/sub:clear [all]` — clear finished runs, or every run with `all`
-- `/sub:abort [runId|all]` — abort the latest running run, one run, or all running runs
+| Command | Description |
+| --- | --- |
+| `/subagents` | List agents and offer the starter pack when none exist |
+| `/sub:main [agent\|runId] <task>` | Launch or continue with main-session context |
+| `/sub:isolate [agent\|runId] <task>` | Launch or continue with isolated context |
+| `/sub:peek [runId]` | Show the latest result |
+| `/sub:open [runId]` | Open the child session replay |
+| `/sub:history` | Show run history, including removed runs |
+| `/sub:abort [runId\|all]` | Abort running work |
+| `/sub:rm [runId]` | Remove a run, aborting it first if necessary |
+| `/sub:clear [all]` | Clear finished runs, or all runs |
 
 When an agent is omitted, launch commands use `defaultAgent`.
 
-## Interactive shortcuts
+### Shortcuts
 
-| Shortcut | Behavior |
+| Shortcut | Description |
 | --- | --- |
-| `>> [agent\|runId] <task>` | Visible run using main-session context |
-| `> [agent\|runId] <task>` | Hidden run using main-session context; interactive UI only |
+| `>> [agent\|runId] <task>` | Visible run with main-session context |
+| `> [agent\|runId] <task>` | Hidden run with main-session context |
 | `#<runId> <task>` | Continue a run |
-| `>><symbol> <task>` | Visible run using the agent mapped in `symbolMap` |
-| `><symbol> <task>` | Hidden run using the mapped agent |
-| `<>runId` | Compact form of `/sub:peek runId` |
-| `<< [runId\|runId,runId]` | Abort selected running runs or clear selected finished runs; without arguments, abort the latest running run |
-| `<<< [all]` | Clear finished runs; use `all` to clear every run |
+| `>><symbol> <task>` / `><symbol> <task>` | Run an agent from `symbolMap` |
+| `<>runId` | Peek at a result |
+| `<< [runId\|runId,runId]` | Abort running or clear finished runs |
+| `<<< [all]` | Clear finished runs, or all runs |
 
-Hidden runs do not add start or completion messages to the main transcript. Read their output with `/sub:peek`, `<>runId`, or `/sub:open`. A plain `>` shortcut requires a space before its task; configured symbol shortcuts do not.
+Hidden runs are available only in the interactive UI and do not add start or completion messages to the main transcript.
 
-## Prompt mentions
+### Prompt mentions
 
-Type `>agent-name` anywhere in the prompt to reference a discovered subagent for the main LLM. Typing a partial name such as `>w` opens autocomplete candidates whose names contain `w`; selecting `worker` inserts `>worker`. Exact discovered mentions are highlighted in the prompt editor.
-
-When the prompt is submitted, the extension rewrites exact mentions to `subagent:agent-name` before the main LLM sees them:
+Use `>agent-name` inside a prompt to reference a discovered agent. Exact names are highlighted and rewritten to `subagent:agent-name` before the main LLM receives the prompt; they do not launch a run directly. Unknown names remain unchanged.
 
 ```text
-Please delegate this implementation to >worker and the review to >reviewer.
+Delegate implementation to >worker and review to >reviewer.
 ```
 
-becomes:
-
-```text
-Please delegate this implementation to subagent:worker and the review to subagent:reviewer.
-```
-
-Mentions do not launch subagents directly. They make the intended agent explicit to the main LLM, which can then decide how to use the `subagent` tool. Unknown names remain unchanged. Existing launch shortcuts remain distinct: `> worker ...` contains a space, while a prompt mention does not.
-
-## Escalation from pi-runtime agents
-
-Pi-runtime subagent sessions receive an `ask_master` tool. It lets a child report a decision that the parent must make, then immediately terminates that child run. The parent receives the escalation as a follow-up.
-
-Use `ask_master` only when the child cannot safely proceed, such as before a destructive operation or an unresolved architecture decision. Claude-runtime agents do not receive this tool; they report blockers in their final text instead.
+A mention has no space after `>`. Launch shortcuts remain separate, such as `> worker implement this`.
 
 ## Configuration
 
-Global configuration belongs under `subagent` in `$PI_CODING_AGENT_DIR/settings.json` (normally `~/.pi/agent/settings.json`):
+Global settings belong under `subagent` in `$PI_CODING_AGENT_DIR/settings.json`:
 
 ```json
 {
@@ -230,65 +190,44 @@ A nearest project `.pi/subagent.json` overrides global values:
 }
 ```
 
-- `claudeRuntime`: `sdk` (default) or `cli`; applies only to agents with `runtime: claude`
-- `defaultAgent`: agent used when a launch omits its agent; defaults to `worker` and must match a discovered definition
-- `symbolMap`: one-character shortcuts mapped to non-empty agent names; a valid project map replaces the global map as a whole, while a malformed project map falls back to the valid global map
+- `claudeRuntime`: `sdk` (default) or `cli`; applies only to `runtime: claude`
+- `defaultAgent`: used when an interactive launch omits the agent; defaults to `worker`
+- `symbolMap`: one-character shortcuts mapped to agent names; a valid project map replaces the global map
 
-### Context guard override
+Set `PI_SUBAGENT_CONTEXT_GUARD_TOKENS` to a positive integer to override the proactive context limit for pi-runtime children. Set it to `0` or an empty value to disable the guard.
 
-`PI_SUBAGENT_CONTEXT_GUARD_TOKENS` overrides the proactive context limit for pi-runtime children. Set it to a positive integer to apply that ceiling to every pi model. Set it to `0` or an empty value to disable the proactive guard and rely on native compaction or provider overflow handling.
+## Claude runtime
+
+The default Claude runtime uses the Claude Agent SDK and requires supported Anthropic authentication such as `ANTHROPIC_API_KEY`; see the [official Claude Agent SDK documentation](https://platform.claude.com/docs/en/agent-sdk/overview).
+
+For `claudeRuntime: "cli"`, install the `claude` executable, ensure it is on `PATH`, and authenticate Claude Code.
+
+## Escalation
+
+Pi-runtime children receive an `ask_master` tool. Calling it reports a decision or blocker to the parent and immediately terminates the child run. Use it only when the child cannot proceed safely.
+
+Claude-runtime children do not receive `ask_master`; they report blockers in their final response.
 
 ## Troubleshooting
 
-### `Configured defaultAgent "worker" was not found`
+- **`Configured defaultAgent "worker" was not found`** — create a matching agent, choose another agent explicitly, or update `defaultAgent`.
+- **Claude SDK authentication failure** — confirm the environment that starts pi contains valid Anthropic authentication.
+- **`spawn claude ENOENT`** — install Claude Code or switch `claudeRuntime` to `sdk`.
+- **Hidden run shows no transcript message** — inspect it with `/sub:peek`, `<>runId`, or `/sub:open`.
 
-Create a `worker` definition from the quick start, choose an existing agent explicitly, or change `defaultAgent`. Run `/subagents` to verify discovery before launching.
+When reporting a bug, include the pi and extension versions, OS and Node version, launch command, reproduction steps, and sanitized error output. Do not attach full session files because they may contain prompts, tool output, or secrets.
 
-### Claude SDK authentication failure
+## Security
 
-Confirm the environment used to start pi has valid Anthropic authentication, such as `ANTHROPIC_API_KEY`. The SDK runtime does not require the Claude Code CLI.
-
-### `spawn claude ENOENT`
-
-`claudeRuntime` is set to `cli`, but the `claude` executable is not on `PATH`. Install and authenticate Claude Code, or switch back to `claudeRuntime: "sdk"`.
-
-### Hidden shortcut produces no transcript message
-
-That is intentional. Hidden `>` runs are human-only UI jobs. Inspect them with `/sub:peek`, `<>runId`, or `/sub:open`.
-
-### Debug runner termination
-
-The extension records process lifecycle diagnostics as `subagent-runner-diagnostic` custom entries in the parent session JSONL. They include run/batch IDs, parent and child PID/PGID, abort reason, internal kill cause, `exit`/`close` code and signal, settle reason, shutdown reason, and process-error stacks. Custom entries are not sent to the LLM and remain hidden unless an entry renderer is registered, as documented by pi's [`appendEntry` API](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#piappendentrycustomtype-data).
-
-Run `/session` to find the current session file, set `SESSION_FILE` to that path, then extract only the diagnostic entries:
-
-```bash
-jq -c 'select(.type == "custom" and .customType == "subagent-runner-diagnostic") | {timestamp, data}' "$SESSION_FILE"
-```
-
-For batch failures, compare entries by `batchId` and `runId`, then follow each run from `spawn` through `kill_intent`, `exit`, `close`, and `settled`. Share only the selected diagnostic lines—not the full session file, which may contain prompts or tool output.
-
-To report a reproducible extension bug, create `subagent-issue.md` with the pi and extension versions, OS and Node version, launch mode/command, reproduction steps, expected and actual behavior, and the sanitized diagnostic lines. Then submit it with:
-
-```bash
-gh issue create --repo Jonghakseo/pi-extension \
-  --title "subagent: unexpected child termination" \
-  --body-file subagent-issue.md
-```
-
-Without GitHub CLI, use the repository's [new issue page](https://github.com/Jonghakseo/pi-extension/issues/new). Remove secrets and sensitive paths before attaching diagnostics.
-
-## Security and trust boundary
-
-- Claude SDK execution uses `permissionMode: "bypassPermissions"` with `allowDangerouslySkipPermissions`; Claude CLI execution uses `--dangerously-skip-permissions`.
-- Pi-runtime children are headless and have unrestricted access to the tools declared by their agent.
-- Project agent definitions are repository-controlled instructions. Review `.pi/agents` and `.claude/agents` before running this extension in an unfamiliar repository.
-- Restrict each agent's `tools` list to what it needs. Avoid broad shell or write access for read-only review agents.
-- `--isolated` separates conversation context; it does not provide filesystem, process, credential, or network isolation.
+- Claude SDK uses permission bypass; Claude CLI uses `--dangerously-skip-permissions`.
+- Pi-runtime children can use every tool declared by their agent.
+- Project agent definitions are repository-controlled instructions. Review `.pi/agents` and `.claude/agents` in unfamiliar repositories.
+- Restrict each agent's `tools` list to the minimum required.
+- `--isolated` separates conversation context, not filesystem, process, credential, or network access.
 
 ## Stability
 
-This is a `0.1.x` release. The commands, configuration keys, agent frontmatter, and behaviors documented here are the supported surface. Internal TypeScript modules included in the npm tarball are implementation details and may change during the `0.x` series. Compatibility is currently tested against pi 0.80.7.
+This package is pre-1.0. Documented commands, configuration, and agent frontmatter are the supported surface; internal TypeScript modules may change between releases.
 
 ## License
 
