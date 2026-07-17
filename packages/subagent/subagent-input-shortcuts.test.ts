@@ -67,13 +67,13 @@ function createPi() {
 }
 
 async function dispatchInput(handlers: Map<string, any[]>, text: string, ctx: any) {
+	let currentText = text;
 	for (const handler of handlers.get("input") ?? []) {
-		const result = await handler({ source: "user", text }, ctx);
-		if (result?.action === "handled") {
-			return result;
-		}
+		const result = await handler({ source: "user", text: currentText }, ctx);
+		if (result?.action === "handled") return result;
+		if (result?.action === "transform") currentText = result.text;
 	}
-	return { action: "continue" as const };
+	return currentText === text ? { action: "continue" as const } : { action: "transform" as const, text: currentText };
 }
 
 describe("subagent input shortcuts", () => {
@@ -175,6 +175,27 @@ describe("subagent input shortcuts", () => {
 		expect(single.action).toBe("continue");
 		expect(legacy.action).toBe("continue");
 		expect(legacySymbol.action).toBe("continue");
+		expect(mockRunSingleAgent).not.toHaveBeenCalled();
+	});
+
+	it("transforms >agent mentions before symbol shortcuts without launching a run", async () => {
+		fs.writeFileSync(path.join(tmpDir, ".pi", "subagent.json"), JSON.stringify({ symbolMap: { w: "searcher" } }));
+		const { registerAll } = await import("./commands.ts");
+		const store = createStore();
+		const { pi, handlers } = createPi();
+		registerAll(pi as never, store);
+		const ctx = {
+			cwd: tmpDir,
+			hasUI: true,
+			ui: { notify: vi.fn(), select: vi.fn(), getEditorText: vi.fn(() => ""), setEditorText: vi.fn() },
+			sessionManager: { getSessionFile: () => path.join(tmpDir, "main.jsonl"), getEntries: () => [] },
+		};
+
+		const result = await dispatchInput(handlers, "please implement this >worker", ctx);
+		const leadingResult = await dispatchInput(handlers, ">worker implement this", ctx);
+
+		expect(result).toEqual({ action: "transform", text: "please implement this subagent:worker" });
+		expect(leadingResult).toEqual({ action: "transform", text: "subagent:worker implement this" });
 		expect(mockRunSingleAgent).not.toHaveBeenCalled();
 	});
 

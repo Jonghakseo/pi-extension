@@ -68,7 +68,9 @@ describe("subagent extension lifecycle", () => {
 		const ctx = {
 			cwd: "/tmp/project",
 			hasUI: false,
+			mode: "json",
 			ui: {
+				addAutocompleteProvider: vi.fn(),
 				onTerminalInput: vi.fn(() => {
 					readinessOrder.push("session-ready");
 					return unsubscribeTerminalInput;

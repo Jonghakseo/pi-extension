@@ -178,6 +178,24 @@ When an agent is omitted, launch commands use `defaultAgent`.
 
 Hidden runs do not add start or completion messages to the main transcript. Read their output with `/sub:peek`, `<>runId`, or `/sub:open`. A plain `>` shortcut requires a space before its task; configured symbol shortcuts do not.
 
+## Prompt mentions
+
+Type `>agent-name` anywhere in the prompt to reference a discovered subagent for the main LLM. Typing a partial name such as `>w` opens autocomplete candidates whose names contain `w`; selecting `worker` inserts `>worker`. Exact discovered mentions are highlighted in the prompt editor.
+
+When the prompt is submitted, the extension rewrites exact mentions to `subagent:agent-name` before the main LLM sees them:
+
+```text
+Please delegate this implementation to >worker and the review to >reviewer.
+```
+
+becomes:
+
+```text
+Please delegate this implementation to subagent:worker and the review to subagent:reviewer.
+```
+
+Mentions do not launch subagents directly. They make the intended agent explicit to the main LLM, which can then decide how to use the `subagent` tool. Unknown names remain unchanged. Existing launch shortcuts remain distinct: `> worker ...` contains a space, while a prompt mention does not.
+
 ## Escalation from pi-runtime agents
 
 Pi-runtime subagent sessions receive an `ask_master` tool. It lets a child report a decision that the parent must make, then immediately terminates that child run. The parent receives the escalation as a follow-up.

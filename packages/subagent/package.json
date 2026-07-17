@@ -40,6 +40,7 @@
 		"lifecycle.ts",
 		"invocation-queue.ts",
 		"live-preview.ts",
+		"mentions.ts",
 		"persisted-session.ts",
 		"replay.ts",
 		"registration-manifest.ts",

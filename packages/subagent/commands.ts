@@ -42,6 +42,11 @@ import {
 	upsertPendingGroupCompletion,
 } from "./group-pending.js";
 import { enqueueSubagentInvocation } from "./invocation-queue.js";
+import {
+	createAgentMentionAutocompleteProvider,
+	registerAgentMentionHighlighting,
+	replaceAgentMentions,
+} from "./mentions.js";
 import { appendDisplayTaskUpdate, getSessionFileSize } from "./persisted-session.js";
 import { SUBAGENT_COMMANDS, type SubagentCommandName } from "./registration-manifest.js";
 import { readSessionReplayItems, SubagentSessionReplayOverlay } from "./replay.js";
@@ -903,6 +908,17 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 	const defineCommand = (name: SubagentCommandName, definition: SubagentCommandDefinition): void => {
 		commandDefinitions.set(name, definition);
 	};
+
+	// Prompt mentions are references for the main LLM, not direct launch shortcuts.
+	// Register this transform before the legacy `>` handlers so `>worker` cannot
+	// be mistaken for a configured one-character symbol shortcut.
+	pi.on("input", (event, ctx) => {
+		if (event.source === "extension") return { action: "continue" as const };
+
+		const transformedText = replaceAgentMentions(event.text ?? "", discoverAgents(ctx.cwd).agents);
+		if (transformedText === event.text) return { action: "continue" as const };
+		return { action: "transform" as const, text: transformedText, images: event.images };
+	});
 
 	pi.registerTool({
 		name: "list-agents",
@@ -2300,6 +2316,19 @@ export async function handleBeforeAgentStart(
 export function handleSessionStart(pi: ExtensionAPI, store: SubagentStore, ctx: ExtensionContext): void {
 	restoreRunsFromSession(store, ctx, pi);
 	registerTerminalInputRedirect(ctx);
+
+	let cachedAgents = discoverAgents(ctx.cwd).agents;
+	let discoveredAt = Date.now();
+	const getAgents = () => {
+		if (Date.now() - discoveredAt >= 1_000) {
+			cachedAgents = discoverAgents(ctx.cwd).agents;
+			discoveredAt = Date.now();
+		}
+		return cachedAgents;
+	};
+
+	ctx.ui.addAutocompleteProvider((current) => createAgentMentionAutocompleteProvider(current, getAgents));
+	registerAgentMentionHighlighting(ctx, getAgents);
 }
 
 /** session_shutdown handler; index.ts invokes this after shutting down runs. */
