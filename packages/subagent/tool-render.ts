@@ -5,10 +5,11 @@
  */
 
 import { getMarkdownTheme, type ThemeColor } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, Markdown, Spacer, Text, visibleWidth } from "@earendil-works/pi-tui";
+import { parseSubagentToolCommand } from "./cli.js";
 import { formatToolCall, formatUsageStats } from "./format.js";
 import { getDisplayItems, getFinalOutput } from "./runner.js";
-import { COLLAPSED_ITEM_COUNT } from "./store.js";
+import { COLLAPSED_ITEM_COUNT, truncateText } from "./store.js";
 import type { DisplayItem, SubagentDetails } from "./types.js";
 
 // ─── Helpers (internal) ──────────────────────────────────────────────────────
@@ -24,6 +25,90 @@ type ToolRenderResult = {
 };
 
 type ToolRenderArgs = { command?: unknown };
+type ToolCallRenderContext = { expanded: boolean };
+type CompactBlock = { agent: string; task: string };
+
+const COMPACT_TASK_PREVIEW_WIDTH = 72;
+const COMPACT_AGENT_WIDTH = 20;
+const COMPACT_MAX_ITEMS = 3;
+
+function normalizeTaskPreview(task: string): string {
+	return truncateText(task.replace(/\s+/g, " ").trim(), COMPACT_TASK_PREVIEW_WIDTH);
+}
+
+function getContextLabel(params: Record<string, unknown>): "main" | "isolated" {
+	return params.contextMode === "main" ? "main" : "isolated";
+}
+
+function getCompactBlocks(value: unknown): CompactBlock[] | null {
+	if (!Array.isArray(value)) return null;
+	const blocks: CompactBlock[] = [];
+	for (const item of value) {
+		if (!item || typeof item !== "object") return null;
+		const agent = "agent" in item ? item.agent : undefined;
+		const task = "task" in item ? item.task : undefined;
+		if (typeof agent !== "string" || typeof task !== "string") return null;
+		blocks.push({ agent, task });
+	}
+	return blocks;
+}
+
+function formatCompactAgent(agent: string, width: number): string {
+	const label = truncateText(agent, COMPACT_AGENT_WIDTH);
+	return `${label}${" ".repeat(Math.max(0, width - visibleWidth(label)))}`;
+}
+
+function renderCompactBlocks(kind: "batch" | "chain", params: Record<string, unknown>): string | null {
+	const blocks = getCompactBlocks(kind === "batch" ? params.runs : params.steps);
+	if (!blocks || blocks.length === 0) return null;
+
+	const visibleBlocks = blocks.slice(0, COMPACT_MAX_ITEMS);
+	const agentWidth = Math.max(
+		...visibleBlocks.map((block) => visibleWidth(truncateText(block.agent, COMPACT_AGENT_WIDTH))),
+	);
+	const contextLabel = getContextLabel(params);
+	const executionLabel = kind === "batch" ? "parallel" : "sequential";
+	const lines = [`  ${kind} · ${contextLabel} · ${blocks.length} ${executionLabel}`];
+
+	for (const [index, block] of visibleBlocks.entries()) {
+		const agent = formatCompactAgent(block.agent, agentWidth);
+		const task = normalizeTaskPreview(block.task);
+		if (kind === "batch") {
+			lines.push(`  ∥ ${agent}  ${task}`);
+			continue;
+		}
+
+		const connector = index === 0 ? "" : `${"   ".repeat(index - 1)}└─ `;
+		lines.push(`  ${connector}${index + 1} ${agent}  ${task}`);
+	}
+
+	const hiddenCount = blocks.length - visibleBlocks.length;
+	if (hiddenCount > 0) {
+		if (kind === "batch") lines.push(`  ∥ +${hiddenCount} jobs`);
+		else lines.push(`  ${"   ".repeat(visibleBlocks.length - 1)}└─ +${hiddenCount} steps`);
+	}
+
+	return lines.join("\n");
+}
+
+function renderCompactLaunch(command: unknown): string | null {
+	const parsed = parseSubagentToolCommand(command);
+	if (parsed.type !== "params") return null;
+
+	const { params } = parsed;
+	if (params.asyncAction === "batch") return renderCompactBlocks("batch", params);
+	if (params.asyncAction === "chain") return renderCompactBlocks("chain", params);
+	if (typeof params.task !== "string") return null;
+
+	const contextLabel = getContextLabel(params);
+	const task = normalizeTaskPreview(params.task);
+	if (typeof params.runId === "number") {
+		const agent = typeof params.agent === "string" ? ` · ${params.agent}` : "";
+		return `  continue · #${params.runId}${agent} · ${contextLabel}\n  ${task}`;
+	}
+	if (typeof params.agent !== "string") return null;
+	return `  run · ${params.agent} · ${contextLabel}\n  ${task}`;
+}
 
 function renderDisplayItems(items: DisplayItem[], expanded: boolean, theme: RenderTheme, limit?: number): string {
 	const toShow = limit ? items.slice(-limit) : items;
@@ -43,15 +128,25 @@ function renderDisplayItems(items: DisplayItem[], expanded: boolean, theme: Rend
 
 // ─── renderCall ──────────────────────────────────────────────────────────────
 
-export function renderSubagentToolCall(args: ToolRenderArgs, theme: RenderTheme) {
+export function renderSubagentToolCall(
+	args: ToolRenderArgs,
+	theme: RenderTheme,
+	context: ToolCallRenderContext = { expanded: false },
+) {
 	const raw = typeof args.command === "string" ? args.command.trim() : "";
 	const command = raw || "subagent help";
+	let text = theme.fg("toolTitle", theme.bold("subagent ")) + theme.fg("accent", "cli");
+
+	if (!context.expanded) {
+		const compactLaunch = renderCompactLaunch(args.command);
+		if (compactLaunch) return new Text(`${text}\n${theme.fg("dim", compactLaunch)}`, 0, 0);
+	}
+
 	const MAX_CALL_LINES = 5;
 	const commandLines = command.split("\n");
 	const truncated = commandLines.length > MAX_CALL_LINES;
 	const preview = truncated ? commandLines.slice(0, MAX_CALL_LINES).join("\n") : command;
 
-	let text = theme.fg("toolTitle", theme.bold("subagent ")) + theme.fg("accent", "cli");
 	text += `\n  ${theme.fg("dim", preview)}`;
 	if (truncated) text += `\n  ${theme.fg("muted", `... +${commandLines.length - MAX_CALL_LINES} more lines`)}`;
 	return new Text(text, 0, 0);
