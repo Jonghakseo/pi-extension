@@ -27,10 +27,12 @@ type ToolRenderResult = {
 type ToolRenderArgs = { command?: unknown };
 type ToolCallRenderContext = { expanded: boolean };
 type CompactBlock = { agent: string; task: string };
+type ListAgentsDetails = { agents?: Array<{ name?: unknown }> };
 
 const COMPACT_TASK_PREVIEW_WIDTH = 72;
 const COMPACT_AGENT_WIDTH = 20;
 const COMPACT_MAX_ITEMS = 3;
+const COMPACT_AGENT_LIST_COUNT = 3;
 
 function normalizeTaskPreview(task: string): string {
 	return truncateText(task.replace(/\s+/g, " ").trim(), COMPACT_TASK_PREVIEW_WIDTH);
@@ -110,6 +112,11 @@ function renderCompactLaunch(command: unknown): string | null {
 	return `  run · ${params.agent} · ${contextLabel}\n  ${task}`;
 }
 
+function getToolResultText(result: ToolRenderResult): string {
+	const raw = result.content[0];
+	return (raw?.type === "text" ? raw.text : undefined) ?? "(no output)";
+}
+
 function renderDisplayItems(items: DisplayItem[], expanded: boolean, theme: RenderTheme, limit?: number): string {
 	const toShow = limit ? items.slice(-limit) : items;
 	const skipped = limit && items.length > limit ? items.length - limit : 0;
@@ -127,6 +134,38 @@ function renderDisplayItems(items: DisplayItem[], expanded: boolean, theme: Rend
 }
 
 // ─── renderCall ──────────────────────────────────────────────────────────────
+
+export function renderListAgentsCall(_args: unknown, theme: RenderTheme) {
+	return new Text(theme.fg("toolTitle", theme.bold("list-agents")), 0, 0);
+}
+
+export function renderListAgentsResult(
+	result: ToolRenderResult,
+	{ expanded }: { expanded: boolean },
+	theme: RenderTheme,
+) {
+	const fullText = getToolResultText(result);
+	if (expanded) return new Text(theme.fg("toolOutput", fullText), 0, 0);
+
+	const details = result.details as ListAgentsDetails | undefined;
+	const names = details?.agents
+		?.map((agent) => (typeof agent.name === "string" ? truncateText(agent.name, COMPACT_AGENT_WIDTH) : ""))
+		.filter(Boolean);
+	if (!names) return new Text(theme.fg("toolOutput", fullText.split("\n")[0] ?? fullText), 0, 0);
+	if (names.length === 0) return new Text(theme.fg("muted", "○ no agents"), 0, 0);
+
+	const visibleNames = names.slice(0, COMPACT_AGENT_LIST_COUNT);
+	const hiddenCount = names.length - visibleNames.length;
+	const hiddenSuffix = hiddenCount > 0 ? `, +${hiddenCount}` : "";
+	return new Text(
+		theme.fg(
+			"toolOutput",
+			`✓ ${names.length} agent${names.length === 1 ? "" : "s"} · ${visibleNames.join(", ")}${hiddenSuffix}`,
+		),
+		0,
+		0,
+	);
+}
 
 export function renderSubagentToolCall(
 	args: ToolRenderArgs,

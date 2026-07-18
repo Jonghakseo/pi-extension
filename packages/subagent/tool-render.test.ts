@@ -1,16 +1,64 @@
 import { describe, expect, it } from "vitest";
-import { renderSubagentToolCall } from "./tool-render.ts";
+import { renderListAgentsCall, renderListAgentsResult, renderSubagentToolCall } from "./tool-render.ts";
 
 const theme = {
 	fg: (_color: string, text: string) => text,
 	bold: (text: string) => text,
 };
 
-function renderCall(command: string, expanded = false): string {
-	return renderSubagentToolCall({ command }, theme as never, { expanded })
+function renderComponent(component: { render(width: number): string[] }): string {
+	return component
 		.render(240)
+		.map((line) => line.trimEnd())
 		.join("\n");
 }
+
+function renderCall(command: string, expanded = false): string {
+	return renderComponent(renderSubagentToolCall({ command }, theme as never, { expanded }));
+}
+
+describe("list-agents tool rendering", () => {
+	const fullText = [
+		"Available subagents",
+		"",
+		"worker [user] · model: test · thinking: medium · tools: read,bash",
+		"reviewer [user] · model: test · thinking: high · tools: read",
+		"verifier [user] · model: test · thinking: medium · tools: read,bash",
+		"searcher [user] · model: test · thinking: low · tools: read",
+	].join("\n");
+	const details = {
+		agents: [{ name: "worker" }, { name: "reviewer" }, { name: "verifier" }, { name: "searcher" }],
+	};
+
+	it("shows agent count and up to three names when collapsed", () => {
+		const call = renderComponent(renderListAgentsCall({}, theme as never));
+		const result = renderComponent(
+			renderListAgentsResult(
+				{ content: [{ type: "text", text: fullText }], details },
+				{ expanded: false },
+				theme as never,
+			),
+		);
+
+		expect(call).toContain("list-agents");
+		expect(result).toContain("✓ 4 agents · worker, reviewer, verifier, +1");
+		expect(result).not.toContain("model: test");
+	});
+
+	it("keeps the original agent list when expanded", () => {
+		const rendered = renderComponent(
+			renderListAgentsResult(
+				{ content: [{ type: "text", text: fullText }], details },
+				{ expanded: true },
+				theme as never,
+			),
+		);
+
+		expect(rendered).toContain(fullText);
+		expect(rendered).toContain("model: test");
+		expect(rendered).not.toContain("✓ 4 agents");
+	});
+});
 
 describe("renderSubagentToolCall", () => {
 	it("renders a compact single-run summary when collapsed", () => {

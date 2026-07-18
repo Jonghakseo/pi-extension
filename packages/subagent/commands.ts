@@ -63,7 +63,12 @@ import { buildMainContextText, makeSubagentSessionFile, wrapTaskWithMainContext 
 import { formatStarterPackNotice, offerStarterPackIfEmpty } from "./starter-pack.js";
 import { type SubagentStore, truncateText, updateRunFromResult } from "./store.js";
 import { createSubagentToolExecute } from "./tool-execute.js";
-import { renderSubagentToolCall, renderSubagentToolResult } from "./tool-render.js";
+import {
+	renderListAgentsCall,
+	renderListAgentsResult,
+	renderSubagentToolCall,
+	renderSubagentToolResult,
+} from "./tool-render.js";
 import type { CommandRunState, SingleResult, SubagentDetails } from "./types.js";
 import { ListAgentsParams, SubagentParams } from "./types.js";
 import { updateCommandRunsWidget, type WidgetRenderCtx } from "./widget.js";
@@ -927,6 +932,8 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 		description:
 			"List available subagent definitions (name, source, model, thinking, tools, description). Useful before planning delegation.",
 		parameters: ListAgentsParams,
+		renderCall: renderListAgentsCall,
+		renderResult: renderListAgentsResult,
 		execute: async (_toolCallId, _params: Record<string, any>, _signal, _onUpdate, ctx) => {
 			const starterPack = await offerStarterPackIfEmpty(ctx);
 			const discovery = starterPack.discovery;
