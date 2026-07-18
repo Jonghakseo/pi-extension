@@ -1,7 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { copyToClipboard } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-
 import { buildMemoryPrompt } from "./inject.ts";
 import { resolveProjectId } from "./project-id.ts";
 import {
@@ -12,6 +10,7 @@ import {
 	memoryEntryId,
 	memoryExistsInScope,
 	migrateFromJson,
+	parseIndex,
 	readMemoryMd,
 	readTopicFile,
 	removeMemory,
@@ -20,6 +19,17 @@ import {
 	saveMemory,
 	searchMemories,
 } from "./storage.ts";
+import {
+	type MemoryToolDetails,
+	renderForgetCall,
+	renderForgetResult,
+	renderMemoryListCall,
+	renderMemoryListResult,
+	renderRecallCall,
+	renderRecallResult,
+	renderRememberCall,
+	renderRememberResult,
+} from "./tool-render.ts";
 import type { MemoryScope } from "./types.ts";
 import { ForgetParams, MemoryListParams, RecallParams, RememberParams } from "./types.ts";
 import {
@@ -94,8 +104,16 @@ function parseRememberArgs(raw: string): { scope: MemoryScope; content: string }
 	return { scope: "project", content: raw };
 }
 
-function buildTextResult(text: string) {
-	return { content: [{ type: "text" as const, text }], details: undefined };
+function buildTextResult(text: string, details?: MemoryToolDetails) {
+	return { content: [{ type: "text" as const, text }], details };
+}
+
+function countMemoryIndex(content: string): { memories: number; topics: number } {
+	const sections = parseIndex(content);
+	return {
+		memories: sections.reduce((sum, section) => sum + section.entries.length, 0),
+		topics: sections.length,
+	};
 }
 
 async function openMemoryDetail(ctx: ExtensionContext, entry: SearchResult): Promise<void> {
@@ -134,7 +152,12 @@ async function executeRecallById(id: string, projectId: string | undefined) {
 	if (!entry) {
 		throw new Error(`Memory not found with id: ${id}`);
 	}
-	return buildTextResult(`[${entry.scope}] ${entry.topic}/${entry.title}\n\n${entry.content}`);
+	return buildTextResult(`[${entry.scope}] ${entry.topic}/${entry.title}\n\n${entry.content}`, {
+		kind: "recall-id",
+		scope: entry.scope,
+		topic: entry.topic,
+		title: entry.title,
+	});
 }
 
 async function executeRecallQuery(query: string, projectId: string | undefined, scope?: MemoryScope) {
@@ -142,8 +165,13 @@ async function executeRecallQuery(query: string, projectId: string | undefined, 
 	if (scope) {
 		results = results.filter((r) => r.scope === scope);
 	}
+	const resultDetails: MemoryToolDetails = {
+		kind: "recall-query",
+		total: results.length,
+		matches: results.slice(0, 2).map((result) => ({ scope: result.scope, topic: result.topic, title: result.title })),
+	};
 	if (results.length === 0) {
-		return buildTextResult("No matching memories found.");
+		return buildTextResult("No matching memories found.", resultDetails);
 	}
 	const maxResults = 20;
 	const lines = results.slice(0, maxResults).map((r) => {
@@ -157,20 +185,30 @@ async function executeRecallQuery(query: string, projectId: string | undefined, 
 		results.length > shown
 			? `Found ${results.length} memories (showing top ${shown}):`
 			: `Found ${results.length} memories:`;
-	return buildTextResult(`${header}\n\n${lines.join("\n")}\n\nUse recall with id to view full content.`);
+	return buildTextResult(`${header}\n\n${lines.join("\n")}\n\nUse recall with id to view full content.`, resultDetails);
 }
 
 async function executeRecallIndex(projectId: string | undefined, scope?: MemoryScope) {
 	const parts: string[] = [];
+	let userCount = { memories: 0, topics: 0 };
+	let projectCount = { memories: 0, topics: 0 };
 	if (!scope || scope === "user") {
 		const userIndex = (await readMemoryMd("user")).trim();
+		userCount = countMemoryIndex(userIndex);
 		if (userIndex) parts.push(userIndex);
 	}
 	if ((!scope || scope === "project") && projectId) {
 		const projectIndex = (await readMemoryMd("project", projectId)).trim();
+		projectCount = countMemoryIndex(projectIndex);
 		if (projectIndex) parts.push(projectIndex);
 	}
-	return buildTextResult(parts.filter(Boolean).join("\n\n") || "No memories stored.");
+	return buildTextResult(parts.filter(Boolean).join("\n\n") || "No memories stored.", {
+		kind: "recall-index",
+		scope,
+		user: userCount.memories,
+		project: projectCount.memories,
+		topics: userCount.topics + projectCount.topics,
+	});
 }
 
 function normalizeForgetTitle(title: string) {
@@ -197,7 +235,12 @@ async function executeForgetTopic(
 		if (!removed) {
 			throw new Error(`Memory not found in ${scope} scope: ${normalizedTopic} / "${normalizedTitle}"`);
 		}
-		return buildTextResult(`Deleted from ${scope}: ${normalizedTopic} / "${normalizedTitle}"`);
+		return buildTextResult(`Deleted from ${scope}: ${normalizedTopic} / "${normalizedTitle}"`, {
+			kind: "forget",
+			scope,
+			topic: normalizedTopic,
+			title: normalizedTitle,
+		});
 	}
 
 	const existsInUser = await memoryExistsInScope("user", undefined, normalizedTopic, normalizedTitle);
@@ -220,7 +263,12 @@ async function executeForgetTopic(
 	if (!removed) {
 		throw new Error(`Memory not found: ${normalizedTopic} / "${normalizedTitle}"`);
 	}
-	return buildTextResult(`Deleted from ${targetScope}: ${normalizedTopic} / "${normalizedTitle}"`);
+	return buildTextResult(`Deleted from ${targetScope}: ${normalizedTopic} / "${normalizedTitle}"`, {
+		kind: "forget",
+		scope: targetScope,
+		topic: normalizedTopic,
+		title: normalizedTitle,
+	});
 }
 
 async function executeForgetByTitle(
@@ -261,7 +309,12 @@ async function executeForgetByTitle(
 		throw new Error(`Memory not found: ${target.topic} / "${target.title}"`);
 	}
 	const caseMatchNote = caseInsensitive ? ` (matched title: "${target.title}")` : "";
-	return buildTextResult(`Deleted from ${target.scope}: ${target.topic} / "${target.title}"${caseMatchNote}`);
+	return buildTextResult(`Deleted from ${target.scope}: ${target.topic} / "${target.title}"${caseMatchNote}`, {
+		kind: "forget",
+		scope: target.scope,
+		topic: target.topic,
+		title: target.title,
+	});
 }
 
 // ── Extension Entry Point ────────────────────────────────────────────────────
@@ -514,6 +567,8 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 			"'project' for repo-specific tech decisions, env, tooling, configs. " +
 			"Defaults to 'project' when ambiguous.",
 		parameters: RememberParams,
+		renderCall: renderRememberCall,
+		renderResult: renderRememberResult,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { content, title, scope, topic } = params as {
 				content: string;
@@ -542,7 +597,12 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 						text: `Memory saved.\nScope: ${result.scope}\nTopic: ${result.topic}.md\nTitle: ${result.title}`,
 					},
 				],
-				details: undefined,
+				details: {
+					kind: "remember" as const,
+					scope: result.scope,
+					topic: result.topic,
+					title: result.title,
+				},
 			};
 		},
 	});
@@ -560,18 +620,8 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 			"recall({ id }) to get the full content of a specific memory, " +
 			"or recall({ scope }) to list all memories filtered by scope.",
 		parameters: RecallParams,
-
-		renderCall(args, theme) {
-			const query = typeof args.query === "string" ? args.query : undefined;
-			const id = typeof args.id === "string" ? args.id : undefined;
-			const scope = typeof args.scope === "string" ? args.scope : undefined;
-			let text = theme.fg("toolTitle", theme.bold("recall"));
-			if (id) text += ` ${theme.fg("accent", `id:${id}`)}`;
-			if (query) text += ` ${theme.fg("accent", `"${query}"`)}`;
-			if (scope) text += ` ${theme.fg("accent", `scope:${scope}`)}`;
-			if (!query && !id) text += ` ${theme.fg("muted", "(index)")}`;
-			return new Text(text, 0, 0);
-		},
+		renderCall: renderRecallCall,
+		renderResult: renderRecallResult,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			try {
@@ -598,6 +648,8 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 			"Use when the user says '잊어줘', 'forget this', or a stored rule is no longer valid. " +
 			"Provide title and optional topic/scope; if topic is omitted, the title must resolve uniquely.",
 		parameters: ForgetParams,
+		renderCall: renderForgetCall,
+		renderResult: renderForgetResult,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			try {
 				const { topic, title, scope } = params as { topic?: string; title: string; scope?: MemoryScope };
@@ -627,15 +679,20 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 		label: "Memory List",
 		description: "List all active memories. Optionally filter by scope (user or project).",
 		parameters: MemoryListParams,
+		renderCall: renderMemoryListCall,
+		renderResult: renderMemoryListResult,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			try {
 				const { scope } = params as { scope?: MemoryScope };
 				currentProjectId = resolveCurrentProjectId(ctx.cwd);
 
 				const parts: string[] = [];
+				let userCount = { memories: 0, topics: 0 };
+				let projectCount = { memories: 0, topics: 0 };
 
 				if (!scope || scope === "user") {
 					const idx = (await readMemoryMd("user")).trim();
+					userCount = countMemoryIndex(idx);
 					if (idx) {
 						parts.push("[User Memory]");
 						parts.push(idx);
@@ -644,6 +701,7 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 
 				if ((!scope || scope === "project") && currentProjectId) {
 					const idx = (await readMemoryMd("project", currentProjectId)).trim();
+					projectCount = countMemoryIndex(idx);
 					if (idx) {
 						if (parts.length) parts.push("");
 						parts.push("[Project Memory]");
@@ -652,7 +710,16 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 				}
 
 				const text = parts.join("\n") || "No active memories.";
-				return { content: [{ type: "text" as const, text }], details: undefined };
+				return {
+					content: [{ type: "text" as const, text }],
+					details: {
+						kind: "memory-list" as const,
+						scope,
+						user: userCount.memories,
+						project: projectCount.memories,
+						topics: userCount.topics + projectCount.topics,
+					},
+				};
 			} catch (err: unknown) {
 				throw new Error(`List failed: ${err instanceof Error ? err.message : "unknown"}`);
 			}

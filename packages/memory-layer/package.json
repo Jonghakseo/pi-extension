@@ -21,6 +21,7 @@
 		"main.ts",
 		"types.ts",
 		"storage.ts",
+		"tool-render.ts",
 		"inject.ts",
 		"ui.ts",
 		"project-id.ts",
