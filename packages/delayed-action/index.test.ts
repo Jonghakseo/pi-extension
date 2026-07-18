@@ -80,6 +80,27 @@ describe("delayed-action delay extension", () => {
 		expect(ctx.ui.notify).toHaveBeenCalledWith("⏰ deploy-log 시간이 되어 프롬프트를 실행했어요.", "info");
 	});
 
+	it("keeps delayed prompts bound to the runtime that scheduled them", async () => {
+		const mainRuntime = createExtensionApiMock();
+		delayedActionExtension(mainRuntime.api);
+		const mainTool = mainRuntime.getTool("delay");
+
+		const throwawayRuntime = createExtensionApiMock();
+		delayedActionExtension(throwawayRuntime.api);
+
+		await mainTool.execute?.(
+			"call-main-runtime",
+			{ delay: "2s", prompt: "메인 세션에서 실행", id: "main-runtime" },
+			undefined,
+			undefined,
+			createCtx(),
+		);
+		await vi.advanceTimersByTimeAsync(2_000);
+
+		expect(mainRuntime.userMessages).toEqual([{ message: "메인 세션에서 실행", options: undefined }]);
+		expect(throwawayRuntime.userMessages).toHaveLength(0);
+	});
+
 	it("queues followUp when the agent is busy", async () => {
 		const apiMock = createExtensionApiMock();
 		delayedActionExtension(apiMock.api);
