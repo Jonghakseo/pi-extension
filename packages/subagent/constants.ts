@@ -30,6 +30,12 @@ export const SUBAGENT_STRONG_WAIT_MESSAGE =
 /** Maximum age (ms) for pending cross-session completions before eviction. */
 export const STALE_PENDING_COMPLETION_MS = 30 * 60 * 1_000;
 
+/** Max number of finished batch/chain group snapshots retained for `status`/`detail` queries. */
+export const MAX_FINISHED_GROUPS = 20;
+
+/** Max age (ms) a finished group snapshot is retained before eviction. */
+export const FINISHED_GROUP_TTL_MS = 30 * 60 * 1_000;
+
 /** Short label shown in the widget when inside a child session. */
 export const PARENT_HINT = "↩ parent (><)";
 

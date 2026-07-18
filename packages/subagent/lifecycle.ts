@@ -114,6 +114,7 @@ export function shutdownSubagentRuns(store: SubagentStore, pi: ExtensionAPI, rea
 	store.globalLiveRuns.clear();
 	store.batchGroups.clear();
 	store.pipelines.clear();
+	store.finishedGroups.clear();
 	store.recentLaunchTimestamps.clear();
 	store.commandRuns.clear();
 	store.commandWidgetCtx = null;

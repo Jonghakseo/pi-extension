@@ -183,6 +183,30 @@ export interface PipelineState {
 	pendingCompletion?: PendingCompletion;
 }
 
+/** A single member (batch run or chain step) captured in a finished-group snapshot. */
+export interface FinishedGroupMember {
+	/** Pre-rendered one-line summary, frozen at retirement time. */
+	summaryLine: string;
+	/** Full member output, truncated only when rendered. */
+	output: string;
+	/** Chain step task (omitted for batch runs). */
+	task?: string;
+}
+
+/**
+ * Immutable snapshot of a completed batch/chain group, retained briefly so
+ * `subagent status/detail <groupId>` still works after the live group is gone.
+ */
+export interface FinishedGroupSnapshot {
+	groupId: string;
+	kind: "batch" | "chain";
+	terminalStatus: "completed" | "error" | "stopped";
+	finishedAt: number;
+	total: number;
+	failed: number;
+	members: FinishedGroupMember[];
+}
+
 export const ListAgentsParams = Type.Object({});
 
 export const SubagentParams = Type.Object({

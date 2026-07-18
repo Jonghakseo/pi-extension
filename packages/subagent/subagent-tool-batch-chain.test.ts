@@ -379,6 +379,104 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 		await waitForAssertion(() => {
 			expect(sent).toHaveLength(1);
 		});
+
+		// After completion the live group is gone, but the finished snapshot is retained.
+		expect(store.batchGroups.has(batchId)).toBe(false);
+		expect(store.finishedGroups.has(batchId)).toBe(true);
+		const finished = await execute(
+			"call-live-batch-finished",
+			{ command: `subagent detail ${batchId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(finished.isError).toBeFalsy();
+		expect(finished.content[0]?.text).toContain(`[subagent-batch#${batchId}] completed`);
+		expect(finished.content[0]?.text).toContain("LIVE_A");
+		expect(finished.content[0]?.text).toContain("LIVE_B");
+	});
+
+	it("reports completion from the retained snapshot before cross-session delivery", async () => {
+		let releaseRuns: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			releaseRuns = resolve;
+		});
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			await gate;
+			return makeResult(agentName, task, "CROSS_SESSION_DONE");
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const pi = createPi(sent);
+		let currentSessionFile = "/tmp/main-session.jsonl";
+		const ctx = createCtx();
+		ctx.sessionManager.getSessionFile = () => currentSessionFile;
+		const execute = createSubagentToolExecute(pi as never, store);
+
+		const launch = await execute(
+			"call-cross-session-batch",
+			{ command: 'subagent batch --main --agent worker --task "cross a" --agent reviewer --task "cross b"' },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+		currentSessionFile = "/tmp/child-session.jsonl";
+		releaseRuns();
+		await waitForAssertion(() => {
+			expect(store.finishedGroups.has(batchId)).toBe(true);
+		});
+
+		expect(sent).toHaveLength(0);
+		expect(store.batchGroups.has(batchId)).toBe(true);
+		const status = await execute(
+			"call-cross-session-status",
+			{ command: `subagent status ${batchId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(status.content[0]?.text).toContain(`[subagent-batch#${batchId}] completed`);
+		expect(status.content[0]?.text).not.toContain("running");
+	});
+
+	it("retains a finished chain snapshot queryable by groupId", async () => {
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			return makeResult(agentName, task, agentName === "worker" ? "CHAIN_ONE" : "CHAIN_TWO");
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const pi = createPi(sent);
+		const execute = createSubagentToolExecute(pi as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-chain-retain",
+			{ command: 'subagent chain --main --agent worker --task "step one" --agent reviewer --task "step two"' },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const pipelineId = /chain (p_\S+)/.exec(launch.content[0]?.text ?? "")?.[1] as string;
+		expect(pipelineId).toMatch(/^p_/);
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+
+		expect(store.pipelines.has(pipelineId)).toBe(false);
+		const detail = await execute(
+			"call-chain-retain-detail",
+			{ command: `subagent detail ${pipelineId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(detail.isError).toBeFalsy();
+		expect(detail.content[0]?.text).toContain(`[subagent-chain#${pipelineId}] completed`);
+		expect(detail.content[0]?.text).toContain("CHAIN_ONE");
+		expect(detail.content[0]?.text).toContain("CHAIN_TWO");
 	});
 
 	it("returns an error when querying an unknown groupId", async () => {
@@ -397,6 +495,6 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 			ctx,
 		);
 		expect(result.isError).toBe(true);
-		expect(result.content[0]?.text).toContain("Unknown or already-finished subagent group");
+		expect(result.content[0]?.text).toContain("Unknown subagent group");
 	});
 });

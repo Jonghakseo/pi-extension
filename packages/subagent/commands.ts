@@ -51,7 +51,7 @@ import { appendDisplayTaskUpdate, getSessionFileSize } from "./persisted-session
 import { SUBAGENT_COMMANDS, type SubagentCommandName } from "./registration-manifest.js";
 import { readSessionReplayItems, SubagentSessionReplayOverlay } from "./replay.js";
 import { invokeWithAutoRetry, MAX_SUBAGENT_AUTO_RETRIES } from "./retry.js";
-import { getLatestRun, removeRun, trimCommandRunHistory } from "./run-utils.js";
+import { evictStaleFinishedGroups, getLatestRun, removeRun, trimCommandRunHistory } from "./run-utils.js";
 import {
 	getFinalOutput,
 	getLastNonEmptyLine,
@@ -824,6 +824,7 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 	}
 
 	evictStalePendingGroupCompletions(STALE_PENDING_COMPLETION_MS);
+	evictStaleFinishedGroups(store);
 
 	// Fallback: if this session has no subagent markers at all, but we recently
 	// had in-memory runs for the same session file, reuse that snapshot so

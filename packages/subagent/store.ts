@@ -5,7 +5,14 @@
 import type { Message } from "@earendil-works/pi-ai";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { getDisplayItems, getFinalOutput, getLastNonEmptyLine, getLatestActivityPreview } from "./runner.js";
-import type { BatchGroupState, CommandRunState, GlobalRunEntry, PipelineState, SingleResult } from "./types.js";
+import type {
+	BatchGroupState,
+	CommandRunState,
+	FinishedGroupSnapshot,
+	GlobalRunEntry,
+	PipelineState,
+	SingleResult,
+} from "./types.js";
 import type { WidgetRenderCtx } from "./widget.js";
 
 export const COLLAPSED_ITEM_COUNT = 10;
@@ -40,6 +47,8 @@ export interface SubagentStore {
 	batchGroups: Map<string, BatchGroupState>;
 	/** In-memory sequential pipelines launched via the tool. */
 	pipelines: Map<string, PipelineState>;
+	/** Retained snapshots of finished batch/chain groups, keyed by groupId (insertion-ordered). */
+	finishedGroups: Map<string, FinishedGroupSnapshot>;
 }
 
 export function createStore(): SubagentStore {
@@ -59,6 +68,7 @@ export function createStore(): SubagentStore {
 		recentLaunchTimestamps: new Map(),
 		batchGroups: new Map(),
 		pipelines: new Map(),
+		finishedGroups: new Map(),
 	};
 }
 

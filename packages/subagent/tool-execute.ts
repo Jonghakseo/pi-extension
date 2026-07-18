@@ -41,7 +41,16 @@ import {
 import { clearPendingGroupCompletion, upsertPendingGroupCompletion } from "./group-pending.js";
 import { enqueueSubagentInvocation } from "./invocation-queue.js";
 import { appendDisplayTaskUpdate, getSessionFileSize } from "./persisted-session.js";
-import { clearFinishedRuns, formatCommandRunSummary, removeRun, trimCommandRunHistory } from "./run-utils.js";
+import {
+	clearFinishedRuns,
+	formatCommandRunSummary,
+	formatFinishedGroupStatus,
+	removeRun,
+	retireFinishedGroup,
+	snapshotBatchGroup,
+	snapshotPipeline,
+	trimCommandRunHistory,
+} from "./run-utils.js";
 import { getFinalOutput, getLastNonEmptyLine, runSingleAgent } from "./runner.js";
 import {
 	buildMainContextText,
@@ -888,6 +897,13 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 		if ((asyncAction === "status" || asyncAction === "detail") && typeof cmdParams.groupId === "string") {
 			const groupId = cmdParams.groupId;
 			const detailed = asyncAction === "detail";
+			const finished = store.finishedGroups.get(groupId);
+			if (finished) {
+				return {
+					content: [{ type: "text", text: withIdleRunWarning(formatFinishedGroupStatus(finished, detailed)) }],
+					details: makeDetails("single"),
+				};
+			}
 			const batch = store.batchGroups.get(groupId);
 			if (batch) {
 				return {
@@ -906,7 +922,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				content: [
 					{
 						type: "text",
-						text: `Unknown or already-finished subagent group "${groupId}". Groups are cleared once their completion is delivered; use \`subagent runs\` to inspect individual runs.`,
+						text: `Unknown subagent group "${groupId}". Finished groups are retained only briefly; use \`subagent runs\` to inspect individual runs.`,
 					},
 				],
 				details: makeDetails("single"),
@@ -1543,6 +1559,9 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				const orderedRuns = runStates.map(({ runState }) => runState);
 				const hasError = finalizedRuns.some((finalized) => finalized.isError);
 				const content = formatBatchSummary(batchId, orderedRuns, hasError ? "error" : "completed");
+				const batchForSnapshot = store.batchGroups.get(batchId);
+				if (batchForSnapshot)
+					retireFinishedGroup(store, snapshotBatchGroup(store, batchForSnapshot, hasError ? "error" : "completed"));
 				for (const { runState } of runStates) cleanupRunAfterFinalDelivery(runState.id);
 				clearPendingGroupCompletion("batch", batchId);
 				store.batchGroups.delete(batchId);
@@ -1597,6 +1616,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 									runSummaries: orderedRuns.map((run) => buildRunAnalyticsSummary(run)),
 								},
 							};
+							retireFinishedGroup(store, snapshotBatchGroup(store, batch, batchTerminalStatus));
 							if (isInOriginSession(ctx, batch.originSessionFile)) {
 								pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
 								clearPendingGroupCompletion("batch", batchId);
@@ -1651,6 +1671,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 									runSummaries: orderedRuns.map((run) => buildRunAnalyticsSummary(run)),
 								},
 							};
+							retireFinishedGroup(store, snapshotBatchGroup(store, batch, "error"));
 							if (isInOriginSession(ctx, batch.originSessionFile)) {
 								pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
 								clearPendingGroupCompletion("batch", batchId);
@@ -1826,6 +1847,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				const hasError = pipeline.stepResults.some((step) => step.status === "error");
 				if (terminalStatus === "completed" && hasError) terminalStatus = "error";
 				const content = formatPipelineSummary(pipelineId, pipeline.stepResults, terminalStatus);
+				retireFinishedGroup(store, snapshotPipeline(pipeline, terminalStatus));
 				for (const runId of pipeline.stepRunIds) cleanupRunAfterFinalDelivery(runId);
 				clearPendingGroupCompletion("chain", pipelineId);
 				store.pipelines.delete(pipelineId);
@@ -1964,6 +1986,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 								runSummaries: orderedRuns.map((run) => buildRunAnalyticsSummary(run)),
 							},
 						};
+						retireFinishedGroup(store, snapshotPipeline(pipeline, terminalStatus));
 						if (isInOriginSession(ctx, pipeline.originSessionFile)) {
 							pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
 							clearPendingGroupCompletion("chain", pipelineId);

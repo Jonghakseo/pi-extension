@@ -7,8 +7,15 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { FINISHED_GROUP_TTL_MS, MAX_FINISHED_GROUPS, STATUS_OUTPUT_PREVIEW_MAX_CHARS } from "./constants.js";
 import type { SubagentStore } from "./store.js";
-import type { CommandRunState } from "./types.js";
+import type {
+	BatchGroupState,
+	CommandRunState,
+	FinishedGroupMember,
+	FinishedGroupSnapshot,
+	PipelineState,
+} from "./types.js";
 import { updateCommandRunsWidget, type WidgetRenderCtx } from "./widget.js";
 
 export interface RemoveRunOptions {
@@ -200,4 +207,116 @@ export function trimCommandRunHistory(
 	}
 
 	return removedRunIds;
+}
+
+// ── Finished-group retention ────────────────────────────────────────────────
+// Batch/chain groups are deleted from the live store once their completion is
+// delivered. To keep `subagent status/detail <groupId>` working for a short
+// window afterward, we retain an immutable snapshot per finished group.
+
+function memberOutput(run: CommandRunState, fallback?: string): string {
+	return run.lastOutput?.trim() || run.lastLine?.trim() || fallback?.trim() || "(no output)";
+}
+
+/** Build a finished-group snapshot from a completed batch group. */
+export function snapshotBatchGroup(
+	store: SubagentStore,
+	batch: BatchGroupState,
+	terminalStatus: FinishedGroupSnapshot["terminalStatus"],
+): FinishedGroupSnapshot {
+	let failed = 0;
+	const members: FinishedGroupMember[] = batch.runIds.map((runId) => {
+		const run = store.commandRuns.get(runId);
+		if (!run) {
+			if (batch.failedRunIds.has(runId)) failed++;
+			return {
+				summaryLine: `#${runId} [gone] (run no longer available)`,
+				output: batch.pendingResults.get(runId)?.trim() || "(no output)",
+			};
+		}
+		if (run.status === "error" || batch.failedRunIds.has(runId)) failed++;
+		return { summaryLine: formatCommandRunSummary(run), output: memberOutput(run, batch.pendingResults.get(runId)) };
+	});
+	return {
+		groupId: batch.batchId,
+		kind: "batch",
+		terminalStatus,
+		finishedAt: Date.now(),
+		total: batch.runIds.length,
+		failed,
+		members,
+	};
+}
+
+/** Build a finished-group snapshot from a completed pipeline. */
+export function snapshotPipeline(
+	pipeline: PipelineState,
+	terminalStatus: FinishedGroupSnapshot["terminalStatus"],
+): FinishedGroupSnapshot {
+	const members: FinishedGroupMember[] = pipeline.stepResults.map((step, index) => ({
+		summaryLine: `Step ${index + 1} · #${step.runId} ${step.agent} · ${step.status}`,
+		output: step.output?.trim() || "(no output)",
+		task: step.task,
+	}));
+	return {
+		groupId: pipeline.pipelineId,
+		kind: "chain",
+		terminalStatus,
+		finishedAt: Date.now(),
+		total: pipeline.stepResults.length,
+		failed: pipeline.stepResults.filter((step) => step.status === "error").length,
+		members,
+	};
+}
+
+/** Retain a finished-group snapshot, evicting the oldest entries past the cap. */
+export function retireFinishedGroup(store: SubagentStore, snapshot: FinishedGroupSnapshot): void {
+	// Re-insert to refresh insertion order (most-recent last).
+	store.finishedGroups.delete(snapshot.groupId);
+	store.finishedGroups.set(snapshot.groupId, snapshot);
+	while (store.finishedGroups.size > MAX_FINISHED_GROUPS) {
+		const oldest = store.finishedGroups.keys().next().value;
+		if (oldest === undefined) break;
+		store.finishedGroups.delete(oldest);
+	}
+}
+
+/** Evict finished-group snapshots older than the retention TTL. Returns count removed. */
+export function evictStaleFinishedGroups(store: SubagentStore, now = Date.now()): number {
+	let removed = 0;
+	for (const [groupId, snapshot] of store.finishedGroups) {
+		if (now - snapshot.finishedAt > FINISHED_GROUP_TTL_MS) {
+			store.finishedGroups.delete(groupId);
+			removed++;
+		}
+	}
+	return removed;
+}
+
+function formatFinishedAge(finishedAt: number, now = Date.now()): string {
+	const seconds = Math.max(0, Math.round((now - finishedAt) / 1000));
+	if (seconds < 60) return `${seconds}s ago`;
+	const minutes = Math.round(seconds / 60);
+	return `${minutes}m ago`;
+}
+
+/** Render a retained finished-group snapshot for `status` (summary) or `detail` (with output). */
+export function formatFinishedGroupStatus(snapshot: FinishedGroupSnapshot, detailed: boolean): string {
+	const label = snapshot.kind === "batch" ? "subagent-batch" : "subagent-chain";
+	const failedSuffix = snapshot.failed > 0 ? `, ${snapshot.failed} failed` : "";
+	const header = `[${label}#${snapshot.groupId}] ${snapshot.terminalStatus} · ${snapshot.total} ${
+		snapshot.kind === "batch" ? "runs" : "steps"
+	}${failedSuffix} · finished ${formatFinishedAge(snapshot.finishedAt)}`;
+	const body = snapshot.members
+		.map((member) => {
+			if (!detailed) return member.summaryLine;
+			const output =
+				member.output.length > STATUS_OUTPUT_PREVIEW_MAX_CHARS
+					? `${member.output.slice(0, STATUS_OUTPUT_PREVIEW_MAX_CHARS)}\n\n... [truncated]`
+					: member.output;
+			const taskLine = member.task ? `Task: ${member.task}\n` : "";
+			return `${member.summaryLine}\n${taskLine}${output}`;
+		})
+		.join(detailed ? "\n\n" : "\n");
+	return `${header}\n\n${body}`;
 }

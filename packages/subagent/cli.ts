@@ -55,7 +55,7 @@ export const SUBAGENT_CLI_HELP_TEXT = [
 	"    subagent runs",
 	"    subagent status <runId|groupId>",
 	"    subagent detail <runId|groupId>",
-	"      (groupId = the b_.../p_... id returned by batch/chain launches)",
+	"      (groupId = the b_.../p_... id returned by batch/chain launches; finished groups are retained briefly)",
 	"",
 	"  Execution:",
 	"    subagent run <agent> [--main|--isolated] -- <task>",
