@@ -78,7 +78,7 @@ describe("memory-layer compact tool rendering", () => {
 		} as const;
 
 		expect(render(renderRecallCall({ id: "57cf723214aa" }, theme as never, { expanded: false }))).toBe(
-			"recall · id:57cf723…",
+			"recall · id:57cf7...",
 		);
 		expect(render(renderRecallResult(result("full content", idDetails), { expanded: false }, theme as never))).toBe(
 			"✓ project/general · 배포 절차",

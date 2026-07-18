@@ -42,7 +42,7 @@ function stringArg(args: ToolRenderArgs, key: string): string | undefined {
 }
 
 function preview(value: string, width: number): string {
-	return truncateToWidth(value.replace(/\s+/g, " ").trim(), width, "…");
+	return truncateToWidth(value.replace(/\s+/g, " ").trim(), width, "...");
 }
 
 function renderTitle(name: string, theme: RenderTheme): string {

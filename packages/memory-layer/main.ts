@@ -51,7 +51,7 @@ function resolveCurrentProjectId(cwd: string): string | undefined {
 function truncateTitle(content: string, maxLen = 60): string {
 	const firstLine = content.split("\n")[0]?.trim() ?? content.trim();
 	if (firstLine.length <= maxLen) return firstLine;
-	return `${firstLine.slice(0, maxLen - 1)}…`;
+	return `${firstLine.slice(0, maxLen - 3)}...`;
 }
 
 /** Convert slug to a human-readable heading. */
@@ -177,7 +177,7 @@ async function executeRecallQuery(query: string, projectId: string | undefined, 
 	const lines = results.slice(0, maxResults).map((r) => {
 		const id = memoryEntryId(r.scope, r.projectId, r.topic, r.title, r.content);
 		const firstLine = r.content.split("\n")[0] ?? "";
-		const snippet = firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine;
+		const snippet = firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
 		return `- [${id}] [${r.scope}] ${r.topic}/${r.title}${snippet ? `\n  ${snippet}` : ""}`;
 	});
 	const shown = Math.min(results.length, maxResults);
