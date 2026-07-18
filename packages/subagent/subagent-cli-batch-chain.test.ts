@@ -57,6 +57,29 @@ describe("subagent CLI batch/chain parsing", () => {
 		expect(emptySegment.type).toBe("error");
 	});
 
+	it("parses status/detail with a batch/chain groupId", () => {
+		expect(parseSubagentToolCommand("subagent status b_1712_abc")).toEqual({
+			type: "params",
+			params: { asyncAction: "status", groupId: "b_1712_abc" },
+		});
+		expect(parseSubagentToolCommand("subagent detail p_1712_xyz")).toEqual({
+			type: "params",
+			params: { asyncAction: "detail", groupId: "p_1712_xyz" },
+		});
+	});
+
+	it("still parses numeric runId for status/detail", () => {
+		expect(parseSubagentToolCommand("subagent status 12")).toEqual({
+			type: "params",
+			params: { asyncAction: "status", runId: 12 },
+		});
+	});
+
+	it("rejects a non-numeric, non-group id for status", () => {
+		const parsed = parseSubagentToolCommand("subagent status typo");
+		expect(parsed.type).toBe("error");
+	});
+
 	it("treats batch and chain as async launch commands", () => {
 		expect(isSubagentAsyncLaunchCommand("subagent batch --agent worker --task A --agent reviewer --task B")).toBe(true);
 		expect(isSubagentAsyncLaunchCommand("subagent chain --agent worker --task A --agent reviewer --task B")).toBe(true);

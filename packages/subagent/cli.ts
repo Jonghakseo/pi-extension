@@ -53,8 +53,9 @@ export const SUBAGENT_CLI_HELP_TEXT = [
 	"    subagent help",
 	"    subagent agents",
 	"    subagent runs",
-	"    subagent status <runId>",
-	"    subagent detail <runId>",
+	"    subagent status <runId|groupId>",
+	"    subagent detail <runId|groupId>",
+	"      (groupId = the b_.../p_... id returned by batch/chain launches)",
 	"",
 	"  Execution:",
 	"    subagent run <agent> [--main|--isolated] -- <task>",
@@ -165,6 +166,11 @@ function parseInteger(raw: string): number | null {
 	if (!/^\d+$/.test(raw)) return null;
 	const value = Number.parseInt(raw, 10);
 	return Number.isInteger(value) ? value : null;
+}
+
+/** Group IDs returned by batch (`b_...`) and chain (`p_...`) launches. */
+function isGroupId(raw: string): boolean {
+	return /^[bp]_/.test(raw);
 }
 
 function parseRunTarget(
@@ -462,33 +468,35 @@ export function parseSubagentToolCommand(
 			return { type: "params", params: { asyncAction: "list" } };
 
 		case "status": {
-			const runIdRaw = args[0];
-			if (!runIdRaw)
+			const idRaw = args[0];
+			if (!idRaw)
 				return {
 					type: "error",
-					message: `❌ status requires <runId>\n\n✓ Example: subagent status 22\n\nSee all runs with: subagent runs`,
+					message: `❌ status requires <runId|groupId>\n\n✓ Example: subagent status 22\n✓ Example: subagent status b_1712... (batch/chain)\n\nSee all runs with: subagent runs`,
 				};
-			const runId = parseInteger(runIdRaw);
+			if (isGroupId(idRaw)) return { type: "params", params: { asyncAction: "status", groupId: idRaw } };
+			const runId = parseInteger(idRaw);
 			if (runId === null)
 				return {
 					type: "error",
-					message: `❌ Invalid runId: "${runIdRaw}"\n\nThe runId must be a number. See all runs with: subagent runs`,
+					message: `❌ Invalid id: "${idRaw}"\n\nUse a numeric runId or a batch/chain groupId (b_.../p_...). See all runs with: subagent runs`,
 				};
 			return { type: "params", params: { asyncAction: "status", runId } };
 		}
 
 		case "detail": {
-			const runIdRaw = args[0];
-			if (!runIdRaw)
+			const idRaw = args[0];
+			if (!idRaw)
 				return {
 					type: "error",
-					message: `❌ detail requires <runId>\n\n✓ Example: subagent detail 22\n\nSee all runs with: subagent runs`,
+					message: `❌ detail requires <runId|groupId>\n\n✓ Example: subagent detail 22\n✓ Example: subagent detail b_1712... (batch/chain)\n\nSee all runs with: subagent runs`,
 				};
-			const runId = parseInteger(runIdRaw);
+			if (isGroupId(idRaw)) return { type: "params", params: { asyncAction: "detail", groupId: idRaw } };
+			const runId = parseInteger(idRaw);
 			if (runId === null)
 				return {
 					type: "error",
-					message: `❌ Invalid runId: "${runIdRaw}"\n\nThe runId must be a number. See all runs with: subagent runs`,
+					message: `❌ Invalid id: "${idRaw}"\n\nUse a numeric runId or a batch/chain groupId (b_.../p_...). See all runs with: subagent runs`,
 				};
 			return { type: "params", params: { asyncAction: "detail", runId } };
 		}

@@ -337,4 +337,66 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 			runSummaries: [{ agent: "worker", runId: 1, status: "error", stepIndex: 0 }],
 		});
 	});
+
+	it("reports live batch progress when queried by groupId", async () => {
+		let releaseRuns: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			releaseRuns = resolve;
+		});
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			await gate;
+			return makeResult(agentName, task, agentName === "worker" ? "LIVE_A" : "LIVE_B");
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const pi = createPi(sent);
+		const execute = createSubagentToolExecute(pi as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-live-batch",
+			{ command: 'subagent batch --main --agent worker --task "live a" --agent reviewer --task "live b"' },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+		expect(batchId).toMatch(/^b_/);
+
+		const status = await execute(
+			"call-live-batch-status",
+			{ command: `subagent status ${batchId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(status.isError).toBeFalsy();
+		expect(status.content[0]?.text).toContain(`[subagent-batch#${batchId}]`);
+		expect(status.content[0]?.text).toContain("0/2 finished");
+
+		releaseRuns();
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+	});
+
+	it("returns an error when querying an unknown groupId", async () => {
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const pi = createPi(sent);
+		const execute = createSubagentToolExecute(pi as never, store);
+		const ctx = createCtx();
+
+		const result = await execute(
+			"call-unknown-group",
+			{ command: "subagent status b_does_not_exist" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(result.isError).toBe(true);
+		expect(result.content[0]?.text).toContain("Unknown or already-finished subagent group");
+	});
 });

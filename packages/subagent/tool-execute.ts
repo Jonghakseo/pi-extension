@@ -54,10 +54,12 @@ import {
 import { formatStarterPackNotice, offerStarterPackIfEmpty } from "./starter-pack.js";
 import { type SubagentStore, updateRunFromResult } from "./store.js";
 import type {
+	BatchGroupState,
 	BatchOrChainItem,
 	CommandRunState,
 	OnUpdateCallback,
 	PendingCompletion,
+	PipelineState,
 	PipelineStepResult,
 	SingleResult,
 	SubagentDetails,
@@ -583,6 +585,47 @@ function formatPipelineSummary(
 	return `[subagent-chain#${pipelineId}] ${terminalStatus}\n\n${steps}`;
 }
 
+function previewOutput(output: string): string {
+	const trimmed = output.trim() || "(no output yet)";
+	return trimmed.length > STATUS_OUTPUT_PREVIEW_MAX_CHARS
+		? `${trimmed.slice(0, STATUS_OUTPUT_PREVIEW_MAX_CHARS)}\n\n... [truncated]`
+		: trimmed;
+}
+
+function formatBatchGroupStatus(store: SubagentStore, batch: BatchGroupState, detailed: boolean): string {
+	const total = batch.runIds.length;
+	const done = batch.completedRunIds.size;
+	const failed = batch.failedRunIds.size;
+	const header = `[subagent-batch#${batch.batchId}] running · ${done}/${total} finished${
+		failed > 0 ? `, ${failed} failed` : ""
+	}`;
+	const body = batch.runIds
+		.map((runId) => {
+			const run = store.commandRuns.get(runId);
+			if (!run) return `#${runId} (unavailable)`;
+			const summary = formatCommandRunSummary(run);
+			if (!detailed) return summary;
+			return `${summary}\n${previewOutput(run.lastOutput ?? run.lastLine ?? "")}`;
+		})
+		.join(detailed ? "\n\n" : "\n");
+	return `${header}\n\n${body}`;
+}
+
+function formatPipelineGroupStatus(store: SubagentStore, pipeline: PipelineState, detailed: boolean): string {
+	const finishedCount = pipeline.stepResults.length;
+	const header = `[subagent-chain#${pipeline.pipelineId}] running · step ${pipeline.currentIndex + 1} (${finishedCount} finished)`;
+	const parts = pipeline.stepResults.map((step, index) => {
+		const line = `Step ${index + 1} · #${step.runId} ${step.agent} · ${step.status}`;
+		return detailed ? `${line}\nTask: ${step.task}\n${previewOutput(step.output)}` : line;
+	});
+	const runningRunId = pipeline.stepRunIds[finishedCount];
+	if (runningRunId !== undefined) {
+		const run = store.commandRuns.get(runningRunId);
+		if (run) parts.push(`Step ${finishedCount + 1} · ${formatCommandRunSummary(run)}`);
+	}
+	return `${header}\n\n${parts.join(detailed ? "\n\n" : "\n")}`;
+}
+
 function toLaunchSummary(
 	runState: Pick<CommandRunState, "agent" | "id" | "batchId" | "pipelineId" | "pipelineStepIndex">,
 	mode: SubagentLaunchSummary["mode"],
@@ -839,6 +882,35 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			return {
 				content: [{ type: "text", text: withIdleRunWarning(`${header}\n\n${lines.join("\n\n")}`) }],
 				details: makeDetails("single"),
+			};
+		}
+
+		if ((asyncAction === "status" || asyncAction === "detail") && typeof cmdParams.groupId === "string") {
+			const groupId = cmdParams.groupId;
+			const detailed = asyncAction === "detail";
+			const batch = store.batchGroups.get(groupId);
+			if (batch) {
+				return {
+					content: [{ type: "text", text: withIdleRunWarning(formatBatchGroupStatus(store, batch, detailed)) }],
+					details: makeDetails("single"),
+				};
+			}
+			const pipeline = store.pipelines.get(groupId);
+			if (pipeline) {
+				return {
+					content: [{ type: "text", text: withIdleRunWarning(formatPipelineGroupStatus(store, pipeline, detailed)) }],
+					details: makeDetails("single"),
+				};
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Unknown or already-finished subagent group "${groupId}". Groups are cleared once their completion is delivered; use \`subagent runs\` to inspect individual runs.`,
+					},
+				],
+				details: makeDetails("single"),
+				isError: true,
 			};
 		}
 
