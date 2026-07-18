@@ -51,6 +51,8 @@ pi install npm:@ryan_nookpi/pi-extension-todo-write-overlay
 
 ## 사용 예
 
+처음 목록을 만들거나 큰 폭으로 재편할 때는 `op` 없이(기본 `replace`) 전체를 보냅니다.
+
 ```json
 {
   "todos": [
@@ -60,6 +62,24 @@ pi install npm:@ryan_nookpi/pi-extension-todo-write-overlay
   ]
 }
 ```
+
+이미 목록이 있고 일부만 바꿀 때는 `op: "patch"`로 변경분만 보냅니다. 작업 수가 많을수록 args 크기가 변경분에만 비례해 저렴합니다.
+
+```json
+{
+  "op": "patch",
+  "set": [
+    { "id": "task-1", "status": "completed" },
+    { "id": "task-2", "status": "in_progress", "activeForm": "구현 중" }
+  ],
+  "add": [{ "content": "문서화", "status": "pending" }],
+  "remove": ["task-5"]
+}
+```
+
+- `set`/`add`/`remove`는 함께 쓸 수 있으며 remove → set → add 순서로 적용됩니다.
+- `id`는 직전 `todo_write` 결과에 표시된 `task-N` 값을 참조합니다. 존재하지 않는 id는 결과 텍스트에 경고로 표시되고 무시됩니다.
+- `add`로 추가되는 항목은 기존 id와 겹치지 않는 새 `task-N` id를 받습니다.
 
 ## 상태 필드
 

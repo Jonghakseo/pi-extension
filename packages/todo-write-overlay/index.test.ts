@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import {
+	applyTodoPatch,
 	applyTodoWrite,
 	buildPostCompactionTodoReminder,
 	getTodoOverlayVisibility,
@@ -27,6 +28,43 @@ describe("todo-write-overlay helpers", () => {
 		]);
 
 		expect(applied.state.tasks.map((task) => task.status)).toEqual(["in_progress", "pending", "pending"]);
+	});
+
+	it("patches task status without resending the whole list", () => {
+		const base = applyTodoWrite([
+			{ content: "first", status: "in_progress" },
+			{ content: "second", status: "pending" },
+		]).state;
+
+		const patched = applyTodoPatch(base, {
+			set: [
+				{ id: "task-1", status: "completed" },
+				{ id: "task-2", status: "in_progress" },
+			],
+		});
+
+		expect(patched.warnings).toEqual([]);
+		expect(patched.state.tasks.map((task) => task.status)).toEqual(["completed", "in_progress"]);
+	});
+
+	it("adds tasks with fresh non-colliding ids and removes by id", () => {
+		const base = applyTodoWrite([{ content: "first", status: "in_progress" }]).state;
+
+		const added = applyTodoPatch(base, {
+			add: [{ content: "second", status: "pending" }],
+		});
+		expect(added.state.tasks.map((task) => task.id)).toEqual(["task-1", "task-2"]);
+
+		const removed = applyTodoPatch(added.state, { remove: ["task-1"] });
+		expect(removed.state.tasks.map((task) => task.id)).toEqual(["task-2"]);
+		expect(removed.state.tasks[0]?.status).toBe("in_progress");
+	});
+
+	it("warns when a patch references an unknown id", () => {
+		const base = applyTodoWrite([{ content: "first", status: "in_progress" }]).state;
+		const result = applyTodoPatch(base, { set: [{ id: "task-9", status: "completed" }] });
+		expect(result.warnings).toHaveLength(1);
+		expect(result.warnings[0]).toContain("task-9");
 	});
 
 	it("renders overlay plain lines without completed-item folding", () => {

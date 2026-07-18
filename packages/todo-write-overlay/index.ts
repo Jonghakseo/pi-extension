@@ -39,14 +39,32 @@ const InputTask = Type.Object({
 	notes: Type.Optional(Type.String({ description: "추가 맥락 또는 메모" })),
 });
 
+const PatchSetTask = Type.Object({
+	id: Type.String({ description: "갱신할 작업 id. 직전 todo_write 결과에 표시된 task-N 값을 사용" }),
+	content: Type.Optional(Type.String({ description: "작업 설명 (변경 시에만)" })),
+	status: Type.Optional(StatusEnum),
+	activeForm: Type.Optional(Type.String({ description: "진행 중 표시용 현재진행형 문구" })),
+	notes: Type.Optional(Type.String({ description: "추가 맥락 또는 메모" })),
+});
+
 const TodoWriteParams = Type.Object(
 	{
-		todos: Type.Array(InputTask, { description: "업데이트된 todo 목록" }),
+		op: Type.Optional(
+			Type.Union([Type.Literal("replace"), Type.Literal("patch")], {
+				description:
+					"replace(기본): todos로 전체 목록 교체. patch: set/add/remove로 변경분만 전달. 항목이 많을 때는 patch가 저렴합니다.",
+			}),
+		),
+		todos: Type.Optional(Type.Array(InputTask, { description: "op=replace일 때: 전체 todo 목록" })),
+		set: Type.Optional(Type.Array(PatchSetTask, { description: "op=patch일 때: 기존 항목의 부분 갱신 목록" })),
+		add: Type.Optional(Type.Array(InputTask, { description: "op=patch일 때: 새로 추가할 항목 목록" })),
+		remove: Type.Optional(Type.Array(Type.String(), { description: "op=patch일 때: 제거할 작업 id 목록" })),
 	},
 	{ additionalProperties: true },
 );
 
-type TodoWriteParamsType = Static<typeof TodoWriteParams>;
+type InputTaskType = Static<typeof InputTask>;
+type PatchSetTaskType = Static<typeof PatchSetTask>;
 
 const todoStateStore = new Map<string, TodoState>();
 const todoOverlayStore = new Map<string, TodoOverlayRecord>();
@@ -130,7 +148,7 @@ export function getTodoOverlayVisibility(
 	};
 }
 
-export function applyTodoWrite(todos: TodoWriteParamsType["todos"]): {
+export function applyTodoWrite(todos: InputTaskType[]): {
 	state: TodoState;
 } {
 	const tasks: TodoTask[] = todos.map((todo, index) => ({
@@ -142,6 +160,66 @@ export function applyTodoWrite(todos: TodoWriteParamsType["todos"]): {
 	}));
 	normalizeInProgressTask(tasks);
 	return { state: { tasks } };
+}
+
+function nextTaskId(tasks: TodoTask[]): string {
+	let max = 0;
+	for (const task of tasks) {
+		const match = /^task-(\d+)$/.exec(task.id);
+		if (match?.[1]) max = Math.max(max, Number.parseInt(match[1], 10));
+	}
+	return `task-${max + 1}`;
+}
+
+export type TodoPatch = {
+	set?: PatchSetTaskType[];
+	add?: InputTaskType[];
+	remove?: string[];
+};
+
+export function applyTodoPatch(
+	state: TodoState,
+	patch: TodoPatch,
+): {
+	state: TodoState;
+	warnings: string[];
+} {
+	const tasks = cloneTasks(state.tasks);
+	const warnings: string[] = [];
+
+	for (const id of patch.remove ?? []) {
+		const index = tasks.findIndex((task) => task.id === id);
+		if (index === -1) {
+			warnings.push(`제거할 항목을 찾지 못했습니다: ${id}`);
+			continue;
+		}
+		tasks.splice(index, 1);
+	}
+
+	for (const update of patch.set ?? []) {
+		const task = tasks.find((candidate) => candidate.id === update.id);
+		if (!task) {
+			warnings.push(`갱신할 항목을 찾지 못했습니다: ${update.id}`);
+			continue;
+		}
+		if (update.content !== undefined) task.content = update.content;
+		if (update.status !== undefined) task.status = update.status;
+		if (update.activeForm !== undefined) task.activeForm = update.activeForm;
+		if (update.notes !== undefined) task.notes = update.notes;
+	}
+
+	for (const todo of patch.add ?? []) {
+		tasks.push({
+			id: nextTaskId(tasks),
+			content: todo.content,
+			status: todo.status,
+			activeForm: todo.activeForm,
+			notes: todo.notes,
+		});
+	}
+
+	normalizeInProgressTask(tasks);
+	return { state: { tasks }, warnings };
 }
 
 export function renderTodoOverlayPlainLines(state: TodoState): string[] {
@@ -597,6 +675,14 @@ export default function todoWriteOverlayExtension(pi: ExtensionAPI): void {
 - 완전히 끝난 일만 completed로 표시하고, 막혔으면 in_progress 유지
 - 요구사항이 바뀌면 계속 진행하기 전에 todo 목록부터 갱신
 
+## 업데이트 방식 (op)
+- 처음 목록을 만들거나 큰 폭으로 재편할 때만 op=replace(기본)로 todos 전체를 보냅니다.
+- 이미 목록이 있고 일부만 바뀌면 op=patch로 변경분만 보내세요. 항목 수가 많을수록 강력히 권장됩니다.
+  - set: 기존 항목의 상태/내용 부분 갱신. 예: 하나 완료 + 다음 시작 => set: [{id:"task-1", status:"completed"}, {id:"task-2", status:"in_progress"}]
+  - add: 새 항목 추가
+  - remove: 항목 id 제거
+- id는 임의로 지어내지 말고, 직전 todo_write 결과에 표시된 task-N 값을 그대로 참조하세요.
+
 ## 필드 설명
 - content: 명령형 작업 문구 (예: "테스트 실행")
 - status: pending | in_progress | completed
@@ -604,14 +690,31 @@ export default function todoWriteOverlayExtension(pi: ExtensionAPI): void {
 - notes: (선택) 추가 맥락`,
 		parameters: TodoWriteParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const applied = applyTodoWrite(params.todos);
-			const summary = renderTodoWriteSummary(applied.state);
-			writeTodoWriteState(ctx, applied.state);
-			persistTodoWriteStateEntry(pi, applied.state);
+			const op = params.op ?? "replace";
+			let state: TodoState;
+			let warnings: string[] = [];
+			if (op === "patch") {
+				const result = applyTodoPatch(readTodoWriteState(ctx), {
+					set: params.set,
+					add: params.add,
+					remove: params.remove,
+				});
+				state = result.state;
+				warnings = result.warnings;
+			} else {
+				state = applyTodoWrite(params.todos ?? []).state;
+			}
+			const summary = renderTodoWriteSummary(state);
+			writeTodoWriteState(ctx, state);
+			persistTodoWriteStateEntry(pi, state);
 			await syncTodoOverlay(ctx, pi);
+			const text =
+				warnings.length > 0
+					? `${summary}\n\n주의:\n${warnings.map((warning) => `  - ${warning}`).join("\n")}`
+					: summary;
 			return {
-				content: [{ type: "text" as const, text: summary }],
-				details: { tasks: applied.state.tasks, summary },
+				content: [{ type: "text" as const, text }],
+				details: { tasks: state.tasks, summary, warnings },
 			};
 		},
 		renderResult(result, { expanded }, theme) {
