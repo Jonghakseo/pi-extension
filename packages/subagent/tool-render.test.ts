@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { renderListAgentsCall, renderListAgentsResult, renderSubagentToolCall } from "./tool-render.ts";
+import { SUBAGENT_STRONG_WAIT_MESSAGE } from "./constants.ts";
+import {
+	renderListAgentsCall,
+	renderListAgentsResult,
+	renderSubagentToolCall,
+	renderSubagentToolResult,
+} from "./tool-render.ts";
 
 const theme = {
 	fg: (_color: string, text: string) => text,
@@ -57,6 +63,40 @@ describe("list-agents tool rendering", () => {
 		expect(rendered).toContain(fullText);
 		expect(rendered).toContain("model: test");
 		expect(rendered).not.toContain("✓ 4 agents");
+	});
+});
+
+describe("subagent async launch result rendering", () => {
+	const launchMessages = [
+		"Started async subagent run #5 (worker).",
+		"Started async subagent batch b_1234_abcd (3 runs).",
+		"Started async subagent chain p_1234_abcd (3 steps).",
+	];
+
+	for (const launchMessage of launchMessages) {
+		it(`hides the anti-poll footer when collapsed: ${launchMessage}`, () => {
+			const fullText = `${launchMessage} ${SUBAGENT_STRONG_WAIT_MESSAGE}`;
+			const collapsed = renderComponent(
+				renderSubagentToolResult({ content: [{ type: "text", text: fullText }] }, { expanded: false }, theme as never),
+			);
+			const expanded = renderComponent(
+				renderSubagentToolResult({ content: [{ type: "text", text: fullText }] }, { expanded: true }, theme as never),
+			);
+
+			expect(collapsed).toBe(launchMessage);
+			expect(collapsed).not.toContain("Do not poll");
+			expect(expanded.replace(/\n/g, " ")).toBe(fullText);
+		});
+	}
+
+	it("also hides the footer from running status responses", () => {
+		const fullText = `Run #5 is still running.\n${SUBAGENT_STRONG_WAIT_MESSAGE}`;
+		const collapsed = renderComponent(
+			renderSubagentToolResult({ content: [{ type: "text", text: fullText }] }, { expanded: false }, theme as never),
+		);
+
+		expect(collapsed).toBe("Run #5 is still running.");
+		expect(collapsed).not.toContain("Do not poll");
 	});
 });
 

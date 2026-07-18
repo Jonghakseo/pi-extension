@@ -7,6 +7,7 @@
 import { getMarkdownTheme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text, visibleWidth } from "@earendil-works/pi-tui";
 import { parseSubagentToolCommand } from "./cli.js";
+import { SUBAGENT_STRONG_WAIT_MESSAGE } from "./constants.js";
 import { formatToolCall, formatUsageStats } from "./format.js";
 import { getDisplayItems, getFinalOutput } from "./runner.js";
 import { COLLAPSED_ITEM_COUNT, truncateText } from "./store.js";
@@ -117,6 +118,20 @@ function getToolResultText(result: ToolRenderResult): string {
 	return (raw?.type === "text" ? raw.text : undefined) ?? "(no output)";
 }
 
+function renderPlainToolResult(fullText: string, expanded: boolean, theme: RenderTheme): Text {
+	if (expanded) return new Text(fullText, 0, 0);
+
+	const waitMessageIndex = fullText.indexOf(SUBAGENT_STRONG_WAIT_MESSAGE);
+	if (waitMessageIndex >= 0) {
+		return new Text(fullText.slice(0, waitMessageIndex).trimEnd(), 0, 0);
+	}
+
+	const firstLine = fullText.split("\n")[0] ?? "";
+	const lineCount = fullText.split("\n").length;
+	const suffix = lineCount > 1 ? theme.fg("muted", ` (+${lineCount - 1} lines)`) : "";
+	return new Text(firstLine + suffix, 0, 0);
+}
+
 function renderDisplayItems(items: DisplayItem[], expanded: boolean, theme: RenderTheme, limit?: number): string {
 	const toShow = limit ? items.slice(-limit) : items;
 	const skipped = limit && items.length > limit ? items.length - limit : 0;
@@ -200,30 +215,12 @@ export function renderSubagentToolResult(
 ) {
 	const details = result.details as SubagentDetails | undefined;
 	if (!details || details.results.length === 0) {
-		const raw = result.content[0];
-		const fullText = (raw?.type === "text" ? raw.text : undefined) ?? "(no output)";
-		if (!expanded) {
-			const firstLine = fullText.split("\n")[0] ?? "";
-			const lineCount = fullText.split("\n").length;
-			const suffix = lineCount > 1 ? theme.fg("muted", ` (+${lineCount - 1} lines)`) : "";
-			return new Text(firstLine + suffix, 0, 0);
-		}
-		return new Text(fullText, 0, 0);
+		return renderPlainToolResult(getToolResultText(result), expanded, theme);
 	}
 
 	const mdTheme = getMarkdownTheme();
 	const r = details.results[0];
-	if (!r) {
-		const raw2 = result.content[0];
-		const fullText2 = (raw2?.type === "text" ? raw2.text : undefined) ?? "(no output)";
-		if (!expanded) {
-			const firstLine = fullText2.split("\n")[0] ?? "";
-			const lineCount = fullText2.split("\n").length;
-			const suffix = lineCount > 1 ? theme.fg("muted", ` (+${lineCount - 1} lines)`) : "";
-			return new Text(firstLine + suffix, 0, 0);
-		}
-		return new Text(fullText2, 0, 0);
-	}
+	if (!r) return renderPlainToolResult(getToolResultText(result), expanded, theme);
 
 	const isError = r.exitCode !== 0 || r.stopReason === "error" || r.stopReason === "aborted";
 	const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
