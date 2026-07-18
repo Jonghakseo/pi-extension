@@ -30,7 +30,7 @@ type ToolCallRenderContext = { expanded: boolean };
 type CompactBlock = { agent: string; task: string };
 type ListAgentsDetails = { agents?: Array<{ name?: unknown }> };
 
-const COMPACT_TASK_PREVIEW_WIDTH = 72;
+const COMPACT_TASK_PREVIEW_WIDTH = 67;
 const COMPACT_AGENT_WIDTH = 20;
 const COMPACT_MAX_ITEMS = 3;
 const COMPACT_AGENT_LIST_COUNT = 3;
