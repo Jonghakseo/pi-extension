@@ -43,6 +43,7 @@ import { enqueueSubagentInvocation } from "./invocation-queue.js";
 import { appendDisplayTaskUpdate, getSessionFileSize } from "./persisted-session.js";
 import {
 	clearFinishedRuns,
+	evictStaleFinishedGroups,
 	formatCommandRunSummary,
 	formatFinishedGroupStatus,
 	removeRun,
@@ -895,6 +896,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 		}
 
 		if ((asyncAction === "status" || asyncAction === "detail") && typeof cmdParams.groupId === "string") {
+			evictStaleFinishedGroups(store);
 			const groupId = cmdParams.groupId;
 			const detailed = asyncAction === "detail";
 			const finished = store.finishedGroups.get(groupId);

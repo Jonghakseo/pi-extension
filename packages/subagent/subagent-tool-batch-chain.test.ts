@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FINISHED_GROUP_TTL_MS } from "./constants.ts";
 import { createStore } from "./store.ts";
 import type { SingleResult } from "./types.ts";
 
@@ -477,6 +478,33 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 		expect(detail.content[0]?.text).toContain(`[subagent-chain#${pipelineId}] completed`);
 		expect(detail.content[0]?.text).toContain("CHAIN_ONE");
 		expect(detail.content[0]?.text).toContain("CHAIN_TWO");
+	});
+
+	it("evicts an expired finished group when queried", async () => {
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		store.finishedGroups.set("b_expired", {
+			groupId: "b_expired",
+			kind: "batch",
+			terminalStatus: "completed",
+			finishedAt: Date.now() - FINISHED_GROUP_TTL_MS - 1,
+			total: 1,
+			failed: 0,
+			members: [{ summaryLine: "#1 [done] worker", output: "expired" }],
+		});
+		const sent: SentCall[] = [];
+		const pi = createPi(sent);
+		const execute = createSubagentToolExecute(pi as never, store);
+
+		const result = await execute(
+			"call-expired-group",
+			{ command: "subagent status b_expired" },
+			undefined,
+			undefined,
+			createCtx(),
+		);
+		expect(result.isError).toBe(true);
+		expect(store.finishedGroups.has("b_expired")).toBe(false);
 	});
 
 	it("returns an error when querying an unknown groupId", async () => {
