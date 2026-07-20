@@ -774,8 +774,13 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 		}
 
 		if (parsedCommand.type === "error") {
+			const errorText =
+				parsedCommand.showHelp === false
+					? parsedCommand.message
+					: `${parsedCommand.message}\n\n${SUBAGENT_CLI_HELP_TEXT}`;
+
 			return {
-				content: [{ type: "text", text: `${parsedCommand.message}\n\n${SUBAGENT_CLI_HELP_TEXT}` }],
+				content: [{ type: "text", text: errorText }],
 				details: createEmptyDetails("single", false, null),
 				isError: true,
 			};

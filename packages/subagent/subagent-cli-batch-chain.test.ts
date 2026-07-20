@@ -49,6 +49,17 @@ describe("subagent CLI batch/chain parsing", () => {
 		}
 	});
 
+	it("returns concise no-help syntax error for unclosed quotes", () => {
+		const parsed = parseSubagentToolCommand('subagent run worker -- "open quote');
+
+		expect(parsed).toEqual({
+			type: "error",
+			message:
+				"❌ Syntax error: Unclosed quote in command.\nClose the quote or wrap the task after `--` in matching quotes.",
+			showHelp: false,
+		});
+	});
+
 	it("rejects an entire comma-separated target when any run ID is invalid", () => {
 		const malformed = parseSubagentToolCommand("subagent remove 12,typo");
 		const emptySegment = parseSubagentToolCommand("subagent abort 12,,13");

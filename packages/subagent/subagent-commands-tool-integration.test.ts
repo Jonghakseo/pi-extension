@@ -609,4 +609,47 @@ describe("T09: command/tool runtime metadata integration", () => {
 			expect(run.claudeProjectDir).toBeUndefined();
 		});
 	});
+
+	describe("parse error rendering", () => {
+		it("does not append full CLI help for unclosed-quote syntax errors", async () => {
+			const { createSubagentToolExecute } = await loadToolExecute();
+			const store = createStore();
+			const sent: SentCall[] = [];
+			const execute = createSubagentToolExecute(createPi(sent) as never, store);
+
+			const result = await execute(
+				"call-unclosed-quote",
+				{ command: 'subagent run worker -- "open quote' },
+				undefined,
+				undefined,
+				createCtx(),
+			);
+
+			expect(result.isError).toBe(true);
+			const text = result.content[0]?.text ?? "";
+			expect(text).toBe(
+				"❌ Syntax error: Unclosed quote in command.\nClose the quote or wrap the task after `--` in matching quotes.",
+			);
+			expect(text).not.toContain("Subagent CLI (LLM interface)");
+		});
+
+		it("still appends full CLI help for other parse errors", async () => {
+			const { createSubagentToolExecute } = await loadToolExecute();
+			const store = createStore();
+			const sent: SentCall[] = [];
+			const execute = createSubagentToolExecute(createPi(sent) as never, store);
+
+			const result = await execute(
+				"call-non-syntax-error",
+				{ command: "subagent run worker --agent" },
+				undefined,
+				undefined,
+				createCtx(),
+			);
+
+			expect(result.isError).toBe(true);
+			const text = result.content[0]?.text ?? "";
+			expect(text).toContain("Subagent CLI (LLM interface)");
+		});
+	});
 });

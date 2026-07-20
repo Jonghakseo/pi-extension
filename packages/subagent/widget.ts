@@ -119,9 +119,10 @@ function getContextShort(run: CommandRunState, ctx: WidgetRenderCtx, theme: Widg
 	if (usedContextPercent === undefined) return "";
 	const contextBar = formatCompactContextBar(usedContextPercent);
 	if (!contextBar) return "";
+	const contextLabel = `${contextBar} ${usedContextPercent}%`;
 	const contextBarColor =
 		remainingContextPercent !== undefined ? getContextBarColorByRemaining(remainingContextPercent) : undefined;
-	return contextBarColor ? theme.fg(contextBarColor, contextBar) : theme.fg("dim", contextBar);
+	return contextBarColor ? theme.fg(contextBarColor, contextLabel) : theme.fg("dim", contextLabel);
 }
 
 function buildPrimaryLabelText(run: CommandRunState): string {

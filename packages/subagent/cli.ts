@@ -15,7 +15,7 @@ export type SubagentCliParseResult =
 	| { type: "help" }
 	| { type: "agents" }
 	| { type: "params"; params: Record<string, unknown> }
-	| { type: "error"; message: string };
+	| { type: "error"; message: string; showHelp?: boolean };
 
 export const SUBAGENT_CLI_HELP_TEXT = [
 	"Subagent CLI (LLM interface)",
@@ -451,7 +451,8 @@ export function parseSubagentToolCommand(
 	if ("error" in tokenized) {
 		return {
 			type: "error",
-			message: `❌ Syntax error: ${tokenized.error}\n\nCheck that quotes are balanced and the command is well-formed.\n\n✓ Correct: subagent run worker -- "task with spaces"`,
+			message: `❌ Syntax error: ${tokenized.error}\nClose the quote or wrap the task after \`--\` in matching quotes.`,
+			showHelp: false,
 		};
 	}
 
