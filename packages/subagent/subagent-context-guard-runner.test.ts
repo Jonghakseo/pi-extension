@@ -120,15 +120,54 @@ describe("runPiAgent proactive context guard", () => {
 		expect(result.errorMessage ?? "").not.toContain("context guard:");
 	});
 
-	it("does not trip for a codex model without a configured ceiling", async () => {
+	it("trips for GPT-5.3 Codex Spark at its 115k ceiling", async () => {
 		const model = "openai-codex/gpt-5.3-codex-spark";
 		const { result, proc } = await run(
 			model,
-			[JSON.stringify({ type: "agent_start" }), assistantMessageEnd(model, "toolUse", 240_000)],
+			[JSON.stringify({ type: "agent_start" }), assistantMessageEnd(model, "toolUse", 115_000)],
+			false,
+		);
+
+		expect(result.stopReason).toBe("error");
+		expect(result.exitCode).toBe(1);
+		expect(result.errorMessage).toContain("context guard:");
+		expect(result.errorMessage).toContain("115000");
+		expect(result.errorClass).toBe("context_overflow");
+		expect(result.peakContextTokens).toBe(115_000);
+		expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+	});
+
+	it("records peak context, failure class, and the last tool result", async () => {
+		const model = "openai-codex/gpt-5.3-codex-spark";
+		const errorMessage = "Codex error: Our servers are currently overloaded. Please try again later.";
+		const { result } = await run(
+			model,
+			[
+				JSON.stringify({ type: "agent_start" }),
+				assistantMessageEnd(model, "toolUse", 80_000),
+				JSON.stringify({ type: "tool_execution_start", toolName: "read", args: { path: "/tmp/a.ts" } }),
+				JSON.stringify({
+					type: "tool_result_end",
+					message: { role: "toolResult", toolName: "read", content: [{ type: "text", text: "123456789" }] },
+				}),
+				JSON.stringify({
+					type: "message_end",
+					message: {
+						role: "assistant",
+						model,
+						content: [],
+						stopReason: "error",
+						errorMessage,
+						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+					},
+				}),
+			],
 			true,
 		);
 
-		expect(result.errorMessage ?? "").not.toContain("context guard:");
-		expect(proc.kill).not.toHaveBeenCalledWith("SIGTERM");
+		expect(result.errorClass).toBe("overloaded");
+		expect(result.peakContextTokens).toBe(80_000);
+		expect(result.lastToolName).toBe("read");
+		expect(result.lastToolOutputChars).toBe(9);
 	});
 });

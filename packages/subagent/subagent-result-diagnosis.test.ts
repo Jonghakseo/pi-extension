@@ -58,6 +58,7 @@ describe("diagnoseResultFailure", () => {
 		const diagnosis = diagnoseResultFailure(result);
 		expect(diagnosis.failed).toBe(true);
 		expect(diagnosis.contextOverflow).toBe(true);
+		expect(diagnosis.errorClass).toBe("context_overflow");
 		expect(diagnosis.reason).toContain("44 turn");
 		expect(diagnosis.reason).toContain("context window");
 	});
@@ -75,7 +76,16 @@ describe("diagnoseResultFailure", () => {
 		const result = makeResult({ stopReason: "error", errorMessage: "rate limited" });
 		const diagnosis = diagnoseResultFailure(result);
 		expect(diagnosis.contextOverflow).toBeFalsy();
+		expect(diagnosis.errorClass).toBe("rate_limit");
 		expect(diagnosis.reason).toContain("rate limited");
+	});
+
+	it("classifies overloaded provider failures separately", () => {
+		const result = makeResult({
+			stopReason: "error",
+			errorMessage: "Codex error: Our servers are currently overloaded. Please try again later.",
+		});
+		expect(diagnoseResultFailure(result).errorClass).toBe("overloaded");
 	});
 
 	it("fails when stopReason is aborted", () => {

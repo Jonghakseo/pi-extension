@@ -127,6 +127,10 @@ export function updateRunFromResult(state: CommandRunState, result: SingleResult
 	state.toolCalls = Math.max(collectToolCallCount(result.messages), result.liveToolCalls ?? 0);
 	state.usage = result.usage;
 	state.model = result.model ?? state.model;
+	state.errorClass = result.errorClass;
+	state.peakContextTokens = Math.max(state.peakContextTokens ?? 0, result.peakContextTokens ?? 0);
+	if (result.lastToolName) state.lastToolName = result.lastToolName;
+	if (result.lastToolOutputChars != null) state.lastToolOutputChars = result.lastToolOutputChars;
 	if (result.usage?.turns != null) state.turnCount = result.usage.turns;
 	if (result.thoughtText) state.thoughtText = result.thoughtText;
 

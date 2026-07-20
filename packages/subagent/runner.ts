@@ -24,6 +24,7 @@ import {
 	serializeDiagnosticValue,
 	toDiagnosticError,
 } from "./diagnostics.js";
+import { classifySubagentFailure, countTextChars } from "./failure-telemetry.js";
 import { formatToolCallPlain } from "./format.js";
 import {
 	extractActivityPreviewFromTextDelta,
@@ -871,6 +872,7 @@ async function runPiAgent(
 				if (event.type === "tool_execution_start") {
 					currentResult.liveToolCalls = (currentResult.liveToolCalls ?? 0) + 1;
 					if (typeof event.toolName === "string") {
+						currentResult.lastToolName = event.toolName;
 						currentResult.liveActivityPreview = formatPiToolExecutionPreview(event.toolName, event.args);
 					}
 					emitUpdate();
@@ -894,6 +896,7 @@ async function runPiAgent(
 							currentResult.usage.contextTokens = usage.totalTokens || 0;
 						}
 						peakContextTokens = Math.max(peakContextTokens, currentResult.usage.contextTokens);
+						currentResult.peakContextTokens = peakContextTokens;
 						// ④ Proactive context guard: stop just below the provider's real
 						// ceiling so heavy runs surface partial findings instead of a raw
 						// context-overflow error one turn later.
@@ -944,7 +947,10 @@ async function runPiAgent(
 				}
 
 				if (event.type === "tool_result_end" && event.message) {
-					currentResult.messages.push(event.message as Message);
+					const toolResultMessage = event.message as Message & { toolName?: string };
+					currentResult.messages.push(toolResultMessage);
+					if (typeof toolResultMessage.toolName === "string") currentResult.lastToolName = toolResultMessage.toolName;
+					currentResult.lastToolOutputChars = countTextChars(toolResultMessage.content);
 					emitUpdate();
 					if (sawAgentEnd) scheduleAgentEndForceResolve();
 					return;
@@ -1112,6 +1118,17 @@ async function runPiAgent(
 		});
 
 		currentResult.exitCode = exitCode;
+		if (peakContextTokens > 0) {
+			currentResult.peakContextTokens = Math.max(currentResult.peakContextTokens ?? 0, peakContextTokens);
+		}
+		currentResult.errorClass = classifySubagentFailure({
+			failed: exitCode !== 0 || currentResult.stopReason === "error" || currentResult.stopReason === "aborted",
+			stopReason: wasAborted ? "aborted" : currentResult.stopReason,
+			exitCode,
+			errorMessage: currentResult.errorMessage,
+			stderr: currentResult.stderr,
+			output: getFinalOutput(currentResult.messages),
+		});
 		if (wasAborted) throw new Error("Subagent was aborted");
 		return currentResult;
 	} finally {

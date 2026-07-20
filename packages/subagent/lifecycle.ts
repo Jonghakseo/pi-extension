@@ -74,6 +74,7 @@ export function shutdownSubagentRuns(store: SubagentStore, pi: ExtensionAPI, rea
 		if (run.status !== "running") continue;
 		const message = `Aborted because the parent pi session ${reason} is shutting down.`;
 		run.status = "error";
+		run.errorClass = "aborted";
 		run.elapsedMs = Date.now() - run.startedAt;
 		run.lastActivityAt = Date.now();
 		run.lastLine = message;
@@ -98,6 +99,10 @@ export function shutdownSubagentRuns(store: SubagentStore, pi: ExtensionAPI, rea
 						displayTask: run.displayTask,
 						status: "error",
 						error: message,
+						errorClass: run.errorClass,
+						peakContextTokens: run.peakContextTokens,
+						lastToolName: run.lastToolName,
+						lastToolOutputChars: run.lastToolOutputChars,
 						startedAt: run.startedAt,
 						elapsedMs: run.elapsedMs,
 						lastActivityAt: run.lastActivityAt,

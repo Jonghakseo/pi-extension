@@ -176,6 +176,44 @@ describe("T09: command/tool runtime metadata integration", () => {
 			});
 		});
 
+		it("propagates failure telemetry in completion details", async () => {
+			mockRunSingleAgent.mockResolvedValue(
+				makeResult("worker", "heavy task", "", {
+					exitCode: 1,
+					stopReason: "error",
+					errorMessage: "Your input exceeds the context window of this model.",
+					errorClass: "context_overflow",
+					peakContextTokens: 127196,
+					lastToolName: "read",
+					lastToolOutputChars: 9032,
+				}),
+			);
+			const { createSubagentToolExecute } = await loadToolExecute();
+			const store = createStore();
+			const sent: SentCall[] = [];
+			const execute = createSubagentToolExecute(createPi(sent) as never, store);
+
+			await execute(
+				"call-telemetry",
+				{ command: "subagent run worker -- heavy task" },
+				undefined,
+				undefined,
+				createCtx(),
+			);
+
+			await waitForAssertion(() => {
+				const failed = sent.find(
+					(call) => typeof call.message.content === "string" && call.message.content.includes("] failed"),
+				);
+				expect(failed?.message.details).toMatchObject({
+					errorClass: "context_overflow",
+					peakContextTokens: 127196,
+					lastToolName: "read",
+					lastToolOutputChars: 9032,
+				});
+			});
+		});
+
 		it("propagates runtime metadata to run state via updateRunFromResult", () => {
 			const run: CommandRunState = {
 				id: 1,
@@ -385,11 +423,14 @@ describe("T09: command/tool runtime metadata integration", () => {
 			expect(piRun?.runtime).toBe("pi");
 		});
 
-		it("batch analytics summary includes runtime field", async () => {
+		it("batch analytics summary includes runtime and context/tool telemetry", async () => {
 			mockRunSingleAgent.mockImplementation(
 				async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
 					return makeResult(agentName, task, "done", {
 						runtime: agentName === "claude-worker" ? "claude" : "pi",
+						peakContextTokens: 42000,
+						lastToolName: "bash",
+						lastToolOutputChars: 321,
 					});
 				},
 			);
@@ -422,6 +463,11 @@ describe("T09: command/tool runtime metadata integration", () => {
 				const piSummary = summaries.find((s) => s.agent === "worker");
 				expect(claudeSummary?.runtime).toBe("claude");
 				expect(piSummary?.runtime).toBe("pi");
+				expect(piSummary).toMatchObject({
+					peakContextTokens: 42000,
+					lastToolName: "bash",
+					lastToolOutputChars: 321,
+				});
 			});
 		});
 	});

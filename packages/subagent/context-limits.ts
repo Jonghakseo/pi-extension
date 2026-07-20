@@ -8,12 +8,12 @@
  *    partial findings instead of surfacing a raw provider error.
  *
  * 2. Proactive guard (④): some providers register a context window that is
- *    larger than the backend's actually-enforced limit. Notably `openai-codex`
- *    models report climbing usage.totalTokens every turn but hard-error around
- *    ~264k with "Your input exceeds the context window of this model" — and
- *    pi's native threshold-compaction never fires because the registry window
- *    sits above that ceiling. We watch reported tokens live and stop the run
- *    gracefully just below the real cliff, preserving findings.
+ *    unsafe for long internal tool loops. Some `openai-codex` models expose a
+ *    larger registry window than the backend actually enforces; Spark correctly
+ *    reports 128k but can still cross the threshold between tool turns because
+ *    pi checks native compaction only after the whole agent run. We watch
+ *    reported tokens live and stop just below each known cliff, preserving
+ *    findings.
  *
  * Overflow patterns are aligned with `@earendil-works/pi-ai`'s OVERFLOW_PATTERNS.
  */
@@ -73,6 +73,11 @@ export function isContextOverflowText(text: string | undefined | null): boolean 
  * Only applied to the pi runtime; the claude runtime handles its own limits.
  */
 const GUARD_CEILINGS: Array<{ prefix: string; tokens: number }> = [
+	// GPT-5.3 Codex Spark has a hard 128k text-only window. Pi checks native
+	// threshold compaction only after the full agent run, not between internal
+	// tool-use turns, so stop at 115k before one large read/reasoning turn can
+	// cross the provider cliff.
+	{ prefix: "openai-codex/gpt-5.3-codex-spark", tokens: 115_000 },
 	// GPT-5.6 Codex models expose a 372k input window in pi. Keep the same 37k
 	// safety margin used by the older 272k-window models so long tool turns stop
 	// at 335k while partial findings can still be preserved. The family prefix
@@ -80,7 +85,7 @@ const GUARD_CEILINGS: Array<{ prefix: string; tokens: number }> = [
 	{ prefix: "openai-codex/gpt-5.6", tokens: 335_000 },
 	// Observed 272k-window codex models hard-error around ~264k with a raw
 	// provider error and no compaction. Cut at 235k to preserve the exploration
-	// so far. Unlisted codex models fall back to overflow detection/recovery (②).
+	// so far. Other unlisted models fall back to overflow detection/recovery (②).
 	{ prefix: "openai-codex/gpt-5.5", tokens: 235_000 },
 	// gpt-5.4 and gpt-5.4-mini both use a 272k window and are covered via startsWith.
 	{ prefix: "openai-codex/gpt-5.4", tokens: 235_000 },

@@ -1,5 +1,6 @@
 /** biome-ignore-all lint/suspicious/noExplicitAny: Claude stream events are dynamic runtime data. */
 import type { Message } from "@earendil-works/pi-ai";
+import { classifySubagentFailure, countTextChars } from "./failure-telemetry.js";
 import { extractActivityPreviewFromTextDelta, extractThoughtText } from "./live-preview.js";
 import type { SingleResult } from "./types.js";
 
@@ -32,6 +33,7 @@ export interface ClaudeStreamState {
 	completedUsage?: ClaudeUsageTotals;
 	currentMessageUsage?: ClaudeUsageTotals;
 	lastTurnContextTokens?: number;
+	peakContextTokens?: number;
 	resultReceived: boolean;
 	resultEvent: any | undefined;
 	isError: boolean;
@@ -39,6 +41,8 @@ export interface ClaudeStreamState {
 	liveActivityPreview: string | undefined;
 	currentToolName: string | undefined;
 	currentToolInput: string;
+	lastToolName?: string;
+	lastToolOutputChars?: number;
 }
 
 export function createStreamState(): ClaudeStreamState {
@@ -56,6 +60,7 @@ export function createStreamState(): ClaudeStreamState {
 		completedUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		currentMessageUsage: undefined,
 		lastTurnContextTokens: 0,
+		peakContextTokens: 0,
 		resultReceived: false,
 		resultEvent: undefined,
 		isError: false,
@@ -63,6 +68,8 @@ export function createStreamState(): ClaudeStreamState {
 		liveActivityPreview: undefined,
 		currentToolName: undefined,
 		currentToolInput: "",
+		lastToolName: undefined,
+		lastToolOutputChars: undefined,
 	};
 }
 
@@ -99,6 +106,7 @@ function syncUsageTotals(state: ClaudeStreamState): void {
 	state.usage.cacheRead = completed.cacheRead + (current?.cacheRead || 0);
 	state.usage.cacheWrite = completed.cacheWrite + (current?.cacheWrite || 0);
 	state.usage.contextTokens = current ? getContextTokensFromUsage(current) : (state.lastTurnContextTokens ?? 0);
+	state.peakContextTokens = Math.max(state.peakContextTokens ?? 0, state.usage.contextTokens);
 }
 
 function finalizeCurrentMessageUsage(state: ClaudeStreamState): void {
@@ -173,6 +181,7 @@ function processStreamEvent(state: ClaudeStreamState, ev: any): boolean {
 		} else if (block?.type === "tool_use") {
 			state.liveToolCalls++;
 			state.currentToolName = block.name;
+			state.lastToolName = block.name;
 			state.currentToolInput = "";
 			state.liveActivityPreview = `\u2192 ${block.name}`;
 		} else if (block?.type === "thinking") {
@@ -279,6 +288,10 @@ function processUserEvent(state: ClaudeStreamState, event: any): void {
 		}
 	}
 
+	if (contentBlocks.length > 0) {
+		state.lastToolOutputChars = countTextChars(contentBlocks);
+	}
+
 	const piMessage = {
 		role: "user" as const,
 		content: contentBlocks.length > 0 ? contentBlocks : [{ type: "text" as const, text: "" }],
@@ -315,6 +328,7 @@ function processResultEvent(state: ClaudeStreamState, event: any): void {
 				(state.lastTurnContextTokens ?? 0) > 0 ? (state.lastTurnContextTokens ?? 0) : getContextTokensFromUsage(totals),
 			turns: event.num_turns || state.usage.turns,
 		};
+		state.peakContextTokens = Math.max(state.peakContextTokens ?? 0, state.usage.contextTokens);
 	}
 }
 
@@ -372,6 +386,9 @@ export function stateToSingleResult(
 		model: state.model,
 		stopReason: state.stopReason,
 		errorMessage: state.errorMessage,
+		peakContextTokens: (state.peakContextTokens ?? 0) > 0 ? state.peakContextTokens : undefined,
+		lastToolName: state.lastToolName,
+		lastToolOutputChars: state.lastToolOutputChars,
 		step,
 		runtime: "claude",
 		claudeSessionId: state.sessionId,
@@ -395,6 +412,14 @@ export function stateToSingleResult(
 		const names = state.permissionDenials.map((d: any) => d.tool_name).join(", ");
 		result.errorMessage = `Permission denied for tools: ${names}`;
 	}
+
+	result.errorClass = classifySubagentFailure({
+		failed: exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted" || state.isError,
+		stopReason: result.stopReason,
+		exitCode,
+		errorMessage: result.errorMessage,
+		stderr,
+	});
 
 	return result;
 }

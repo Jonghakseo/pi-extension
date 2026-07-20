@@ -34,6 +34,7 @@
 		"diagnostics.ts",
 		"display-task.ts",
 		"escalation.ts",
+		"failure-telemetry.ts",
 		"format.ts",
 		"group-pending.ts",
 		"index.ts",

@@ -640,6 +640,10 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 					contextMode: d.contextMode ?? existing?.contextMode,
 					usage: d.usage ?? existing?.usage,
 					model: d.model ?? existing?.model,
+					errorClass: d.errorClass ?? existing?.errorClass,
+					peakContextTokens: d.peakContextTokens ?? existing?.peakContextTokens,
+					lastToolName: d.lastToolName ?? existing?.lastToolName,
+					lastToolOutputChars: d.lastToolOutputChars ?? existing?.lastToolOutputChars,
 					thoughtText: d.thoughtText ?? d.progressText ?? existing?.thoughtText,
 					source: restoredSource,
 					runtime: d.runtime ?? existing?.runtime,
@@ -697,6 +701,10 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 					contextMode: d.contextMode ?? existing?.contextMode,
 					usage: existing?.usage,
 					model: existing?.model,
+					errorClass: existing?.errorClass ?? "unknown",
+					peakContextTokens: existing?.peakContextTokens,
+					lastToolName: existing?.lastToolName,
+					lastToolOutputChars: existing?.lastToolOutputChars,
 					thoughtText: d.thoughtText ?? d.progressText ?? existing?.thoughtText,
 					source: restoredSource,
 					runtime: d.runtime ?? existing?.runtime,
@@ -1514,6 +1522,10 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 							usage: result.usage,
 							model: result.model,
 							source: result.agentSource,
+							errorClass: runState.errorClass,
+							peakContextTokens: runState.peakContextTokens,
+							lastToolName: runState.lastToolName,
+							lastToolOutputChars: runState.lastToolOutputChars,
 							thoughtText: runState.thoughtText,
 							retryCount: runState.retryCount,
 							status: runState.status,
@@ -1546,6 +1558,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 				} catch (error: any) {
 					if (runState.removed || store.disposed) return;
 					runState.status = "error";
+					runState.errorClass = "process_error";
 					runState.elapsedMs = Date.now() - runState.startedAt;
 					runState.lastLine =
 						runState.autoAbortReason ?? (error?.message ? String(error.message) : "Subagent execution failed");
@@ -1572,6 +1585,10 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 							elapsedMs: runState.elapsedMs,
 							lastActivityAt: runState.lastActivityAt,
 							error: runState.lastLine,
+							errorClass: runState.errorClass,
+							peakContextTokens: runState.peakContextTokens,
+							lastToolName: runState.lastToolName,
+							lastToolOutputChars: runState.lastToolOutputChars,
 							thoughtText: runState.thoughtText,
 							status: runState.status,
 							runtime: runState.runtime,

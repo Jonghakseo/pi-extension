@@ -6,6 +6,7 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { AgentConfig, AgentRuntime } from "./agents.js";
+import type { SubagentErrorClass } from "./failure-telemetry.js";
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -30,6 +31,10 @@ export interface SingleResult {
 	model?: string;
 	stopReason?: string;
 	errorMessage?: string;
+	errorClass?: SubagentErrorClass;
+	peakContextTokens?: number;
+	lastToolName?: string;
+	lastToolOutputChars?: number;
 	step?: number;
 	liveText?: string;
 	liveThinking?: string;
@@ -91,6 +96,14 @@ export interface CommandRunState {
 	retryCount?: number;
 	/** Last transient failure reason that triggered an auto-retry. */
 	lastRetryReason?: string;
+	/** Normalized terminal failure category for analytics. */
+	errorClass?: SubagentErrorClass;
+	/** Highest reported context usage observed during the run. */
+	peakContextTokens?: number;
+	/** Most recently completed/started tool name. */
+	lastToolName?: string;
+	/** Text character count of the most recent tool result. */
+	lastToolOutputChars?: number;
 	/** Hang detector reason preserved until the normal finalizer emits the sole completion. */
 	autoAbortReason?: string;
 	runtime?: AgentRuntime;

@@ -31,6 +31,7 @@ import {
 	summarizeSubagentDisplayTask,
 } from "./display-task.js";
 import { ESCALATION_EXIT_CODE, readAndConsumeEscalation } from "./escalation.js";
+import { classifySubagentFailure, type SubagentErrorClass } from "./failure-telemetry.js";
 import {
 	formatContextUsageBar,
 	formatUsageStats,
@@ -97,6 +98,7 @@ type SessionDetailSummary = {
 type ResultFailureDiagnosis = {
 	failed: boolean;
 	reason?: string;
+	errorClass?: SubagentErrorClass;
 	/** Set when the failure was caused by exceeding the model context window. */
 	contextOverflow?: boolean;
 };
@@ -283,12 +285,26 @@ function parseSessionDetailSummary(sessionFile?: string): SessionDetailSummary {
 }
 
 export function diagnoseResultFailure(result: SingleResult): ResultFailureDiagnosis {
+	const finalOutput = getFinalOutput(result.messages).trim();
+	const failedByStatus = result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
+	const errorClass =
+		result.errorClass ??
+		classifySubagentFailure({
+			failed: failedByStatus,
+			stopReason: result.stopReason,
+			exitCode: result.exitCode,
+			errorMessage: result.errorMessage,
+			stderr: result.stderr,
+			output: finalOutput,
+		});
+
 	if (result.exitCode !== 0 || result.stopReason === "error") {
-		const overflowText = result.errorMessage || result.stderr || getFinalOutput(result.messages);
+		const overflowText = result.errorMessage || result.stderr || finalOutput;
 		if (isContextOverflowText(overflowText)) {
 			const turns = result.usage?.turns ?? 0;
 			return {
 				failed: true,
+				errorClass: "context_overflow",
 				contextOverflow: true,
 				reason:
 					`Subagent stopped after exceeding the model context window (${turns} turn(s) completed). ` +
@@ -296,12 +312,13 @@ export function diagnoseResultFailure(result: SingleResult): ResultFailureDiagno
 			};
 		}
 	}
-	if (result.exitCode !== 0) return { failed: true, reason: `Subagent process exited with code ${result.exitCode}.` };
+	if (result.exitCode !== 0)
+		return { failed: true, errorClass, reason: `Subagent process exited with code ${result.exitCode}.` };
 	if (result.stopReason === "error")
-		return { failed: true, reason: result.errorMessage || "Subagent reported stopReason=error." };
-	if (result.stopReason === "aborted") return { failed: true, reason: "Subagent execution was aborted." };
+		return { failed: true, errorClass, reason: result.errorMessage || "Subagent reported stopReason=error." };
+	if (result.stopReason === "aborted")
+		return { failed: true, errorClass: errorClass ?? "aborted", reason: "Subagent execution was aborted." };
 
-	const finalOutput = getFinalOutput(result.messages).trim();
 	const hasAssistantText = finalOutput.length > 0;
 	if (hasAssistantText) return { failed: false };
 
@@ -309,6 +326,7 @@ export function diagnoseResultFailure(result: SingleResult): ResultFailureDiagno
 	if (result.messages.length === 0) {
 		return {
 			failed: true,
+			errorClass: errorClass ?? "unknown",
 			reason:
 				"Subagent returned no messages (turn=0). " +
 				(stderr ? `stderr: ${stderr}` : "No stderr captured. Child process may have exited before producing output."),
@@ -317,6 +335,7 @@ export function diagnoseResultFailure(result: SingleResult): ResultFailureDiagno
 
 	return {
 		failed: true,
+		errorClass: errorClass ?? "unknown",
 		reason: `Subagent finished without assistant text output. ${stderr ? `stderr: ${stderr}` : "No stderr captured."}`,
 	};
 }
@@ -471,6 +490,10 @@ function buildRunCompletionMessage(finalized: FinalizedRun, options?: { display?
 			usage: result?.usage,
 			model: result?.model,
 			source: result?.agentSource,
+			errorClass: runState.errorClass,
+			peakContextTokens: runState.peakContextTokens,
+			lastToolName: runState.lastToolName,
+			lastToolOutputChars: runState.lastToolOutputChars,
 			thoughtText: runState.thoughtText,
 			status: runState.status,
 			batchId: runState.batchId,
@@ -506,6 +529,10 @@ function buildEscalationMessage(runState: CommandRunState, escalationMessage: st
 			exitCode: result.exitCode,
 			usage: result.usage,
 			model: result.model,
+			errorClass: runState.errorClass,
+			peakContextTokens: runState.peakContextTokens,
+			lastToolName: runState.lastToolName,
+			lastToolOutputChars: runState.lastToolOutputChars,
 			batchId: runState.batchId,
 			pipelineId: runState.pipelineId,
 			pipelineStepIndex: runState.pipelineStepIndex,
@@ -549,6 +576,7 @@ function finalizeRunState(runState: CommandRunState, result: SingleResult): Fina
 	const failure = diagnoseResultFailure(result);
 	const isError = failure.failed;
 	runState.status = isError ? "error" : "done";
+	runState.errorClass = failure.errorClass;
 	runState.elapsedMs = Date.now() - runState.startedAt;
 	let rawOutput: string;
 	if (isError && failure.contextOverflow) {
@@ -653,7 +681,19 @@ function toLaunchSummary(
 function buildRunAnalyticsSummary(
 	runState: Pick<
 		CommandRunState,
-		"id" | "agent" | "status" | "elapsedMs" | "model" | "batchId" | "pipelineId" | "pipelineStepIndex" | "runtime"
+		| "id"
+		| "agent"
+		| "status"
+		| "elapsedMs"
+		| "model"
+		| "batchId"
+		| "pipelineId"
+		| "pipelineStepIndex"
+		| "runtime"
+		| "errorClass"
+		| "peakContextTokens"
+		| "lastToolName"
+		| "lastToolOutputChars"
 	>,
 ): Record<string, unknown> {
 	return {
@@ -662,6 +702,10 @@ function buildRunAnalyticsSummary(
 		status: runState.status,
 		elapsedMs: runState.elapsedMs,
 		model: runState.model,
+		errorClass: runState.errorClass,
+		peakContextTokens: runState.peakContextTokens,
+		lastToolName: runState.lastToolName,
+		lastToolOutputChars: runState.lastToolOutputChars,
 		batchId: runState.batchId,
 		pipelineId: runState.pipelineId,
 		stepIndex: runState.pipelineStepIndex,
@@ -683,6 +727,7 @@ function isInteractiveTuiContext(ctx: SubagentToolExecuteContext): boolean {
 
 function finalizeRunError(runState: CommandRunState, error: unknown): FinalizedRun {
 	runState.status = "error";
+	runState.errorClass = "process_error";
 	runState.elapsedMs = Date.now() - runState.startedAt;
 	runState.lastLine =
 		runState.autoAbortReason ?? (error instanceof Error ? error.message : "Subagent execution failed");
