@@ -1,7 +1,11 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createExtensionApiMock } from "../../tests/mock-extension-api.ts";
 import delayedActionExtension from "./index.ts";
+import { loadPersistedTasks, savePersistedTasks } from "./storage.ts";
 
 function createCtx(overrides: Partial<ExtensionContext> = {}) {
 	return {
@@ -18,6 +22,16 @@ function createCtx(overrides: Partial<ExtensionContext> = {}) {
 			...overrides.ui,
 		},
 	} as unknown as ExtensionContext;
+}
+
+function createPersistentCtx(sessionId: string, overrides: Partial<ExtensionContext> = {}) {
+	return createCtx({
+		sessionManager: {
+			getSessionId: () => sessionId,
+			getSessionFile: () => `/tmp/sessions/${sessionId}.jsonl`,
+		},
+		...overrides,
+	} as unknown as Partial<ExtensionContext>);
 }
 
 function deferred<T>() {
@@ -364,5 +378,114 @@ describe("delayed-action delay extension", () => {
 		expect(ctx.ui.notify).toHaveBeenCalledWith("✓ cancel-task 예약을 취소했어요.", "info");
 		await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
 		expect(apiMock.userMessages).toHaveLength(0);
+	});
+});
+
+describe("delayed-action persistence", () => {
+	let storeDir: string;
+
+	beforeEach(async () => {
+		storeDir = await mkdtemp(path.join(os.tmpdir(), "delay-persist-"));
+		process.env.PI_DELAYED_ACTION_DIR = storeDir;
+	});
+
+	afterEach(async () => {
+		delete process.env.PI_DELAYED_ACTION_DIR;
+		await rm(storeDir, { recursive: true, force: true });
+	});
+
+	async function settleWrites(): Promise<void> {
+		for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+
+	it("writes scheduled tasks to disk and clears the store on cancel", async () => {
+		const apiMock = createExtensionApiMock();
+		delayedActionExtension(apiMock.api);
+		const tool = apiMock.getTool("delay");
+		const cancelCommand = apiMock.getCommand("delay-cancel");
+		const ctx = createPersistentCtx("session-persist");
+
+		await tool.execute?.(
+			"call-persist",
+			{ delay: "1h", prompt: "배포 확인", id: "deploy-check" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		await settleWrites();
+
+		const persisted = await loadPersistedTasks("session-persist", storeDir);
+		expect(persisted).toHaveLength(1);
+		expect(persisted[0]).toMatchObject({ id: "deploy-check", prompt: "배포 확인" });
+
+		await cancelCommand.handler("deploy-check", ctx);
+		await settleWrites();
+		expect(await loadPersistedTasks("session-persist", storeDir)).toEqual([]);
+	});
+
+	it("does not persist when the session is not backed by a file", async () => {
+		const apiMock = createExtensionApiMock();
+		delayedActionExtension(apiMock.api);
+		const tool = apiMock.getTool("delay");
+		const ctx = createCtx();
+
+		await tool.execute?.("call-mem", { delay: "1h", prompt: "메모리만", id: "mem" }, undefined, undefined, ctx);
+		await settleWrites();
+
+		expect(await loadPersistedTasks("session-persist", storeDir)).toEqual([]);
+	});
+
+	it("rehydrates persisted tasks on session_start and fires them at due time", async () => {
+		vi.useFakeTimers();
+		const now = Date.UTC(2025, 0, 1, 12, 0, 0);
+		vi.setSystemTime(now);
+		try {
+			const apiMock = createExtensionApiMock();
+			delayedActionExtension(apiMock.api);
+			const [sessionStart] = apiMock.getHandlers("session_start");
+			const ctx = createPersistentCtx("resumed-session");
+
+			await savePersistedTasks(
+				"resumed-session",
+				[{ id: "delay-3", prompt: "복원된 작업", createdAt: now - 60_000, dueAt: now + 10 * 60_000 }],
+				storeDir,
+			);
+
+			await sessionStart({ type: "session_start", reason: "resume" }, ctx);
+
+			expect(ctx.ui.setStatus).toHaveBeenCalledWith("delay", expect.stringContaining("⏰ 1"));
+			expect(apiMock.userMessages).toHaveLength(0);
+
+			await vi.advanceTimersByTimeAsync(10 * 60_000);
+			expect(apiMock.userMessages).toEqual([{ message: "복원된 작업", options: undefined }]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("fires overdue tasks shortly after session_start", async () => {
+		vi.useFakeTimers();
+		const now = Date.UTC(2025, 0, 1, 12, 0, 0);
+		vi.setSystemTime(now);
+		try {
+			const apiMock = createExtensionApiMock();
+			delayedActionExtension(apiMock.api);
+			const [sessionStart] = apiMock.getHandlers("session_start");
+			const ctx = createPersistentCtx("resumed-session");
+
+			await savePersistedTasks(
+				"resumed-session",
+				[{ id: "delay-1", prompt: "놓친 리마인더", createdAt: now - 7_200_000, dueAt: now - 3_600_000 }],
+				storeDir,
+			);
+
+			await sessionStart({ type: "session_start", reason: "resume" }, ctx);
+			expect(apiMock.userMessages).toHaveLength(0);
+
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(apiMock.userMessages).toEqual([{ message: "놓친 리마인더", options: undefined }]);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

@@ -2,8 +2,14 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { parseDelayArgs, parseDurationMs } from "./parse.ts";
+import { loadPersistedTasks, savePersistedTasks } from "./storage.ts";
 
 const STATUS_KEY = "delay";
+
+// setTimeout stores its delay in a signed 32-bit int; longer values fire immediately.
+const MAX_TIMEOUT_MS = 2_147_483_647;
+// Small grace so overdue reminders fire after the resumed session settles, not mid-startup.
+const OVERDUE_GRACE_MS = 1_000;
 
 interface DelayTask {
 	id: string;
@@ -12,6 +18,21 @@ interface DelayTask {
 	dueAt: number;
 	timer: ReturnType<typeof setTimeout>;
 	ctx: ExtensionContext;
+}
+
+type SessionManagerLike = {
+	getSessionId?: () => string;
+	getSessionFile?: () => string | undefined;
+};
+
+function resolvePersistId(ctx: ExtensionContext): string | undefined {
+	try {
+		const sm = (ctx as { sessionManager?: SessionManagerLike }).sessionManager;
+		if (!sm?.getSessionFile?.()) return undefined;
+		return sm.getSessionId?.() || undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 const DelayParamsSchema = Type.Object({
@@ -41,6 +62,34 @@ function createDelayController(pi: ExtensionAPI) {
 	let nextId = 1;
 	let latestCtx: ExtensionContext | undefined;
 	let statusInterval: ReturnType<typeof setInterval> | undefined;
+	let persistSessionId: string | undefined;
+	let writeChain: Promise<void> = Promise.resolve();
+
+	// Serialize disk writes so rapid mutations can't interleave and corrupt the store.
+	function persist(): void {
+		if (!persistSessionId) return;
+		const sessionId = persistSessionId;
+		const snapshot = [...tasks.values()].map((task) => ({
+			id: task.id,
+			prompt: task.prompt,
+			createdAt: task.createdAt,
+			dueAt: task.dueAt,
+		}));
+		writeChain = writeChain.then(() => savePersistedTasks(sessionId, snapshot)).catch(() => {});
+	}
+
+	// Re-arm across the 32-bit setTimeout ceiling so multi-day delays fire at the right time.
+	function armTimer(task: DelayTask): void {
+		const remaining = task.dueAt - Date.now();
+		if (remaining > MAX_TIMEOUT_MS) {
+			task.timer = setTimeout(() => {
+				if (tasks.get(task.id) !== task) return;
+				armTimer(task);
+			}, MAX_TIMEOUT_MS);
+			return;
+		}
+		task.timer = setTimeout(() => submitTask(task, "due"), Math.max(0, remaining));
+	}
 
 	function allocateId(requested?: string): string {
 		const base = requested?.trim() || `delay-${nextId++}`;
@@ -114,6 +163,7 @@ function createDelayController(pi: ExtensionAPI) {
 		if (tasks.get(task.id) !== task) return false;
 		clearTimeout(task.timer);
 		tasks.delete(task.id);
+		persist();
 		refreshStatus();
 		stopStatusTickerIfIdle();
 		return true;
@@ -148,6 +198,7 @@ function createDelayController(pi: ExtensionAPI) {
 	function scheduleDelay(ctx: ExtensionContext, delayMs: number, prompt: string, requestedId?: string): DelayTask {
 		if (!ctx.hasUI) throw new Error("delay requires an interactive UI so it can submit the prompt to the agent.");
 		latestCtx = ctx;
+		persistSessionId = resolvePersistId(ctx);
 		const id = allocateId(requestedId);
 		const createdAt = Date.now();
 		const task: DelayTask = {
@@ -155,10 +206,12 @@ function createDelayController(pi: ExtensionAPI) {
 			prompt,
 			createdAt,
 			dueAt: createdAt + delayMs,
-			timer: setTimeout(() => submitTask(task, "due"), delayMs),
+			timer: undefined as unknown as ReturnType<typeof setTimeout>,
 			ctx,
 		};
+		armTimer(task);
 		tasks.set(id, task);
+		persist();
 		ensureStatusTicker();
 		refreshStatus();
 		return task;
@@ -173,10 +226,12 @@ function createDelayController(pi: ExtensionAPI) {
 			prompt,
 			createdAt,
 			dueAt: createdAt + delayMs,
-			timer: setTimeout(() => submitTask(updatedTask, "due"), delayMs),
+			timer: undefined as unknown as ReturnType<typeof setTimeout>,
 			ctx: task.ctx,
 		};
+		armTimer(updatedTask);
 		tasks.set(updatedTask.id, updatedTask);
+		persist();
 		refreshStatus();
 		return true;
 	}
@@ -186,6 +241,7 @@ function createDelayController(pi: ExtensionAPI) {
 		if (!task) return false;
 		clearTimeout(task.timer);
 		tasks.delete(id);
+		persist();
 		refreshStatus();
 		stopStatusTickerIfIdle();
 		return true;
@@ -195,6 +251,7 @@ function createDelayController(pi: ExtensionAPI) {
 		const count = tasks.size;
 		for (const task of tasks.values()) clearTimeout(task.timer);
 		tasks.clear();
+		persist();
 		refreshStatus();
 		stopStatusTickerIfIdle();
 		return count;
@@ -316,6 +373,43 @@ function createDelayController(pi: ExtensionAPI) {
 		ctx.ui.notify(`✓ ${selectedTask.id} 수정됨: 지금부터 ${formatKoreanDuration(delayMs)} 후 제출`, "info");
 	}
 
+	// Restore persisted tasks after a restart/resume. Overdue ones fire shortly after startup.
+	async function rehydrate(ctx: ExtensionContext): Promise<void> {
+		if (!ctx.hasUI) return;
+		latestCtx = ctx;
+		persistSessionId = resolvePersistId(ctx);
+		if (!persistSessionId) return;
+		const persisted = await loadPersistedTasks(persistSessionId);
+		if (persisted.length === 0) return;
+		const now = Date.now();
+		let restored = 0;
+		for (const entry of persisted) {
+			if (tasks.has(entry.id)) continue;
+			const task: DelayTask = {
+				id: entry.id,
+				prompt: entry.prompt,
+				createdAt: entry.createdAt,
+				// Overdue reminders are pushed out by the grace window instead of firing instantly.
+				dueAt: entry.dueAt <= now ? now + OVERDUE_GRACE_MS : entry.dueAt,
+				timer: undefined as unknown as ReturnType<typeof setTimeout>,
+				ctx,
+			};
+			armTimer(task);
+			tasks.set(task.id, task);
+			nextId = Math.max(nextId, parseIdCounter(task.id) + 1);
+			restored++;
+		}
+		if (restored === 0) return;
+		persist();
+		ensureStatusTicker();
+		refreshStatus();
+	}
+
+	function parseIdCounter(id: string): number {
+		const match = /^delay-(\d+)$/.exec(id);
+		return match ? Number(match[1]) : 0;
+	}
+
 	function clearAllTimers(): void {
 		for (const task of tasks.values()) clearTimeout(task.timer);
 		tasks.clear();
@@ -331,9 +425,11 @@ function createDelayController(pi: ExtensionAPI) {
 		handleDelayListCommand,
 		preview,
 		refreshStatus,
+		rehydrate,
 		scheduleDelay,
 		setLatestContext(ctx: ExtensionContext) {
 			latestCtx = ctx;
+			persistSessionId = resolvePersistId(ctx);
 		},
 	};
 }
@@ -444,6 +540,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		controller.setLatestContext(ctx);
+		await controller.rehydrate(ctx);
 		controller.refreshStatus();
 	});
 

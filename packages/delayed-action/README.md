@@ -4,6 +4,8 @@
 
 이 패키지는 `/delay` 명령어와 `delay` tool을 제공합니다. 시간이 되면 예약한 프롬프트를 사용자 메시지처럼 제출하며, 에이전트가 작업 중이면 follow-up으로 큐잉합니다.
 
+예약은 세션별로 디스크(`~/.pi/delayed-action/<sessionId>.json`)에 저장되어 **compaction, `/reload`, pi 재시작이나 세션 resume 이후에도 유지**됩니다. 세션을 다시 열면 남은 예약이 자동으로 복원되고, pi가 꺼져 있는 동안 시간이 지난 예약은 세션이 준비된 직후 실행됩니다.
+
 ## 설치
 
 ```bash
@@ -57,4 +59,4 @@ pi install npm:@ryan_nookpi/pi-extension-delayed-action
 }
 ```
 
-예약은 세션 내 메모리 기반이며, 세션 종료 시 취소됩니다. 반복/영구 스케줄링이 필요하면 cron 계열 기능을 사용하세요.
+예약은 세션별 파일로 영속화되어 compaction·재시작·resume 이후에도 유지됩니다. 저장 위치는 `~/.pi/delayed-action/<sessionId>.json`이며, `PI_DELAYED_ACTION_DIR` 환경 변수로 바꿀 수 있습니다. 반복/영구 스케줄링이 필요하면 cron 계열 기능을 사용하세요.

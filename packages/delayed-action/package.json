@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-delayed-action",
-	"version": "0.4.1",
+	"version": "0.5.0",
 	"description": "Pi extension for scheduling delayed follow-up prompts.",
 	"license": "MIT",
 	"repository": {
@@ -19,6 +19,7 @@
 	"files": [
 		"index.ts",
 		"parse.ts",
+		"storage.ts",
 		"README.md"
 	],
 	"pi": {
