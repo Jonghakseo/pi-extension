@@ -67,8 +67,35 @@ describe("subagent prompt mentions", () => {
 		await provider.getSuggestions(["ordinary input"], 0, 14, { signal });
 		expect(getSuggestions).toHaveBeenCalledOnce();
 
-		provider.applyCompletion([mentionText], 0, mentionText.length, suggestions?.items[0] as never, ">w");
+		const applied = provider.applyCompletion(
+			[mentionText],
+			0,
+			mentionText.length,
+			suggestions?.items[0] as never,
+			">w",
+		);
+		expect(applyCompletion).not.toHaveBeenCalled();
+		expect(applied).toEqual({ lines: ["please ask >worker "], cursorLine: 0, cursorCol: 19 });
+
+		provider.applyCompletion(["unrelated"], 0, 9, { value: "x", label: "x" } as never, "#x");
 		expect(applyCompletion).toHaveBeenCalledOnce();
+	});
+
+	it("does not double the trailing space when whitespace already follows", () => {
+		const current = {
+			triggerCharacters: ["#"],
+			getSuggestions: vi.fn(),
+			applyCompletion: vi.fn(),
+		};
+		const provider = createAgentMentionAutocompleteProvider(current, () => agents);
+		const applied = provider.applyCompletion(
+			["ask >w done"],
+			0,
+			6,
+			{ value: ">worker", label: ">worker" } as never,
+			">w",
+		);
+		expect(applied).toEqual({ lines: ["ask >worker done"], cursorLine: 0, cursorCol: 11 });
 	});
 
 	it("rewrites only exact discovered mentions for the main LLM", () => {

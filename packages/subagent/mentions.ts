@@ -167,7 +167,23 @@ export function createAgentMentionAutocompleteProvider(
 		},
 
 		applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
-			return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+			if (!prefix.startsWith(">")) {
+				return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+			}
+
+			const currentLine = lines[cursorLine] ?? "";
+			const beforePrefix = currentLine.slice(0, cursorCol - prefix.length);
+			const afterCursor = currentLine.slice(cursorCol);
+			// Append a trailing space so the mention hits its trailing boundary and converts,
+			// but avoid doubling up when the cursor is already followed by whitespace.
+			const suffix = /^\s/.test(afterCursor) ? "" : " ";
+			const newLines = [...lines];
+			newLines[cursorLine] = `${beforePrefix}${item.value}${suffix}${afterCursor}`;
+			return {
+				lines: newLines,
+				cursorLine,
+				cursorCol: beforePrefix.length + item.value.length + suffix.length,
+			};
 		},
 
 		shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
