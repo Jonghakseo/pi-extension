@@ -946,11 +946,9 @@ async function runPiAgent(
 					return;
 				}
 
-				if (event.type === "tool_result_end" && event.message) {
-					const toolResultMessage = event.message as Message & { toolName?: string };
-					currentResult.messages.push(toolResultMessage);
-					if (typeof toolResultMessage.toolName === "string") currentResult.lastToolName = toolResultMessage.toolName;
-					currentResult.lastToolOutputChars = countTextChars(toolResultMessage.content);
+				if (event.type === "tool_execution_end" && event.result) {
+					if (typeof event.toolName === "string") currentResult.lastToolName = event.toolName;
+					currentResult.lastToolOutputChars = countTextChars(event.result.content);
 					emitUpdate();
 					if (sawAgentEnd) scheduleAgentEndForceResolve();
 					return;

@@ -1,5 +1,6 @@
 /** biome-ignore-all lint/suspicious/noExplicitAny: tests use lightweight runtime-shaped fixtures and mocks. */
 import { EventEmitter } from "node:events";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.setConfig({ testTimeout: 20_000 });
@@ -69,6 +70,10 @@ function assistantMessageEnd(model: string, stopReason: string, totalTokens: num
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens },
 		},
 	});
+}
+
+function sessionEvent(event: AgentSessionEvent): string {
+	return JSON.stringify(event);
 }
 
 async function run(agentModel: string, lines: string[], autoComplete: boolean) {
@@ -146,9 +151,12 @@ describe("runPiAgent proactive context guard", () => {
 				JSON.stringify({ type: "agent_start" }),
 				assistantMessageEnd(model, "toolUse", 80_000),
 				JSON.stringify({ type: "tool_execution_start", toolName: "read", args: { path: "/tmp/a.ts" } }),
-				JSON.stringify({
-					type: "tool_result_end",
-					message: { role: "toolResult", toolName: "read", content: [{ type: "text", text: "123456789" }] },
+				sessionEvent({
+					type: "tool_execution_end",
+					toolCallId: "tool-1",
+					toolName: "read",
+					result: { content: [{ type: "text", text: "123456789" }], details: {} },
+					isError: false,
 				}),
 				JSON.stringify({
 					type: "message_end",
