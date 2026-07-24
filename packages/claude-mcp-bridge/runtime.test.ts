@@ -661,6 +661,29 @@ describe("lazy MCP runtime", () => {
 		});
 	});
 
+	it("keeps a live session's tools connected when another Pi session initializes the bridge", async () => {
+		writeConfig({ Creatrip: { command: "creatrip" } });
+		const firstPlan = createPlan([tool("slack_getThreadReplies")]);
+		firstPlan.callResult = { content: [{ type: "text", text: "first session result" }] };
+		sdkMock.plans.push(firstPlan);
+		const firstPi = createMockPi();
+		runtimes.push(firstPi);
+		await claudeMcpBridge(firstPi.api);
+		await startBackgroundConnect(process.cwd());
+		const firstTool = firstPi.tools.get("mcp__creatrip__slack_getthreadreplies");
+		if (!firstTool) throw new Error("first session MCP tool missing");
+
+		sdkMock.plans.push(createPlan([tool("slack_getThreadReplies")]));
+		const secondPi = createMockPi();
+		runtimes.push(secondPi);
+		await claudeMcpBridge(secondPi.api);
+		await startBackgroundConnect(process.cwd());
+
+		await expect(firstTool.execute("call", {}, undefined, undefined, createContext([]))).resolves.toMatchObject({
+			content: [{ type: "text", text: "first session result" }],
+		});
+	});
+
 	it("ignores an old generation that completes after reload", async () => {
 		const { configPath } = writeConfig({ Old: { command: "old" } });
 		const oldPlan = createPlan([tool("old_tool")], { pending: true, ignoreAbort: true });
@@ -670,6 +693,7 @@ describe("lazy MCP runtime", () => {
 		await claudeMcpBridge(oldPi.api);
 		const oldBackground = startBackgroundConnect(process.cwd());
 		await vi.waitFor(() => expect(sdkMock.clients).toHaveLength(1));
+		await shutdown(oldPi);
 
 		fs.writeFileSync(configPath, JSON.stringify({ mcpServers: { New: { command: "new" } } }), "utf-8");
 		const newPlan = createPlan([tool("new_tool")]);

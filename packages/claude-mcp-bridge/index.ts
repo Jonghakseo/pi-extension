@@ -1621,28 +1621,22 @@ class McpToolListOverlay {
 }
 
 type BridgeRuntime = {
-	generation: number;
 	startBackgroundConnect: (cwd: string) => Promise<void>;
 	shutdown: () => Promise<void>;
 };
 
-let connectionPromise: Promise<void> | null = null;
-let latestContext: ExtensionContext | null = null;
-let generation = 0;
-let activeRuntime: BridgeRuntime | null = null;
+// Node caches extension modules, while Pi creates an extension instance for every session.
+// Keep lifecycle state in the factory closure: shutting down a newly-created session must never
+// dispose MCP connections still owned by another live Pi session in the same host process.
+let latestRuntime: BridgeRuntime | null = null;
 
 export function startBackgroundConnect(cwd: string): Promise<void> {
-	if (connectionPromise) return connectionPromise;
-	return activeRuntime?.startBackgroundConnect(cwd) ?? Promise.resolve();
+	return latestRuntime?.startBackgroundConnect(cwd) ?? Promise.resolve();
 }
 
 export default async function claudeMcpBridge(pi: ExtensionAPI) {
 	const cwd = process.cwd();
-	const currentGeneration = ++generation;
-	const previousRuntime = activeRuntime;
-	const previousShutdown = previousRuntime?.shutdown() ?? Promise.resolve();
-	latestContext = null;
-	connectionPromise = null;
+	let latestContext: ExtensionContext | null = null;
 
 	let runtimeReady = false;
 	let backgroundPromise: Promise<void> | null = null;
@@ -1671,11 +1665,7 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 	if (loadedCache) manager.primeCachedTools(loadedCache.servers);
 
 	function isCurrentRuntime(): boolean {
-		return (
-			generation === currentGeneration &&
-			activeRuntime?.generation === currentGeneration &&
-			!runtimeAbort.signal.aborted
-		);
+		return !runtimeAbort.signal.aborted;
 	}
 
 	function getOverlayWarnings(): string[] {
@@ -2022,7 +2012,6 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 	function startRuntimeBackgroundConnect(_cwd: string): Promise<void> {
 		if (backgroundPromise) return backgroundPromise;
 		const promise = (async () => {
-			await previousShutdown;
 			if (!isCurrentRuntime() || isOfflineMode()) {
 				if (latestContext) updateStatus(latestContext);
 				return;
@@ -2041,7 +2030,6 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 			if (latestContext) updateStatus(latestContext);
 		});
 		backgroundPromise = promise;
-		if (isCurrentRuntime()) connectionPromise = promise;
 		return promise;
 	}
 
@@ -2056,11 +2044,10 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 	}
 
 	const runtime: BridgeRuntime = {
-		generation: currentGeneration,
 		startBackgroundConnect: startRuntimeBackgroundConnect,
 		shutdown: shutdownRuntime,
 	};
-	activeRuntime = runtime;
+	latestRuntime = runtime;
 	runtimeReady = true;
 
 	registerDiscoveredTools();
@@ -2069,7 +2056,7 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		if (!isCurrentRuntime()) return;
 		latestContext = ctx;
-		if (process.env.PI_MCP_EAGER !== "1") void startBackgroundConnect(ctx.cwd);
+		if (process.env.PI_MCP_EAGER !== "1") void startRuntimeBackgroundConnect(ctx.cwd);
 		updateStatus(ctx);
 		removeUnavailableToolsFromActiveSet();
 		removeDisabledToolsFromActiveSet();
@@ -2079,12 +2066,8 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
-		if (activeRuntime?.generation === currentGeneration) {
-			generation++;
-			activeRuntime = null;
-			connectionPromise = null;
-			latestContext = null;
-		}
+		if (latestRuntime === runtime) latestRuntime = null;
+		latestContext = null;
 		await shutdownRuntime();
 	});
 
@@ -2105,5 +2088,5 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 		},
 	});
 
-	if (process.env.PI_MCP_EAGER === "1") await startBackgroundConnect(cwd);
+	if (process.env.PI_MCP_EAGER === "1") await startRuntimeBackgroundConnect(cwd);
 }
