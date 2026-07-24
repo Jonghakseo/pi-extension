@@ -390,6 +390,7 @@ describe("delayed-action persistence", () => {
 	});
 
 	afterEach(async () => {
+		await settleWrites();
 		delete process.env.PI_DELAYED_ACTION_DIR;
 		await rm(storeDir, { recursive: true, force: true });
 	});
