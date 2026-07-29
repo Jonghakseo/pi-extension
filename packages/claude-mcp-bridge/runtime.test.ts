@@ -34,11 +34,20 @@ function deferred<T>(): Deferred<T> {
 	return { promise, resolve, reject };
 }
 
+type MockClientOptions = {
+	versionNegotiation?: {
+		mode?: "legacy" | "auto" | { pin: string };
+		probe?: { timeoutMs?: number; maxRetries?: number };
+	};
+};
+
 const sdkMock = vi.hoisted(() => ({
 	plans: [] as ClientPlan[],
 	transports: [] as string[],
+	transportCloseCalls: [] as string[],
 	clients: [] as Array<{
 		plan: ClientPlan;
+		clientOptions?: MockClientOptions;
 		connectOptions?: { signal?: AbortSignal; timeout?: number };
 		listToolsOptions?: { signal?: AbortSignal; timeout?: number };
 		callToolOptions?: { signal?: AbortSignal; timeout?: number };
@@ -49,16 +58,22 @@ const sdkMock = vi.hoisted(() => ({
 	}>,
 }));
 
-vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
+vi.mock("@modelcontextprotocol/client", () => ({
 	Client: class MockClient {
 		onclose?: () => void;
 		onerror?: (error: Error) => void;
 		private readonly record: (typeof sdkMock.clients)[number];
 
-		constructor() {
+		constructor(_info: unknown, options?: MockClientOptions) {
 			const plan = sdkMock.plans.shift();
 			if (!plan) throw new Error("Missing MCP client plan");
-			this.record = { plan, closeCalls: 0, callToolCalls: 0, triggerClose: () => this.onclose?.() };
+			this.record = {
+				plan,
+				clientOptions: options,
+				closeCalls: 0,
+				callToolCalls: 0,
+				triggerClose: () => this.onclose?.(),
+			};
 			sdkMock.clients.push(this.record);
 		}
 
@@ -89,7 +104,7 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
 			return { tools: this.record.plan.tools };
 		}
 
-		async callTool(_params: unknown, _schema?: unknown, options?: { signal?: AbortSignal; timeout?: number }) {
+		async callTool(_params: unknown, options?: { signal?: AbortSignal; timeout?: number }) {
 			this.record.callToolCalls++;
 			this.record.callToolOptions = options;
 			if (this.record.plan.callError) throw this.record.plan.callError;
@@ -100,33 +115,35 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
 			this.record.closeCalls++;
 		}
 	},
-}));
-
-vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
-	StdioClientTransport: class {
-		kind = "stdio";
-		constructor() {
-			sdkMock.transports.push(this.kind);
-		}
-		async close(): Promise<void> {}
-	},
-}));
-vi.mock("@modelcontextprotocol/sdk/client/sse.js", () => ({
 	SSEClientTransport: class {
 		kind = "sse";
 		constructor() {
 			sdkMock.transports.push(this.kind);
 		}
-		async close(): Promise<void> {}
+		async close(): Promise<void> {
+			sdkMock.transportCloseCalls.push(this.kind);
+		}
 	},
-}));
-vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
 	StreamableHTTPClientTransport: class {
 		kind = "http";
 		constructor() {
 			sdkMock.transports.push(this.kind);
 		}
-		async close(): Promise<void> {}
+		async close(): Promise<void> {
+			sdkMock.transportCloseCalls.push(this.kind);
+		}
+	},
+}));
+
+vi.mock("@modelcontextprotocol/client/stdio", () => ({
+	StdioClientTransport: class {
+		kind = "stdio";
+		constructor() {
+			sdkMock.transports.push(this.kind);
+		}
+		async close(): Promise<void> {
+			sdkMock.transportCloseCalls.push(this.kind);
+		}
 	},
 }));
 
@@ -227,6 +244,7 @@ const envKeys = [
 	"PI_MCP_EAGER",
 	"PI_OFFLINE",
 	"PI_MCP_CONNECT_TIMEOUT_MS",
+	"PI_MCP_PROTOCOL_PROBE_TIMEOUT_MS",
 	"PI_MCP_TOOL_TIMEOUT_MS",
 ];
 
@@ -271,6 +289,7 @@ beforeEach(() => {
 	}
 	sdkMock.plans.length = 0;
 	sdkMock.transports.length = 0;
+	sdkMock.transportCloseCalls.length = 0;
 	sdkMock.clients.length = 0;
 });
 
@@ -302,6 +321,10 @@ describe("lazy MCP runtime", () => {
 
 		plan.connect.resolve(undefined);
 		await first;
+		expect(sdkMock.clients[0]?.clientOptions?.versionNegotiation).toEqual({
+			mode: "auto",
+			probe: { timeoutMs: 10_000, maxRetries: 0 },
+		});
 		expect(pi.tools.has("mcp__lazy__search")).toBe(true);
 		expect(pi.activeTools.has("mcp__lazy__search")).toBe(true);
 	});
@@ -357,8 +380,24 @@ describe("lazy MCP runtime", () => {
 		await startBackgroundConnect(process.cwd());
 
 		expect(sdkMock.clients.map((client) => client.transportKind)).toEqual(["sse", "http"]);
+		expect(sdkMock.clients[0]?.clientOptions?.versionNegotiation).toEqual({ mode: "legacy" });
+		expect(sdkMock.clients[1]?.clientOptions?.versionNegotiation).toEqual({ mode: "auto" });
 		expect(pi.tools.has("mcp__events__events")).toBe(true);
 		expect(pi.tools.has("mcp__remote__remote")).toBe(true);
+	});
+
+	it("allows a longer stdio protocol probe for slow modern servers", async () => {
+		writeConfig({ SlowModern: { command: "mock-mcp" } });
+		process.env.PI_MCP_PROTOCOL_PROBE_TIMEOUT_MS = "20000";
+		sdkMock.plans.push(createPlan([tool("ready")]));
+		const pi = createMockPi();
+		runtimes.push(pi);
+
+		await claudeMcpBridge(pi.api);
+		await startBackgroundConnect(process.cwd());
+
+		expect(sdkMock.clients[0]?.clientOptions?.versionNegotiation?.probe?.timeoutMs).toBe(20_000);
+		expect(pi.tools.has("mcp__slowmodern__ready")).toBe(true);
 	});
 
 	it("reconnects after an unexpected transport close", async () => {
@@ -547,6 +586,7 @@ describe("lazy MCP runtime", () => {
 
 		expect(elapsedMs).toBeLessThan(500);
 		expect(sdkMock.clients[0]?.connectOptions?.timeout).toBe(20);
+		expect(sdkMock.clients[0]?.clientOptions?.versionNegotiation?.probe?.timeoutMs).toBe(10);
 		expect(pi.statuses.at(-1)).toBe("MCP 0/1 · 1 failed");
 	});
 
@@ -722,6 +762,22 @@ describe("lazy MCP runtime", () => {
 
 		expect(sdkMock.clients).toHaveLength(0);
 		expect(sdkMock.transports).toHaveLength(0);
+	});
+
+	it("closes the raw transport when disposed during protocol negotiation", async () => {
+		const server = normalizeServer("Probing", { command: "mock-mcp" });
+		if (!server) throw new Error("failed to normalize probing server");
+		const plan = createPlan([], { pending: true, ignoreAbort: true });
+		sdkMock.plans.push(plan);
+		const connection = new McpConnection(server);
+
+		const connecting = connection.connect();
+		await vi.waitFor(() => expect(sdkMock.transports).toEqual(["stdio"]));
+		await connection.dispose();
+
+		expect(sdkMock.transportCloseCalls).toContain("stdio");
+		plan.connect.resolve(undefined);
+		await Promise.allSettled([connecting]);
 	});
 
 	it("does not register tools when shutdown races with connection completion", async () => {

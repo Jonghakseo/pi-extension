@@ -5,10 +5,8 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client, SSEClientTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { Type } from "@sinclair/typebox";
 
 export type RawMcpServer = {
@@ -62,6 +60,8 @@ type ToolCallOptions = ConnectOptions & {
 
 const DEFAULT_CONNECTION_TIMEOUT_MS = 30_000;
 const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
+const MAX_STDIO_PROTOCOL_PROBE_TIMEOUT_MS = 10_000;
+const BRIDGE_CLIENT_VERSION = "1.3.0";
 
 function readPositiveIntEnv(name: string, fallback: number): number {
 	const parsed = Number.parseInt(process.env[name] ?? "", 10);
@@ -74,6 +74,17 @@ function connectionTimeoutMs(): number {
 
 function toolTimeoutMs(): number {
 	return readPositiveIntEnv("PI_MCP_TOOL_TIMEOUT_MS", DEFAULT_TOOL_TIMEOUT_MS);
+}
+
+function stdioProtocolProbeTimeoutMs(connectTimeoutMs: number): number {
+	const defaultProbeTimeoutMs = Math.max(
+		1,
+		Math.min(MAX_STDIO_PROTOCOL_PROBE_TIMEOUT_MS, Math.floor(connectTimeoutMs / 2)),
+	);
+	return Math.min(
+		readPositiveIntEnv("PI_MCP_PROTOCOL_PROBE_TIMEOUT_MS", defaultProbeTimeoutMs),
+		Math.max(1, connectTimeoutMs - 1),
+	);
 }
 
 function isOfflineMode(): boolean {
@@ -248,10 +259,13 @@ export class McpConnection {
 			throw new Error(`MCP tool '${this.server.name}/${toolName}' changed schema while connecting; retry the call`);
 		}
 
-		return this.client.callTool({ name: toolName, arguments: args }, undefined, {
-			signal: options.signal,
-			timeout: options.timeoutMs ?? toolTimeoutMs(),
-		});
+		return this.client.callTool(
+			{ name: toolName, arguments: args },
+			{
+				signal: options.signal,
+				timeout: options.timeoutMs ?? toolTimeoutMs(),
+			},
+		);
 	}
 
 	private async doConnect(attempt: number, controller: AbortController, timeoutMs: number): Promise<void> {
@@ -267,7 +281,24 @@ export class McpConnection {
 				throw controller.signal.reason ?? new Error("MCP connection superseded");
 			}
 
-			client = new Client({ name: "pi-claude-mcp-bridge", version: "0.1.0" }, { capabilities: {} });
+			const versionNegotiation =
+				this.server.type === "sse"
+					? { mode: "legacy" as const }
+					: {
+							mode: "auto" as const,
+							...(this.server.type === "stdio"
+								? {
+										probe: {
+											timeoutMs: stdioProtocolProbeTimeoutMs(timeoutMs),
+											maxRetries: 0,
+										},
+									}
+								: {}),
+						};
+			client = new Client(
+				{ name: "pi-claude-mcp-bridge", version: BRIDGE_CLIENT_VERSION },
+				{ capabilities: {}, versionNegotiation },
+			);
 			transport = this.createTransport();
 			const deadline = Date.now() + timeoutMs;
 			timeout = setTimeout(() => controller.abort(new Error("connection timed out")), timeoutMs);
@@ -362,12 +393,12 @@ export class McpConnection {
 	}
 
 	private async cleanupLocal(client: Client, transport: McpTransport): Promise<void> {
-		let clientCloseFailed = false;
-		const closeClient = client.close().catch(() => {
-			clientCloseFailed = true;
-		});
-		if ((await settlesWithin(closeClient, 1_000)) && !clientCloseFailed) return;
-		await settlesWithin(transport.close(), 1_000);
+		const closeTransport = transport.close().catch(() => undefined);
+		await settlesWithin(closeTransport, 1_000);
+		await settlesWithin(
+			client.close().catch(() => undefined),
+			1_000,
+		);
 	}
 
 	private async cleanupConnection(): Promise<void> {
