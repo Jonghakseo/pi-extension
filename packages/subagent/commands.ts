@@ -9,6 +9,7 @@
 import * as fs from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, Key, matchesKey, Spacer, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { createRunActivityRecorder } from "./activity.js";
 import { discoverAgents } from "./agents.js";
 import { loadSubagentConfig } from "./config.js";
 import {
@@ -1399,6 +1400,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 			}, RUN_TICK_INTERVAL_MS);
 
 			let claudeCheckpointSent = !!runState.claudeSessionId;
+			const recordActivity = createRunActivityRecorder(pi, runState);
 			void (async () => {
 				try {
 					const { result, retryCount } = await invokeWithAutoRetry({
@@ -1428,6 +1430,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 										const current = partial.details?.results?.[0];
 										if (!current) return;
 										updateRunFromResult(runState, current);
+										recordActivity();
 										if (!claudeCheckpointSent && runState.claudeSessionId) {
 											claudeCheckpointSent = true;
 											if (!hiddenFromMain) {

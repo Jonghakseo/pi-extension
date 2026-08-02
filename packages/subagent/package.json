@@ -20,6 +20,7 @@
 	],
 	"files": [
 		"above-widget.ts",
+		"activity.ts",
 		"agents.ts",
 		"claude-args.ts",
 		"claude-sdk-runner.ts",

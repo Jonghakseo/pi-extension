@@ -8,6 +8,7 @@
 
 import * as fs from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createRunActivityRecorder } from "./activity.js";
 import { discoverAgents } from "./agents.js";
 import { parseSubagentToolCommand, SUBAGENT_CLI_HELP_TEXT } from "./cli.js";
 import {
@@ -1314,6 +1315,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 
 		function launchRunInBackground(runState: CommandRunState, taskForAgent: string): Promise<FinalizedRun> {
 			let claudeCheckpointSent = !!runState.claudeSessionId;
+			const recordActivity = createRunActivityRecorder(pi, runState);
 			return enqueueSubagentInvocation(() =>
 				runSingleAgent(
 					ctx.cwd,
@@ -1327,6 +1329,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						const current = partial.details?.results?.[0];
 						if (!current) return;
 						updateRunFromResult(runState, current);
+						recordActivity();
 						if (shouldRunAsync && !claudeCheckpointSent && runState.claudeSessionId) {
 							claudeCheckpointSent = true;
 							pi.sendMessage(buildRunStartMessage(runState, "started"), {
