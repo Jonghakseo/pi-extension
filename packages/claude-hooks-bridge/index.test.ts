@@ -4,8 +4,12 @@
  * Verified against the official Claude Code hooks documentation:
  * https://docs.anthropic.com/en/docs/claude-code/hooks
  */
-import { describe, expect, it } from "vitest";
-import {
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { describe, expect, it, vi } from "vitest";
+import claudeHooksBridge, {
 	BUILTIN_TOOL_ALIASES,
 	type ClaudeCommandHook,
 	type ClaudeHookEventName,
@@ -678,6 +682,64 @@ describe("toBlockReason", () => {
 		const result = toBlockReason(long, "fallback");
 		expect(result.length).toBeLessThanOrEqual(2003);
 		expect(result.endsWith("...")).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Integration: payload field names match official spec
+// ---------------------------------------------------------------------------
+
+describe("project trust", () => {
+	async function runSessionStart(
+		trusted: boolean,
+	): Promise<{ markerPath: string; notify: ReturnType<typeof vi.fn>; cleanup: () => void }> {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "claude-hooks-trust-test-"));
+		const markerPath = path.join(cwd, "hook-ran");
+		fs.mkdirSync(path.join(cwd, ".claude"));
+		fs.writeFileSync(
+			path.join(cwd, ".claude", "settings.json"),
+			JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "touch hook-ran" }] }] } }),
+		);
+
+		const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
+		const api = {
+			on(name: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) {
+				handlers.set(name, handler);
+			},
+		} as unknown as ExtensionAPI;
+		claudeHooksBridge(api);
+
+		const notify = vi.fn();
+		const ctx = {
+			cwd,
+			hasUI: true,
+			isProjectTrusted: () => trusted,
+			ui: { notify },
+			sessionManager: { getSessionId: () => "trust-test", getEntries: () => [] },
+		} as unknown as ExtensionContext;
+		const sessionStart = handlers.get("session_start");
+		if (!sessionStart) throw new Error("session_start handler missing");
+		await sessionStart({}, ctx);
+		return { markerPath, notify, cleanup: () => fs.rmSync(cwd, { recursive: true, force: true }) };
+	}
+
+	it("does not load or execute project hooks when the project is untrusted", async () => {
+		const result = await runSessionStart(false);
+		try {
+			expect(fs.existsSync(result.markerPath)).toBe(false);
+			expect(result.notify).toHaveBeenCalledWith("[claude-hooks-bridge] Untrusted project — hooks disabled", "warning");
+		} finally {
+			result.cleanup();
+		}
+	});
+
+	it("continues to execute project hooks when the project is trusted", async () => {
+		const result = await runSessionStart(true);
+		try {
+			expect(fs.existsSync(result.markerPath)).toBe(true);
+		} finally {
+			result.cleanup();
+		}
 	});
 });
 

@@ -209,9 +209,11 @@ function createMockPi(): MockPi {
 	return { api, tools, commands, activeTools, handlers, statuses };
 }
 
-function createContext(statuses: string[]): ExtensionContext {
+function createContext(statuses: string[], options: { cwd?: string; trusted?: boolean } = {}): ExtensionContext {
 	return {
+		cwd: options.cwd ?? process.cwd(),
 		hasUI: true,
+		isProjectTrusted: () => options.trusted ?? true,
 		ui: {
 			setStatus(_key: string, text: string | undefined) {
 				if (text) statuses.push(text);
@@ -259,6 +261,13 @@ function writeConfig(servers: Record<string, unknown>): { configPath: string; ca
 	return { configPath, cachePath };
 }
 
+function writeProjectConfig(servers: Record<string, unknown>): string {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-mcp-project-config-test-"));
+	tempDirs.push(dir);
+	fs.writeFileSync(path.join(dir, ".mcp.json"), JSON.stringify({ mcpServers: servers }), "utf-8");
+	return dir;
+}
+
 function writeCache(cachePath: string, serverName: string, tools: MockTool[]): void {
 	const server = normalizeServer(serverName, { command: "mock-mcp" });
 	if (!server) throw new Error("Failed to normalize test server");
@@ -272,8 +281,8 @@ function writeCache(cachePath: string, serverName: string, tools: MockTool[]): v
 	saveMcpToolCache(cache, cachePath);
 }
 
-async function startSession(pi: MockPi): Promise<void> {
-	const ctx = createContext(pi.statuses);
+async function startSession(pi: MockPi, options: { cwd?: string; trusted?: boolean } = {}): Promise<void> {
+	const ctx = createContext(pi.statuses, options);
 	for (const handler of pi.handlers.get("session_start") ?? []) await handler({}, ctx);
 }
 
@@ -347,6 +356,31 @@ describe("lazy MCP runtime", () => {
 		plan.connect.resolve(undefined);
 		await loadPromise;
 		expect(pi.tools.has("mcp__eager__ready")).toBe(true);
+	});
+
+	it("does not connect stdio servers from an untrusted project", async () => {
+		const cwd = writeProjectConfig({ Untrusted: { command: "project-mcp" } });
+		const pi = createMockPi();
+		runtimes.push(pi);
+
+		await claudeMcpBridge(pi.api);
+		await startSession(pi, { cwd, trusted: false });
+
+		expect(sdkMock.clients).toHaveLength(0);
+		expect(pi.tools.has("mcp__untrusted__search")).toBe(false);
+	});
+
+	it("connects stdio servers from a trusted project", async () => {
+		const cwd = writeProjectConfig({ Trusted: { command: "project-mcp" } });
+		sdkMock.plans.push(createPlan([tool("search")]));
+		const pi = createMockPi();
+		runtimes.push(pi);
+
+		await claudeMcpBridge(pi.api);
+		await startSession(pi, { cwd, trusted: true });
+		await vi.waitFor(() => expect(pi.tools.has("mcp__trusted__search")).toBe(true));
+
+		expect(sdkMock.clients).toHaveLength(1);
 	});
 
 	it("registers healthy server tools when another server fails", async () => {

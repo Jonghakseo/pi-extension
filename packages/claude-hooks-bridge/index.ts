@@ -81,6 +81,7 @@ export const BUILTIN_TOOL_ALIASES: Record<string, string> = {
 
 const settingsCache = new Map<string, SettingsCacheEntry>();
 const parseErrorNotified = new Set<string>();
+const untrustedProjectNotified = new Set<string>();
 const stopHookActiveBySession = new Map<string, boolean>();
 
 function getSessionId(ctx: ExtensionContext): string {
@@ -534,6 +535,17 @@ function notifyOnceForParseError(ctx: ExtensionContext, loaded: LoadedSettings):
 	ctx.ui.notify(`[claude-hooks-bridge] ${loaded.parseError}`, "warning");
 }
 
+function loadTrustedProjectSettings(ctx: ExtensionContext): LoadedSettings | null {
+	if (ctx.isProjectTrusted()) return loadSettings(ctx.cwd);
+
+	const settingsPath = getSettingsPath(ctx.cwd);
+	if (ctx.hasUI && !untrustedProjectNotified.has(settingsPath)) {
+		untrustedProjectNotified.add(settingsPath);
+		ctx.ui.notify("[claude-hooks-bridge] Untrusted project — hooks disabled", "warning");
+	}
+	return null;
+}
+
 export function countHooks(settings: ClaudeSettings): number {
 	if (!settings.hooks) return 0;
 	let total = 0;
@@ -605,7 +617,8 @@ async function handleSessionStart(event: { reason?: string }, ctx: ExtensionCont
 	stopHookActiveBySession.set(sessionId, false);
 	if (event.reason === "resume" || event.reason === "fork") return;
 
-	const loaded = loadSettings(ctx.cwd);
+	const loaded = loadTrustedProjectSettings(ctx);
+	if (!loaded) return;
 	notifyOnceForParseError(ctx, loaded);
 	const settings = loaded.settings;
 	notifyHookCount(ctx, settings);
@@ -628,7 +641,8 @@ export default function claudeHooksBridge(pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		const loaded = loadSettings(ctx.cwd);
+		const loaded = loadTrustedProjectSettings(ctx);
+		if (!loaded) return;
 		notifyOnceForParseError(ctx, loaded);
 		const settings = loaded.settings;
 		if (!settings) return;
@@ -641,7 +655,8 @@ export default function claudeHooksBridge(pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_call", async (event, ctx): Promise<ToolCallEventResult | undefined> => {
-		const loaded = loadSettings(ctx.cwd);
+		const loaded = loadTrustedProjectSettings(ctx);
+		if (!loaded) return;
 		notifyOnceForParseError(ctx, loaded);
 		const settings = loaded.settings;
 		if (!settings) return;
@@ -681,7 +696,8 @@ export default function claudeHooksBridge(pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
-		const loaded = loadSettings(ctx.cwd);
+		const loaded = loadTrustedProjectSettings(ctx);
+		if (!loaded) return;
 		notifyOnceForParseError(ctx, loaded);
 		const settings = loaded.settings;
 		if (!settings) return;
@@ -691,7 +707,8 @@ export default function claudeHooksBridge(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
-		const loaded = loadSettings(ctx.cwd);
+		const loaded = loadTrustedProjectSettings(ctx);
+		if (!loaded) return;
 		notifyOnceForParseError(ctx, loaded);
 		const settings = loaded.settings;
 		if (!settings) return;

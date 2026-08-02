@@ -471,6 +471,11 @@ export class McpManager {
 		this.onStateChange();
 	}
 
+	async replaceServers(servers: NormalizedMcpServer[], sourcePath: string | null): Promise<void> {
+		await Promise.allSettled(Array.from(this.connections.values()).map((connection) => connection.dispose()));
+		this.configureServers(servers, sourcePath);
+	}
+
 	primeCachedTools(servers: Record<string, { tools: DiscoveredTool[] }>): void {
 		for (const [serverName, cached] of Object.entries(servers)) {
 			this.connections.get(serverName)?.primeCachedTools(cached.tools);
@@ -551,6 +556,12 @@ type LoadedConfig = {
 	sourcePath: string | null;
 	servers: NormalizedMcpServer[];
 	warnings: string[];
+	signature: string;
+};
+
+type ConfigCandidate = {
+	path: string;
+	scope: "global" | "project";
 };
 
 export interface McpToolCache {
@@ -982,72 +993,87 @@ export function normalizeServer(name: string, raw: RawMcpServer): NormalizedMcpS
 	return null;
 }
 
-function collectScopedConfigCandidates(cwd: string): string[] {
-	const candidates: string[] = [];
+function collectScopedConfigCandidates(cwd: string, includeProject: boolean): ConfigCandidate[] {
+	const candidates: ConfigCandidate[] = [];
 	const seen = new Set<string>();
 
-	const push = (candidate: string): void => {
+	const push = (candidate: string, scope: ConfigCandidate["scope"]): void => {
 		const resolved = path.resolve(candidate);
 		if (seen.has(resolved)) return;
 		seen.add(resolved);
-		candidates.push(resolved);
+		candidates.push({ path: resolved, scope });
 	};
 
-	let current = path.resolve(cwd);
-	const home = path.resolve(os.homedir());
-	const root = path.parse(current).root;
+	if (includeProject) {
+		let current = path.resolve(cwd);
+		const home = path.resolve(os.homedir());
+		const root = path.parse(current).root;
 
-	while (true) {
-		push(path.join(current, ".pi", "mcp.json"));
-		push(path.join(current, ".mcp.json"));
-		push(path.join(current, "backend", ".mcp.json"));
-		push(path.join(current, "frontend", ".mcp.json"));
+		while (true) {
+			if (current !== home) {
+				push(path.join(current, ".pi", "mcp.json"), "project");
+				push(path.join(current, ".mcp.json"), "project");
+				push(path.join(current, "backend", ".mcp.json"), "project");
+				push(path.join(current, "frontend", ".mcp.json"), "project");
+			}
 
-		if (current === home || current === root) break;
-		const parent = path.dirname(current);
-		if (parent === current) break;
-		current = parent;
+			if (current === home || current === root) break;
+			const parent = path.dirname(current);
+			if (parent === current) break;
+			current = parent;
+		}
 	}
 
-	push(path.join(os.homedir(), ".mcp.json"));
-	push(path.join(os.homedir(), ".claude.json"));
-
+	push(path.join(os.homedir(), ".pi", "mcp.json"), "global");
+	push(path.join(os.homedir(), ".mcp.json"), "global");
+	push(path.join(os.homedir(), ".claude.json"), "global");
 	return candidates;
 }
 
-function loadConfig(cwd: string): LoadedConfig {
+function loadConfig(cwd: string, options: { includeProject: boolean; projectTrusted: boolean }): LoadedConfig {
 	const warnings: string[] = [];
-
 	const explicitPath = process.env.PI_MCP_CONFIG;
-	const candidates = explicitPath ? [path.resolve(expandEnvVars(explicitPath))] : collectScopedConfigCandidates(cwd);
+	const candidates: ConfigCandidate[] = explicitPath
+		? [{ path: path.resolve(expandEnvVars(explicitPath)), scope: "global" }]
+		: collectScopedConfigCandidates(cwd, options.includeProject);
 
 	const loadedSources: string[] = [];
 	const serversByName = new Map<string, NormalizedMcpServer>();
 
 	for (const candidate of candidates) {
-		const parsed = safeReadJson(candidate);
+		const parsed = safeReadJson(candidate.path);
 		if (!parsed) continue;
 
 		const rawServers = extractRawServers(parsed);
 		if (!rawServers || Object.keys(rawServers).length === 0) continue;
-		loadedSources.push(candidate);
+		loadedSources.push(candidate.path);
 
 		for (const [name, raw] of Object.entries(rawServers)) {
 			if (serversByName.has(name)) {
-				warnings.push(`Skipped duplicate MCP server config: ${name} (from ${candidate})`);
+				warnings.push(`Skipped duplicate MCP server config: ${name} (from ${candidate.path})`);
 				continue;
 			}
 
 			const normalized = normalizeServer(name, raw);
-			if (normalized) serversByName.set(name, normalized);
-			else warnings.push(`Skipped invalid MCP server config: ${name}`);
+			if (!normalized) {
+				warnings.push(`Skipped invalid MCP server config: ${name}`);
+				continue;
+			}
+			if (candidate.scope === "project" && normalized.type === "stdio" && !options.projectTrusted) {
+				warnings.push(`Skipped MCP stdio server from untrusted project: ${name}`);
+				continue;
+			}
+			serversByName.set(name, normalized);
 		}
 	}
 
+	const servers = Array.from(serversByName.values());
+	const sourcePath = loadedSources.length > 0 ? loadedSources.join(", ") : null;
 	return {
-		sourcePath: loadedSources.length > 0 ? loadedSources.join(", ") : null,
-		servers: Array.from(serversByName.values()),
+		sourcePath,
+		servers,
 		warnings,
+		signature: stableStringify({ sourcePath, servers, warnings }),
 	};
 }
 
@@ -1680,8 +1706,8 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 	const loadedToolVisibility = loadToolVisibilitySettings();
 	const disabledToolKeys = loadedToolVisibility.disabledToolKeys;
 	let toolVisibilityWarning = loadedToolVisibility.warning;
-	const loadedAt = loadConfig(cwd);
-	const configFingerprint = buildConfigFingerprint(loadedAt.servers);
+	let loadedAt = loadConfig(cwd, { includeProject: false, projectTrusted: true });
+	let configFingerprint = buildConfigFingerprint(loadedAt.servers);
 	let loadedCache = loadMcpToolCache(configFingerprint);
 
 	const manager = new McpManager(() => {
@@ -1697,6 +1723,19 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 
 	function isCurrentRuntime(): boolean {
 		return !runtimeAbort.signal.aborted;
+	}
+
+	async function loadProjectConfig(ctx: ExtensionContext): Promise<void> {
+		const next = loadConfig(ctx.cwd, { includeProject: true, projectTrusted: ctx.isProjectTrusted() });
+		if (next.signature === loadedAt.signature) return;
+
+		await manager.replaceServers(next.servers, next.sourcePath);
+		loadedAt = next;
+		configFingerprint = buildConfigFingerprint(next.servers);
+		loadedCache = loadMcpToolCache(configFingerprint);
+		if (loadedCache) manager.primeCachedTools(loadedCache.servers);
+		backgroundPromise = null;
+		lastPersistedLiveState = null;
 	}
 
 	function getOverlayWarnings(): string[] {
@@ -2087,7 +2126,8 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		if (!isCurrentRuntime()) return;
 		latestContext = ctx;
-		if (process.env.PI_MCP_EAGER !== "1") void startRuntimeBackgroundConnect(ctx.cwd);
+		await loadProjectConfig(ctx);
+		void startRuntimeBackgroundConnect(ctx.cwd);
 		updateStatus(ctx);
 		removeUnavailableToolsFromActiveSet();
 		removeDisabledToolsFromActiveSet();

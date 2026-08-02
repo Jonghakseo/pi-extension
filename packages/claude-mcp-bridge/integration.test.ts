@@ -127,6 +127,7 @@ describe("dual-era MCP integration", () => {
 		const sessionContext = {
 			cwd: process.cwd(),
 			hasUI: true,
+			isProjectTrusted: () => true,
 			ui: { notify: vi.fn(), setStatus: vi.fn() },
 		} as unknown as ExtensionContext;
 		for (const handler of sessionStartHandlers) await handler({}, sessionContext);
@@ -412,6 +413,7 @@ describe("dual-era MCP integration", () => {
 		const sessionContext = {
 			cwd: process.cwd(),
 			hasUI: true,
+			isProjectTrusted: () => true,
 			ui: { notify: vi.fn(), setStatus: vi.fn() },
 		} as unknown as ExtensionContext;
 		for (const handler of sessionStartHandlers) await handler({}, sessionContext);
