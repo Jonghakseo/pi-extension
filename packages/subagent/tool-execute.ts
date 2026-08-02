@@ -1254,6 +1254,10 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				runState.lastOutput = "";
 				runState.usage = undefined;
 				runState.model = undefined;
+				runState.retryCount = 0;
+				runState.lastRetryReason = undefined;
+				runState.errorClass = undefined;
+				runState.autoAbortReason = undefined;
 				runState.removed = false;
 				runState.turnCount = Math.max(DEFAULT_TURN_COUNT, runState.turnCount || DEFAULT_TURN_COUNT) + 1;
 				runState.contextMode = runState.contextMode ?? (config.inheritMainContext ? "main" : "sub");
@@ -1979,7 +1983,14 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						pipeline.stepRunIds.push(runState.id);
 						chainLaunches.push(toLaunchSummary(runState, "chain"));
 
-						const finalized = await launchRunInBackground(runState, taskForAgent);
+						let finalized: FinalizedRun;
+						try {
+							finalized = await launchRunInBackground(runState, taskForAgent);
+						} catch (error: unknown) {
+							finalized = finalizeRunError(runState, error);
+						} finally {
+							clearRunAbortState(runState);
+						}
 						if (runState.removed) {
 							terminalStatus = finalized.isError ? "error" : "stopped";
 							pipeline.stepResults.push({

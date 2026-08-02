@@ -1250,6 +1250,8 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 				runState.model = undefined;
 				runState.retryCount = 0;
 				runState.lastRetryReason = undefined;
+				runState.errorClass = undefined;
+				runState.autoAbortReason = undefined;
 				runState.removed = false;
 				runState.deliveryMode = deliveryMode;
 				runState.turnCount = Math.max(DEFAULT_TURN_COUNT, runState.turnCount || DEFAULT_TURN_COUNT) + 1;

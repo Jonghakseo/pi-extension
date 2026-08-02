@@ -43,6 +43,10 @@ describe("normalizeTools", () => {
 		expect(normalizeTools("read, write, bash", "pi")).toEqual(["read", "write", "bash"]);
 	});
 
+	it("should normalize YAML array tool lists", () => {
+		expect(normalizeTools(["read", " bash "], "pi")).toEqual(["read", "bash"]);
+	});
+
 	it("should map Claude tools to pi equivalents", () => {
 		expect(normalizeTools("bash,read,glob", "claude")).toEqual(["bash", "read", "find"]);
 	});

@@ -83,6 +83,50 @@ describe("commands retry persisted-session offset refresh", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
+	it("clears auto-abort failure state when a command continuation starts", async () => {
+		const { registerAll } = await import("./commands.ts");
+		const store = createStore();
+		const { pi } = createPi();
+		const { commands } = registerAll(pi as never, store);
+		mockRunSingleAgent.mockResolvedValue(makeResult());
+		store.commandRuns.set(1, {
+			id: 1,
+			agent: "worker",
+			task: "original task",
+			status: "error",
+			startedAt: Date.now() - 5000,
+			elapsedMs: 5000,
+			toolCalls: 1,
+			lastLine: "Auto-aborted after inactivity.",
+			turnCount: 1,
+			lastActivityAt: Date.now(),
+			errorClass: "process_error",
+			autoAbortReason: "Auto-aborted after inactivity.",
+		});
+
+		const handler = commands.get("sub:isolate")?.handler;
+		const ctx = {
+			cwd: tmpDir,
+			hasUI: false,
+			ui: {
+				notify: vi.fn(),
+				select: vi.fn(),
+				getEditorText: vi.fn(() => ""),
+				setEditorText: vi.fn(),
+			},
+			sessionManager: {
+				getSessionFile: () => path.join(tmpDir, "main.jsonl"),
+				getEntries: () => [],
+			},
+		};
+
+		await handler?.("1 keep going", ctx as never);
+
+		expect(store.commandRuns.get(1)?.autoAbortReason).toBeUndefined();
+		expect(store.commandRuns.get(1)?.errorClass).toBeUndefined();
+		await vi.runAllTicks();
+	});
+
 	it("refreshes persistedSessionBaseOffset before each retry attempt", async () => {
 		const { registerAll } = await import("./commands.ts");
 		const store = createStore();

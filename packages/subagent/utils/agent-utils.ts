@@ -88,12 +88,10 @@ export const CLAUDE_MODEL_ALIAS_MAP: Record<string, string> = {
  * Normalize a comma-separated tool list according to the given format.
  * For "claude" format, maps Claude tool names to pi equivalents.
  */
-export function normalizeTools(rawTools: string | undefined, format: "pi" | "claude"): string[] | undefined {
-	if (!rawTools) return undefined;
-
-	const parsed = rawTools
-		.split(",")
-		.map((t) => t.trim())
+export function normalizeTools(rawTools: unknown, format: "pi" | "claude"): string[] | undefined {
+	const parsed = (Array.isArray(rawTools) ? rawTools : typeof rawTools === "string" ? rawTools.split(",") : [])
+		.filter((tool): tool is string => typeof tool === "string")
+		.map((tool) => tool.trim())
 		.filter(Boolean);
 
 	if (parsed.length === 0) return undefined;

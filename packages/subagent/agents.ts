@@ -140,25 +140,30 @@ function loadAgentsFromDir(dir: string, source: "user" | "project", options: Loa
 			continue;
 		}
 
-		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
-		if (!frontmatter.name || !frontmatter.description) continue;
+		try {
+			const { frontmatter, body } = parseFrontmatter<Record<string, unknown>>(content);
+			if (typeof frontmatter.name !== "string" || typeof frontmatter.description !== "string") continue;
+			if (!frontmatter.name || !frontmatter.description) continue;
 
-		const tools = normalizeTools(frontmatter.tools, format);
-		const model = normalizeModel(frontmatter.model, format);
-		const thinking = normalizeThinkingLevel(frontmatter.thinking);
-		const runtime: AgentRuntime = frontmatter.runtime === "claude" ? "claude" : "pi";
+			const tools = normalizeTools(frontmatter.tools, format);
+			const model = normalizeModel(typeof frontmatter.model === "string" ? frontmatter.model : undefined, format);
+			const thinking = normalizeThinkingLevel(
+				typeof frontmatter.thinking === "string" ? frontmatter.thinking : undefined,
+			);
+			const runtime: AgentRuntime = frontmatter.runtime === "claude" ? "claude" : "pi";
 
-		agents.push({
-			name: frontmatter.name,
-			description: frontmatter.description,
-			tools,
-			model,
-			thinking,
-			systemPrompt: attachCommonSubagentRule(body, runtime),
-			source,
-			filePath,
-			runtime,
-		});
+			agents.push({
+				name: frontmatter.name,
+				description: frontmatter.description,
+				tools,
+				model,
+				thinking,
+				systemPrompt: attachCommonSubagentRule(body, runtime),
+				source,
+				filePath,
+				runtime,
+			});
+		} catch {}
 	}
 
 	return agents;

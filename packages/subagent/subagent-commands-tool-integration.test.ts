@@ -312,6 +312,44 @@ describe("T09: command/tool runtime metadata integration", () => {
 			expect(result.content[0]?.text).toContain("claudeProjectDir mismatch");
 		});
 
+		it("clears auto-abort failure state before continuing a run", async () => {
+			mockRunSingleAgent.mockResolvedValue(makeResult("worker", "keep going", "continued"));
+			const { createSubagentToolExecute } = await loadToolExecute();
+			const store = createStore();
+			const sent: SentCall[] = [];
+			const execute = createSubagentToolExecute(createPi(sent) as never, store);
+
+			store.commandRuns.set(1, {
+				id: 1,
+				agent: "worker",
+				task: "original task",
+				status: "error",
+				startedAt: Date.now() - 5000,
+				elapsedMs: 5000,
+				toolCalls: 2,
+				lastLine: "Auto-aborted after inactivity.",
+				turnCount: 1,
+				lastActivityAt: Date.now(),
+				errorClass: "process_error",
+				autoAbortReason: "Auto-aborted after inactivity.",
+			});
+
+			await execute(
+				"call-continue-auto-abort",
+				{ command: "subagent continue 1 -- keep going" },
+				undefined,
+				undefined,
+				createCtx(),
+			);
+
+			await waitForAssertion(() => {
+				expect(sent.some((call) => call.message.content?.includes("] completed"))).toBe(true);
+			});
+			expect(store.commandRuns.get(1)).toMatchObject({ status: "done" });
+			expect(store.commandRuns.get(1)?.autoAbortReason).toBeUndefined();
+			expect(store.commandRuns.get(1)?.errorClass).toBeUndefined();
+		});
+
 		it("allows continue for Claude run with valid metadata", async () => {
 			mockRunSingleAgent.mockImplementation(async () => {
 				return makeResult("claude-worker", "keep going", "continued", {

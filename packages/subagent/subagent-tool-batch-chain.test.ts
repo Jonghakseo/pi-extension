@@ -339,6 +339,33 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 		});
 	});
 
+	it("finalizes a rejected chain step and reports its actual run ID", async () => {
+		mockRunSingleAgent.mockRejectedValue(new Error("CHAIN_REJECTED"));
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const pi = createPi(sent);
+		const execute = createSubagentToolExecute(pi as never, store);
+
+		await execute(
+			"call-chain-rejection",
+			{ command: 'subagent chain --main --agent worker --task "step one" --agent reviewer --task "step two"' },
+			undefined,
+			undefined,
+			createCtx(),
+		);
+
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+		expect(mockRunSingleAgent).toHaveBeenCalledTimes(1);
+		expect(sent[0]?.message.content).toContain("#1 worker · error");
+		expect(sent[0]?.message.content).toContain("CHAIN_REJECTED");
+		expect(sent[0]?.message.content).not.toContain("#-1 pipeline");
+		expect(store.commandRuns.get(1)).toMatchObject({ status: "error", lastOutput: "CHAIN_REJECTED" });
+		expect(store.commandRuns.get(1)?.abortController).toBeUndefined();
+	});
+
 	it("reports live batch progress when queried by groupId", async () => {
 		let releaseRuns: () => void = () => {};
 		const gate = new Promise<void>((resolve) => {

@@ -37,6 +37,52 @@ describe("runtime frontmatter parsing", () => {
 		}
 	});
 
+	it("skips malformed agent files while discovering valid siblings", () => {
+		const tmpDir = createTempAgentDir();
+		const agentsDir = path.join(tmpDir, ".pi", "agents");
+		fs.mkdirSync(agentsDir, { recursive: true });
+		writeAgentFile(agentsDir, "01-malformed.md", ["---", "name: [", "---", "Invalid."].join("\n"));
+		writeAgentFile(
+			agentsDir,
+			"02-valid.md",
+			["---", "name: valid-sibling", "description: A valid sibling agent", "---", "Do work."].join("\n"),
+		);
+
+		const result = discoverAgents(tmpDir);
+		expect(result.agents.some((agent) => agent.name === "valid-sibling")).toBe(true);
+
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("skips non-string required metadata and accepts YAML array tools", () => {
+		const tmpDir = createTempAgentDir();
+		const agentsDir = path.join(tmpDir, ".pi", "agents");
+		fs.mkdirSync(agentsDir, { recursive: true });
+		writeAgentFile(
+			agentsDir,
+			"01-invalid-metadata.md",
+			["---", "name: [invalid]", "description: Invalid metadata", "---", "Do not load."].join("\n"),
+		);
+		writeAgentFile(
+			agentsDir,
+			"02-array-tools.md",
+			[
+				"---",
+				"name: array-tools",
+				"description: Supports YAML array tools",
+				"tools: [read, bash]",
+				"---",
+				"Do work.",
+			].join("\n"),
+		);
+
+		const result = discoverAgents(tmpDir);
+		expect(result.agents.find((agent) => agent.name === "invalid")).toBeUndefined();
+		expect(result.agents.find((agent) => agent.name === "array-tools")?.tools).toEqual(["read", "bash"]);
+
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
 	it("defaults to 'pi' when runtime is not specified", () => {
 		const tmpDir = createTempAgentDir();
 		const agentsDir = path.join(tmpDir, ".pi", "agents");
