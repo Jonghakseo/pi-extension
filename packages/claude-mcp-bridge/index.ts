@@ -2127,7 +2127,8 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 		if (!isCurrentRuntime()) return;
 		latestContext = ctx;
 		await loadProjectConfig(ctx);
-		void startRuntimeBackgroundConnect(ctx.cwd);
+		const connectPromise = startRuntimeBackgroundConnect(ctx.cwd);
+		if (process.env.PI_MCP_EAGER === "1") await connectPromise;
 		updateStatus(ctx);
 		removeUnavailableToolsFromActiveSet();
 		removeDisabledToolsFromActiveSet();
