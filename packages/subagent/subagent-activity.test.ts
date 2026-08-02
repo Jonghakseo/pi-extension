@@ -47,6 +47,12 @@ describe("evaluateActivityEmission", () => {
 		expect(payload).toBeNull();
 	});
 
+	it("does not emit a stale lastToolName when the tool count is zero (continuation reset)", () => {
+		const state = createActivityThrottleState();
+		const payload = evaluateActivityEmission(state, makeSnapshot({ toolCallCount: 0, lastToolName: "read" }), 10_000);
+		expect(payload).toBeNull();
+	});
+
 	it("does not emit when nothing changed", () => {
 		const state = createActivityThrottleState();
 		expect(evaluateActivityEmission(state, makeSnapshot(), 10_000)).not.toBeNull();
@@ -101,6 +107,11 @@ describe("normalizeActivityLine", () => {
 
 	it("collapses multi-line text to the last non-empty line", () => {
 		expect(normalizeActivityLine("first\n\n  second  \n\n")).toBe("second");
+	});
+
+	it("treats carriage returns as line boundaries", () => {
+		expect(normalizeActivityLine("progress 10%\rprogress 90%")).toBe("progress 90%");
+		expect(normalizeActivityLine("first\r\nsecond")).toBe("second");
 	});
 
 	it("caps length at the max chars", () => {

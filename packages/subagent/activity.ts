@@ -56,6 +56,7 @@ const ANSI_PATTERN =
 export function normalizeActivityLine(text: string | undefined): string | undefined {
 	if (!text) return undefined;
 	const line = text
+		.replace(/\r\n?/g, "\n")
 		.replace(ANSI_PATTERN, "")
 		.split("\n")
 		.map((part) => part.trim())
@@ -79,7 +80,9 @@ export function evaluateActivityEmission(
 	now: number,
 ): ActivityPayload | null {
 	if (snapshot.status !== "running") return null;
-	if (snapshot.toolCallCount <= 0 && !snapshot.lastToolName) return null;
+	// Continuations reset toolCalls to 0 while a stale lastToolName may linger
+	// on the run state, so a positive count is required regardless of the name.
+	if (snapshot.toolCallCount <= 0) return null;
 
 	const changed =
 		snapshot.lastToolName !== state.lastEmittedToolName || snapshot.toolCallCount !== state.lastEmittedToolCallCount;
