@@ -7,6 +7,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { CommandRunState } from "./types.js";
+import { getUsedContextPercent } from "./utils/format-utils.js";
 
 export const SUBAGENT_ACTIVITY_CUSTOM_TYPE = "subagent-activity";
 export const SUBAGENT_ACTIVITY_SCHEMA_VERSION = 1;
@@ -24,6 +25,7 @@ export interface ActivitySnapshot {
 	toolCallCount: number;
 	lastLine?: string;
 	contextTokens?: number;
+	contextWindow?: number;
 }
 
 export interface ActivityPayload {
@@ -36,12 +38,15 @@ export interface ActivityPayload {
 	toolCallCount: number;
 	lastLine?: string;
 	contextTokens?: number;
+	contextWindow?: number;
+	contextPercent?: number;
 }
 
 export interface ActivityThrottleState {
 	lastEmittedAt: number;
 	lastEmittedToolName?: string;
 	lastEmittedToolCallCount?: number;
+	lastEmittedContextPercent?: number;
 }
 
 export function createActivityThrottleState(): ActivityThrottleState {
@@ -69,8 +74,8 @@ export function normalizeActivityLine(text: string | undefined): string | undefi
 /**
  * Change-driven throttle policy. Returns a payload to emit, or null.
  *
- * Emits only while the run is `running`, only when `lastToolName` or
- * `toolCallCount` changed since the last emission, and at most once per
+ * Emits only while the run is `running`, when tool metadata or the displayed
+ * context percentage changes, and at most once per
  * `ACTIVITY_MIN_INTERVAL_MS` per run. A change suppressed by the interval
  * stays pending and emits on a later evaluation.
  */
@@ -84,14 +89,18 @@ export function evaluateActivityEmission(
 	// on the run state, so a positive count is required regardless of the name.
 	if (snapshot.toolCallCount <= 0) return null;
 
+	const contextPercent = getUsedContextPercent(snapshot.contextTokens, snapshot.contextWindow);
 	const changed =
-		snapshot.lastToolName !== state.lastEmittedToolName || snapshot.toolCallCount !== state.lastEmittedToolCallCount;
+		snapshot.lastToolName !== state.lastEmittedToolName ||
+		snapshot.toolCallCount !== state.lastEmittedToolCallCount ||
+		contextPercent !== state.lastEmittedContextPercent;
 	if (!changed) return null;
 	if (state.lastEmittedAt !== 0 && now - state.lastEmittedAt < ACTIVITY_MIN_INTERVAL_MS) return null;
 
 	state.lastEmittedAt = now;
 	state.lastEmittedToolName = snapshot.lastToolName;
 	state.lastEmittedToolCallCount = snapshot.toolCallCount;
+	state.lastEmittedContextPercent = contextPercent;
 
 	const payload: ActivityPayload = {
 		runId: snapshot.runId,
@@ -105,10 +114,12 @@ export function evaluateActivityEmission(
 	const lastLine = normalizeActivityLine(snapshot.lastLine);
 	if (lastLine) payload.lastLine = lastLine;
 	if (snapshot.contextTokens != null && snapshot.contextTokens > 0) payload.contextTokens = snapshot.contextTokens;
+	if (snapshot.contextWindow != null && snapshot.contextWindow > 0) payload.contextWindow = snapshot.contextWindow;
+	if (contextPercent !== undefined) payload.contextPercent = contextPercent;
 	return payload;
 }
 
-export function snapshotFromRunState(runState: CommandRunState): ActivitySnapshot {
+export function snapshotFromRunState(runState: CommandRunState, contextWindow?: number): ActivitySnapshot {
 	return {
 		status: runState.status,
 		runId: runState.id,
@@ -120,6 +131,7 @@ export function snapshotFromRunState(runState: CommandRunState): ActivitySnapsho
 		toolCallCount: runState.toolCalls,
 		lastLine: runState.lastLine,
 		contextTokens: runState.usage?.contextTokens,
+		contextWindow,
 	};
 }
 
@@ -130,11 +142,16 @@ export function snapshotFromRunState(runState: CommandRunState): ActivitySnapsho
 export function createRunActivityRecorder(
 	pi: Pick<ExtensionAPI, "appendEntry">,
 	runState: CommandRunState,
+	resolveContextWindow?: (model?: string) => number | undefined,
 ): () => void {
 	const throttleState = createActivityThrottleState();
 	return () => {
 		try {
-			const payload = evaluateActivityEmission(throttleState, snapshotFromRunState(runState), Date.now());
+			const payload = evaluateActivityEmission(
+				throttleState,
+				snapshotFromRunState(runState, resolveContextWindow?.(runState.model)),
+				Date.now(),
+			);
 			if (!payload) return;
 			pi.appendEntry(SUBAGENT_ACTIVITY_CUSTOM_TYPE, {
 				schemaVersion: SUBAGENT_ACTIVITY_SCHEMA_VERSION,

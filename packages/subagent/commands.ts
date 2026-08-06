@@ -35,7 +35,14 @@ import {
 	shouldSummarizeSubagentTask,
 	summarizeSubagentDisplayTask,
 } from "./display-task.js";
-import { AGENT_NAME_PALETTE, agentBgIndex, formatUsageStats, truncateLines, truncatePlainToWidth } from "./format.js";
+import {
+	AGENT_NAME_PALETTE,
+	agentBgIndex,
+	formatUsageStats,
+	resolveContextWindow,
+	truncateLines,
+	truncatePlainToWidth,
+} from "./format.js";
 import {
 	clearPendingGroupCompletion,
 	consumePendingGroupCompletionsForSession,
@@ -1402,7 +1409,9 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 			}, RUN_TICK_INTERVAL_MS);
 
 			let claudeCheckpointSent = !!runState.claudeSessionId;
-			const recordActivity = hiddenFromMain ? () => {} : createRunActivityRecorder(pi, runState);
+			const recordActivity = hiddenFromMain
+				? () => {}
+				: createRunActivityRecorder(pi, runState, (model) => resolveContextWindow(ctx, model));
 			void (async () => {
 				try {
 					const { result, retryCount } = await invokeWithAutoRetry({

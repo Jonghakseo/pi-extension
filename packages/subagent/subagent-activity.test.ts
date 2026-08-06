@@ -59,6 +59,21 @@ describe("evaluateActivityEmission", () => {
 		expect(evaluateActivityEmission(state, makeSnapshot({ lastLine: "different line only" }), 20_000)).toBeNull();
 	});
 
+	it("emits updated context usage even when the tool metadata is unchanged", () => {
+		const state = createActivityThrottleState();
+		expect(
+			evaluateActivityEmission(state, makeSnapshot({ contextTokens: 80_000, contextWindow: 200_000 }), 10_000),
+		).toMatchObject({ contextTokens: 80_000, contextWindow: 200_000, contextPercent: 40 });
+
+		expect(
+			evaluateActivityEmission(
+				state,
+				makeSnapshot({ contextTokens: 84_000, contextWindow: 200_000 }),
+				10_000 + ACTIVITY_MIN_INTERVAL_MS,
+			),
+		).toMatchObject({ contextTokens: 84_000, contextWindow: 200_000, contextPercent: 42 });
+	});
+
 	it("suppresses changes within the minimum interval and emits after it passes", () => {
 		const state = createActivityThrottleState();
 		expect(evaluateActivityEmission(state, makeSnapshot(), 10_000)).not.toBeNull();
@@ -89,10 +104,23 @@ describe("evaluateActivityEmission", () => {
 		const state = createActivityThrottleState();
 		const payload = evaluateActivityEmission(
 			state,
-			makeSnapshot({ batchId: "b_1", pipelineId: "p_1", pipelineStepIndex: 0, contextTokens: 84_000 }),
+			makeSnapshot({
+				batchId: "b_1",
+				pipelineId: "p_1",
+				pipelineStepIndex: 0,
+				contextTokens: 84_000,
+				contextWindow: 200_000,
+			}),
 			10_000,
 		);
-		expect(payload).toMatchObject({ batchId: "b_1", pipelineId: "p_1", pipelineStepIndex: 0, contextTokens: 84_000 });
+		expect(payload).toMatchObject({
+			batchId: "b_1",
+			pipelineId: "p_1",
+			pipelineStepIndex: 0,
+			contextTokens: 84_000,
+			contextWindow: 200_000,
+			contextPercent: 42,
+		});
 
 		const bare = evaluateActivityEmission(createActivityThrottleState(), makeSnapshot({ lastLine: undefined }), 10_000);
 		expect(bare).not.toBeNull();
@@ -153,7 +181,9 @@ describe("createRunActivityRecorder", () => {
 		run.toolCalls = 1;
 		run.lastToolName = "edit";
 		run.lastLine = "edited runner.ts";
-		record();
+		run.usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 84_000, turns: 1 };
+		const recordWithContext = createRunActivityRecorder({ appendEntry } as never, run, () => 200_000);
+		recordWithContext();
 
 		expect(appendEntry).toHaveBeenCalledTimes(1);
 		const [customType, data] = appendEntry.mock.calls[0];
@@ -166,6 +196,9 @@ describe("createRunActivityRecorder", () => {
 			lastToolName: "edit",
 			toolCallCount: 1,
 			lastLine: "edited runner.ts",
+			contextTokens: 84_000,
+			contextWindow: 200_000,
+			contextPercent: 42,
 		});
 		expect(typeof data.recordedAt).toBe("string");
 		expect(JSON.stringify(data)).not.toContain("sensitive task text");

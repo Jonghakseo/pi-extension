@@ -1319,7 +1319,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 
 		function launchRunInBackground(runState: CommandRunState, taskForAgent: string): Promise<FinalizedRun> {
 			let claudeCheckpointSent = !!runState.claudeSessionId;
-			const recordActivity = createRunActivityRecorder(pi, runState);
+			const recordActivity = createRunActivityRecorder(pi, runState, (model) => resolveContextWindow(ctx, model));
 			return enqueueSubagentInvocation(() =>
 				runSingleAgent(
 					ctx.cwd,
