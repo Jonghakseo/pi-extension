@@ -96,20 +96,18 @@ describe("subagent config", () => {
 		expect(loadSubagentConfig(tmpDir, { globalPath: null }).symbolMap).toEqual({});
 	});
 
-	it.each([
-		{ invalid: "worker" },
-		{ "?": 42 },
-		{ "?": "   " },
-		{ "?": "searcher", invalid: "worker" },
-	])("rejects the entire malformed symbolMap %j", (symbolMap) => {
-		const tmpDir = createTempDir();
-		const globalPath = path.join(tmpDir, "settings.json");
-		const projectPath = path.join(tmpDir, ".pi", "subagent.json");
-		writeJson(globalPath, { subagent: { symbolMap: { "!": "reviewer" } } });
-		writeJson(projectPath, { symbolMap });
+	it.each([{ invalid: "worker" }, { "?": 42 }, { "?": "   " }, { "?": "searcher", invalid: "worker" }])(
+		"rejects the entire malformed symbolMap %j",
+		(symbolMap) => {
+			const tmpDir = createTempDir();
+			const globalPath = path.join(tmpDir, "settings.json");
+			const projectPath = path.join(tmpDir, ".pi", "subagent.json");
+			writeJson(globalPath, { subagent: { symbolMap: { "!": "reviewer" } } });
+			writeJson(projectPath, { symbolMap });
 
-		expect(loadSubagentConfig(tmpDir, { globalPath }).symbolMap).toEqual({ "!": "reviewer" });
-	});
+			expect(loadSubagentConfig(tmpDir, { globalPath }).symbolMap).toEqual({ "!": "reviewer" });
+		},
+	);
 
 	it("ignores invalid config values and falls back to sdk", () => {
 		const tmpDir = createTempDir();
