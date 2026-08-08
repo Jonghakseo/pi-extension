@@ -993,6 +993,37 @@ export function normalizeServer(name: string, raw: RawMcpServer): NormalizedMcpS
 	return null;
 }
 
+const PI_TRUST_REQUIRING_RESOURCES = [
+	"settings.json",
+	"extensions",
+	"skills",
+	"prompts",
+	"themes",
+	"SYSTEM.md",
+	"APPEND_SYSTEM.md",
+] as const;
+
+function hasPiTrustRequiringProjectResources(cwd: string): boolean {
+	const home = path.resolve(os.homedir());
+	const projectConfigDir = path.join(path.resolve(cwd), ".pi");
+	if (PI_TRUST_REQUIRING_RESOURCES.some((entry) => fs.existsSync(path.join(projectConfigDir, entry)))) return true;
+
+	let current = path.resolve(cwd);
+	const userAgentSkills = path.join(home, ".agents", "skills");
+	while (true) {
+		const agentSkills = path.join(current, ".agents", "skills");
+		if (agentSkills !== userAgentSkills && fs.existsSync(agentSkills)) return true;
+		const parent = path.dirname(current);
+		if (parent === current) return false;
+		current = parent;
+	}
+}
+
+function shouldLoadProjectMcp(ctx: ExtensionContext): boolean {
+	if (process.env.PI_MCP_ALLOW_PROJECT === "1") return true;
+	return hasPiTrustRequiringProjectResources(ctx.cwd) && ctx.isProjectTrusted();
+}
+
 function collectScopedConfigCandidates(cwd: string, includeProject: boolean): ConfigCandidate[] {
 	const candidates: ConfigCandidate[] = [];
 	const seen = new Set<string>();
@@ -1030,7 +1061,7 @@ function collectScopedConfigCandidates(cwd: string, includeProject: boolean): Co
 	return candidates;
 }
 
-function loadConfig(cwd: string, options: { includeProject: boolean; projectTrusted: boolean }): LoadedConfig {
+function loadConfig(cwd: string, options: { includeProject: boolean }): LoadedConfig {
 	const warnings: string[] = [];
 	const explicitPath = process.env.PI_MCP_CONFIG;
 	const candidates: ConfigCandidate[] = explicitPath
@@ -1057,10 +1088,6 @@ function loadConfig(cwd: string, options: { includeProject: boolean; projectTrus
 			const normalized = normalizeServer(name, raw);
 			if (!normalized) {
 				warnings.push(`Skipped invalid MCP server config: ${name}`);
-				continue;
-			}
-			if (candidate.scope === "project" && normalized.type === "stdio" && !options.projectTrusted) {
-				warnings.push(`Skipped MCP stdio server from untrusted project: ${name}`);
 				continue;
 			}
 			serversByName.set(name, normalized);
@@ -1706,7 +1733,7 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 	const loadedToolVisibility = loadToolVisibilitySettings();
 	const disabledToolKeys = loadedToolVisibility.disabledToolKeys;
 	let toolVisibilityWarning = loadedToolVisibility.warning;
-	let loadedAt = loadConfig(cwd, { includeProject: false, projectTrusted: true });
+	let loadedAt = loadConfig(cwd, { includeProject: false });
 	let configFingerprint = buildConfigFingerprint(loadedAt.servers);
 	let loadedCache = loadMcpToolCache(configFingerprint);
 
@@ -1726,7 +1753,7 @@ export default async function claudeMcpBridge(pi: ExtensionAPI) {
 	}
 
 	async function loadProjectConfig(ctx: ExtensionContext): Promise<void> {
-		const next = loadConfig(ctx.cwd, { includeProject: true, projectTrusted: ctx.isProjectTrusted() });
+		const next = loadConfig(ctx.cwd, { includeProject: shouldLoadProjectMcp(ctx) });
 		if (next.signature === loadedAt.signature) return;
 
 		await manager.replaceServers(next.servers, next.sourcePath);

@@ -6,7 +6,7 @@ Bridge [Claude Code MCP](https://modelcontextprotocol.io/) server configurations
 
 - **Config auto-discovery** — scans for MCP settings in priority order:
   - `PI_MCP_CONFIG` env var (single file override)
-  - Scoped search from cwd upward: `.pi/mcp.json`, `.mcp.json`, `backend/.mcp.json`, `frontend/.mcp.json`
+  - Scoped search from cwd upward: `.pi/mcp.json`, `.mcp.json`, `backend/.mcp.json`, `frontend/.mcp.json` (only after Pi project-trust approval, or with `PI_MCP_ALLOW_PROJECT=1`)
   - Global: `~/.mcp.json`, `~/.claude.json`
   - First-seen server name wins on duplicates
 - **Protocol compatibility** — auto-negotiates the stateless MCP `2026-07-28` protocol over stdio and streamable HTTP, then falls back to the `2025` initialize/session protocol for older servers
@@ -36,6 +36,7 @@ pi install npm:@ryan_nookpi/pi-extension-claude-mcp-bridge
 | Environment variable | Behavior |
 |----------------------|----------|
 | `PI_OFFLINE=1` | Skip connections and reconnect timers while keeping matching cached tool schemas available |
+| `PI_MCP_ALLOW_PROJECT=1` | Explicitly allow project-scoped MCP config discovery when the project has no Pi trust-requiring resources |
 | `PI_MCP_EAGER=1` | Wait for MCP connections during extension load (temporary rollback path) |
 | `PI_MCP_CONNECT_TIMEOUT_MS` | Override the per-server connection timeout (default: 30000 ms) |
 | `PI_MCP_PROTOCOL_PROBE_TIMEOUT_MS` | Override the stdio `server/discover` probe timeout for slow modern servers (default: min of 10000 ms and half the connection timeout) |
@@ -56,7 +57,7 @@ Explicit `type: "sse"` configurations stay on the legacy protocol because HTTP+S
 ## Notes
 
 - Node.js 20 or newer is required by the MCP TypeScript SDK v2.
-- `${ENV_NAME}` in config values are expanded from environment variables.
+- `${ENV_NAME}` in config values are expanded from environment variables only for permitted config sources. Untrusted project MCP files are not read.
 - Cache fingerprints include only server names, transport types, URL hosts, and redacted command structure. Header and environment values are never persisted.
 - URL paths and command argument values are intentionally excluded from fingerprints. Matching cached schemas can be briefly stale until live discovery refreshes them; rename the server or remove the cache before an offline-only run after such changes.
 - Cache files are replaced atomically after every changed live tool discovery.
