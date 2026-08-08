@@ -7,7 +7,7 @@ vi.mock("node:child_process", () => ({
 
 import { spawnSync } from "node:child_process";
 import { createExtensionApiMock } from "../../tests/mock-extension-api.ts";
-import clipboardExtension from "./index.ts";
+import clipboardExtension, { WINDOWS_CLIPBOARD_SCRIPT } from "./index.ts";
 
 const setPlatform = (platform: NodeJS.Platform) => {
 	Object.defineProperty(process, "platform", { value: platform, configurable: true });
@@ -205,11 +205,40 @@ describe("paste_from_clipboard tool", () => {
 
 		expect(vi.mocked(spawnSync)).toHaveBeenCalledWith(
 			"powershell.exe",
-			["-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard"],
+			["-NoProfile", "-NonInteractive", "-Command", WINDOWS_CLIPBOARD_SCRIPT],
 			{ encoding: "utf-8" },
 		);
+		expect(WINDOWS_CLIPBOARD_SCRIPT).toContain("UTF8Encoding]::new($false)");
+		expect(WINDOWS_CLIPBOARD_SCRIPT).toContain("Get-Clipboard -Raw");
+		expect(WINDOWS_CLIPBOARD_SCRIPT).toContain("[Console]::Out.Write");
+		expect(WINDOWS_CLIPBOARD_SCRIPT).not.toContain("WriteLine");
 		expect(result).toMatchObject({
 			details: { success: true, characterCount: 8, preview: "win text" },
+		});
+	});
+
+	it("preserves non-ASCII multiline PowerShell output exactly", async () => {
+		setPlatform("win32");
+		const clipboardText = "한글\n日本語\nemoji 😀";
+		vi.mocked(spawnSync).mockReturnValueOnce({
+			status: 0,
+			stdout: clipboardText,
+			stderr: "",
+		} as unknown as ReturnType<typeof spawnSync>);
+
+		const result = await getPasteExecute()("call-win-unicode", {}, undefined, undefined, {
+			hasUI: false,
+		} as unknown as ExtensionContext);
+
+		expect(result).toMatchObject({
+			content: [
+				{ type: "text", text: `Pasted ${clipboardText.length} characters from clipboard.\n\n${clipboardText}` },
+			],
+			details: {
+				success: true,
+				characterCount: clipboardText.length,
+				preview: clipboardText,
+			},
 		});
 	});
 

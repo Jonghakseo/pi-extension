@@ -43,6 +43,9 @@ interface PasteCommand {
 	args: string[];
 }
 
+export const WINDOWS_CLIPBOARD_SCRIPT =
+	"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $text=Get-Clipboard -Raw; [Console]::Out.Write([string]$text)";
+
 /**
  * Resolve the OS-specific commands used to read the system clipboard.
  * Linux returns multiple commands so the tool can fall back when one is missing.
@@ -60,7 +63,7 @@ function getPasteCommands(platform: NodeJS.Platform): PasteCommand[] {
 			return [
 				{
 					command: "powershell.exe",
-					args: ["-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard"],
+					args: ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_CLIPBOARD_SCRIPT],
 				},
 			];
 		default:
