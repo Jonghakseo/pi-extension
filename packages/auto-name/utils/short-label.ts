@@ -7,7 +7,7 @@ type SummaryResult = Awaited<ReturnType<typeof completeSimple>>;
 type AuthResult = {
 	ok: boolean;
 	apiKey?: string;
-	headers?: Record<string, string>;
+	headers?: Record<string, string | null>;
 };
 
 export type ShortLabelContext = {
