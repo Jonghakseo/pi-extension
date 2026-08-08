@@ -1,3 +1,5 @@
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,6 +31,24 @@ describe("setup-sh extension utilities", () => {
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
+	});
+
+	it("handles asynchronous child spawn errors without an unhandled error event", async () => {
+		const child = new EventEmitter() as ChildProcess;
+		const startup = __test__.waitForChildSpawn(child);
+		child.emit("error", new Error("spawn /bin/zsh ENOENT"));
+
+		await expect(startup).rejects.toThrow("ENOENT");
+		child.emit("exit", 1, null);
+	});
+
+	it("keeps a post-spawn error listener installed", async () => {
+		const child = new EventEmitter() as ChildProcess;
+		const startup = __test__.waitForChildSpawn(child);
+		child.emit("spawn");
+		await expect(startup).resolves.toBeUndefined();
+
+		expect(() => child.emit("error", new Error("late child error"))).not.toThrow();
 	});
 
 	it("renders the widget as at most one truncated line", () => {

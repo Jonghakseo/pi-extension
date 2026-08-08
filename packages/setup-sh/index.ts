@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PENDING_AFTER_MS, STATE_ROOT, STATUS_KEY, WIDGET_KEY, WIDGET_REFRESH_MS } from "./constants.js";
 import { displayPath, findSetupPath, repoKeyFor, resolveSetupContext } from "./context.js";
-import { cancelSetup, createWrapperScript, startSetup } from "./runner.js";
+import { cancelSetup, createWrapperScript, startSetup, waitForChildSpawn } from "./runner.js";
 import { finalizeRunIfNeeded } from "./state.js";
 import type { SetupContext, StartMode, StartResult } from "./types.js";
 import { formatDuration, shellQuote, stripAnsi } from "./utils.js";
@@ -43,6 +43,7 @@ export const __test__ = {
 	renderWidgetLine,
 	resolveSetupContext,
 	createWrapperScript,
+	waitForChildSpawn,
 	shellQuote,
 	stripAnsi,
 };

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { closeSync, openSync, writeFileSync } from "node:fs";
 import { chmod } from "node:fs/promises";
 import * as path from "node:path";
@@ -64,35 +64,95 @@ async function handleLockedSetup(context: SetupContext): Promise<StartResult> {
 		: { kind: "skipped", context, record: running ?? undefined, reason: "setup.sh is locked by another session" };
 }
 
+export function waitForChildSpawn(child: ChildProcess): Promise<void> {
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		const settle = (error?: Error) => {
+			if (settled) return;
+			settled = true;
+			if (error) reject(error);
+			else resolve();
+		};
+		child.once("spawn", () => settle());
+		// Keep this one-shot listener installed after spawn so a later process error is never unhandled.
+		child.once("error", (error) => settle(error));
+	});
+}
+
+function sendSetupSignal(child: ChildProcess, signal: NodeJS.Signals): void {
+	if (!child.pid) return;
+	try {
+		process.kill(-child.pid, signal);
+	} catch {
+		try {
+			child.kill(signal);
+		} catch {}
+	}
+}
+
+async function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+	if (child.exitCode !== null || child.signalCode !== null) return true;
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = (exited: boolean) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			child.off("exit", onExit);
+			resolve(exited);
+		};
+		const onExit = () => finish(true);
+		const timer = setTimeout(() => finish(false), timeoutMs);
+		timer.unref();
+		child.once("exit", onExit);
+	});
+}
+
+async function terminateSpawnedSetup(child: ChildProcess): Promise<void> {
+	sendSetupSignal(child, "SIGTERM");
+	if (await waitForChildExit(child, 1_000)) return;
+	sendSetupSignal(child, "SIGKILL");
+	await waitForChildExit(child, 1_000);
+}
+
 async function spawnSetup(context: SetupContext, record: LockRecord, mode: StartMode): Promise<StartResult> {
 	const wrapperPath = path.join(context.paths.wrappersDir, `${context.repoKey}-${record.runId}.zsh`);
+	let logFd: number | undefined;
+	let child: ChildProcess | undefined;
+	let childStarted = false;
+	let stateCommitted = false;
+	let exitObserved = false;
+
 	try {
-		const logFd = openSync(record.logPath, "a");
-		try {
-			writeFileSync(wrapperPath, createWrapperScript(record, wrapperPath), "utf-8");
-			await chmod(wrapperPath, 0o700);
-			const child = spawn("/bin/zsh", [wrapperPath], {
-				cwd: context.repoRoot,
-				detached: true,
-				stdio: ["ignore", logFd, logFd],
-				env: process.env,
-			});
-			child.unref();
+		logFd = openSync(record.logPath, "a");
+		writeFileSync(wrapperPath, createWrapperScript(record, wrapperPath), "utf-8");
+		await chmod(wrapperPath, 0o700);
+		child = spawn("/bin/zsh", [wrapperPath], {
+			cwd: context.repoRoot,
+			detached: true,
+			stdio: ["ignore", logFd, logFd],
+			env: process.env,
+		});
+		child.on("exit", () => {
+			exitObserved = true;
+			if (stateCommitted) void finalizeRunIfNeeded(context).catch(() => {});
+		});
 
-			if (!child.pid) throw new Error("Failed to start setup.sh");
+		await waitForChildSpawn(child);
+		childStarted = true;
+		if (!child.pid) throw new Error("Failed to start setup.sh");
 
-			const run: RunRecord = { ...record, pid: child.pid, status: "running", mode };
-			await writeJsonAtomic(context.paths.lockPath, run);
-			await writeJsonAtomic(context.paths.statePath, run);
-			child.on("exit", () => {
-				void finalizeRunIfNeeded(context);
-			});
-			return { kind: "started", context, record: run };
-		} finally {
-			closeSync(logFd);
-		}
+		const run: RunRecord = { ...record, pid: child.pid, status: "running", mode };
+		await writeJsonAtomic(context.paths.lockPath, run);
+		await writeJsonAtomic(context.paths.statePath, run);
+		stateCommitted = true;
+		child.unref();
+		if (exitObserved) void finalizeRunIfNeeded(context).catch(() => {});
+		return { kind: "started", context, record: run };
 	} catch (error) {
+		if (childStarted && child) await terminateSpawnedSetup(child);
 		await maybeUnlink(context.paths.lockPath);
+		await maybeUnlink(wrapperPath);
 		const failed: RunRecord = {
 			...record,
 			status: "failed",
@@ -100,8 +160,12 @@ async function spawnSetup(context: SetupContext, record: LockRecord, mode: Start
 			finishedAt: isoNow(),
 			message: error instanceof Error ? error.message : String(error),
 		};
-		await writeJsonAtomic(context.paths.statePath, failed);
+		try {
+			await writeJsonAtomic(context.paths.statePath, failed);
+		} catch {}
 		return { kind: "failed", context, reason: failed.message ?? "Failed to start setup.sh" };
+	} finally {
+		if (logFd !== undefined) closeSync(logFd);
 	}
 }
 
