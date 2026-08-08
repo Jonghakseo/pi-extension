@@ -17,6 +17,7 @@ import claudeHooksBridge, {
 	convertHookTimeoutToMs,
 	countHooks,
 	DEFAULT_HOOK_TIMEOUT_MS,
+	execCommandHook,
 	extractDecision,
 	extractTextFromBlocks,
 	fallbackReason,
@@ -470,6 +471,17 @@ describe("fallbackReason", () => {
 // extractDecision
 // ---------------------------------------------------------------------------
 
+describe("execCommandHook timeout", () => {
+	it("settles near the deadline when a descendant keeps stdio open", async () => {
+		const startedAt = Date.now();
+		const result = await execCommandHook("echo started; sleep 5 & exit 0", process.cwd(), { test: true }, 300);
+
+		expect(result.timedOut).toBe(true);
+		expect(result.code).toBe(1);
+		expect(Date.now() - startedAt).toBeLessThan(1_500);
+	});
+});
+
 describe("extractDecision", () => {
 	const makeResult = (overrides: Partial<HookExecResult> = {}): HookExecResult => ({
 		command: "test",
@@ -570,6 +582,17 @@ describe("extractDecision", () => {
 	});
 
 	describe("non-blocking scenarios", () => {
+		it("treats timed-out hook output as diagnostic only", () => {
+			const result = makeResult({
+				timedOut: true,
+				code: 2,
+				json: { decision: "block", reason: "partial denial" },
+			});
+			const decision = extractDecision(result);
+			expect(decision.action).toBe("none");
+			expect(decision.reason).toContain("timed out");
+		});
+
 		it("should return 'none' for exit 0 with no JSON", () => {
 			const result = makeResult({ code: 0 });
 			const decision = extractDecision(result);

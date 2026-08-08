@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -396,6 +396,7 @@ export function fallbackReason(stderr: string, stdout: string): string | undefin
 }
 
 export function extractDecision(result: HookExecResult): HookDecision {
+	if (result.timedOut) return { action: "none", reason: "Hook timed out; partial output is diagnostic only." };
 	const payload = result.json;
 	const asObj = payload && typeof payload === "object" ? (payload as JsonRecord) : undefined;
 	const hookSpecific = asObj?.hookSpecificOutput;
@@ -427,15 +428,29 @@ export function extractDecision(result: HookExecResult): HookDecision {
 	return { action: "none", reason };
 }
 
-async function execCommandHook(
+function signalHookProcess(child: ChildProcess, signal: NodeJS.Signals, useProcessGroup: boolean): void {
+	if (useProcessGroup && child.pid) {
+		try {
+			process.kill(-child.pid, signal);
+			return;
+		} catch {}
+	}
+	try {
+		child.kill(signal);
+	} catch {}
+}
+
+export async function execCommandHook(
 	command: string,
 	cwd: string,
 	payload: JsonRecord,
 	timeoutMs: number,
 ): Promise<HookExecResult> {
 	return new Promise((resolve) => {
+		const useProcessGroup = process.platform === "darwin" || process.platform === "linux";
 		const child = spawn("bash", ["-lc", command], {
 			cwd,
+			detached: useProcessGroup,
 			env: {
 				...process.env,
 				CLAUDE_PROJECT_DIR: cwd,
@@ -448,6 +463,8 @@ async function execCommandHook(
 		let stderr = "";
 		let settled = false;
 		let timedOut = false;
+		let timeout: NodeJS.Timeout | undefined;
+		let escalation: NodeJS.Timeout | undefined;
 
 		const finalize = (code: number) => {
 			if (settled) return;
@@ -456,13 +473,24 @@ async function execCommandHook(
 			resolve({ command, code, stdout, stderr, timedOut, json });
 		};
 
-		let timeout: NodeJS.Timeout | undefined;
+		const destroyStreams = () => {
+			for (const stream of [child.stdin, child.stdout, child.stderr]) {
+				stream.on("error", () => {});
+				stream.destroy();
+			}
+		};
+
 		if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
 			timeout = setTimeout(() => {
 				timedOut = true;
-				child.kill("SIGTERM");
-				setTimeout(() => child.kill("SIGKILL"), 1000);
+				signalHookProcess(child, "SIGTERM", useProcessGroup);
+				destroyStreams();
+				child.unref();
+				finalize(1);
+				escalation = setTimeout(() => signalHookProcess(child, "SIGKILL", useProcessGroup), 1_000);
+				escalation.unref();
 			}, timeoutMs);
+			timeout.unref();
 		}
 
 		child.stdout.on("data", (chunk: Buffer | string) => {
@@ -473,14 +501,22 @@ async function execCommandHook(
 			stderr += chunk.toString();
 		});
 
+		child.stdin.on("error", (error) => {
+			stderr += `\nstdin write failed: ${error instanceof Error ? error.message : String(error)}`;
+			if (timeout) clearTimeout(timeout);
+			finalize(1);
+		});
+
 		child.on("error", (error) => {
 			if (timeout) clearTimeout(timeout);
+			if (escalation) clearTimeout(escalation);
 			stderr += `\n${error instanceof Error ? error.message : String(error)}`;
 			finalize(1);
 		});
 
 		child.on("close", (code) => {
 			if (timeout) clearTimeout(timeout);
+			if (escalation) clearTimeout(escalation);
 			finalize(typeof code === "number" ? code : 1);
 		});
 
@@ -489,6 +525,7 @@ async function execCommandHook(
 			child.stdin.end();
 		} catch (error) {
 			stderr += `\nstdin write failed: ${error instanceof Error ? error.message : String(error)}`;
+			if (timeout) clearTimeout(timeout);
 			finalize(1);
 		}
 	});
