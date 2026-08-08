@@ -299,10 +299,18 @@ describe("buildClaudeArgs flag correctness", () => {
 		expect(args).not.toContain("--thinking");
 	});
 
-	it("omits --tools and --allowedTools when tool list is empty", () => {
+	it("omits --tools and --allowedTools when the tools field is not configured", () => {
 		const args = buildClaudeArgs({ prompt: "task", tools: [] });
 		expect(args).not.toContain("--tools");
 		expect(args).not.toContain("--allowedTools");
+	});
+
+	it("passes empty allowlists when tools are explicitly configured as empty", () => {
+		const args = buildClaudeArgs({ prompt: "task", tools: [], toolsConfigured: true });
+		const toolsIdx = args.indexOf("--tools");
+		const allowedIdx = args.indexOf("--allowedTools");
+		expect(args[toolsIdx + 1]).toBe("");
+		expect(args[allowedIdx + 1]).toBe("");
 	});
 
 	it("always includes --include-partial-messages for incremental stream events", () => {

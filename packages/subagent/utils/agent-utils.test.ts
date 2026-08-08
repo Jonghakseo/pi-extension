@@ -35,8 +35,12 @@ describe("normalizeTools", () => {
 		expect(normalizeTools(undefined, "pi")).toBeUndefined();
 	});
 
-	it("should return undefined for empty string", () => {
-		expect(normalizeTools("", "pi")).toBeUndefined();
+	it("should reject an explicit empty string", () => {
+		expect(() => normalizeTools("", "pi")).toThrow("must not be an empty string");
+	});
+
+	it("should preserve an explicit empty array as a no-tools policy", () => {
+		expect(normalizeTools([], "claude")).toEqual([]);
 	});
 
 	it("should split and trim pi tools", () => {
@@ -55,8 +59,16 @@ describe("normalizeTools", () => {
 		expect(normalizeTools("todowrite,todoread", "claude")).toEqual(["todo"]);
 	});
 
-	it("should filter out unmappable Claude tools", () => {
-		expect(normalizeTools("skill", "claude")).toBeUndefined();
+	it("should reject unmappable Claude tools", () => {
+		expect(() => normalizeTools("skill", "claude")).toThrow("Unsupported Claude tool");
+	});
+
+	it("should reject mixed supported and unsupported Claude tools", () => {
+		expect(() => normalizeTools("read, WebSearch", "claude")).toThrow("WebSearch");
+	});
+
+	it("should reject malformed explicit tool arrays", () => {
+		expect(() => normalizeTools(["read", 123], "claude")).toThrow("only non-empty strings");
 	});
 });
 

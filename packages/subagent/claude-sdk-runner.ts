@@ -31,8 +31,12 @@ function normalizeTaskForSubagentPrompt(task: string): string {
 	return task;
 }
 
-function resolveClaudeSdkBuiltInTools(requestedTools?: string[]): string[] | undefined {
-	if (!requestedTools || requestedTools.length === 0) return undefined;
+function resolveClaudeSdkBuiltInTools(
+	requestedTools: string[] | undefined,
+	toolsConfigured: boolean,
+): string[] | undefined {
+	if (!toolsConfigured) return undefined;
+	if (!requestedTools || requestedTools.length === 0) return [];
 	return mapPiToolsToClaude(requestedTools);
 }
 
@@ -74,7 +78,7 @@ export async function runClaudeAgentViaSdk(
 
 	let enabledTools: string[] | undefined;
 	try {
-		enabledTools = resolveClaudeSdkBuiltInTools(agent.tools);
+		enabledTools = resolveClaudeSdkBuiltInTools(agent.tools, agent.toolsConfigured ?? agent.tools !== undefined);
 	} catch (error: any) {
 		return {
 			agent: agent.name,
@@ -140,7 +144,7 @@ export async function runClaudeAgentViaSdk(
 				settingSources: [],
 				includePartialMessages: true,
 				persistSession: true,
-				...(enabledTools ? { tools: enabledTools, allowedTools: enabledTools } : {}),
+				...(enabledTools !== undefined ? { tools: enabledTools, allowedTools: enabledTools } : {}),
 				resume: resumeSessionId,
 				stderr: (data) => {
 					stderrBuf += data;

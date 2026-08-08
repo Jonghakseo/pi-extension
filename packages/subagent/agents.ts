@@ -21,6 +21,10 @@ export interface AgentConfig {
 	name: string;
 	description: string;
 	tools?: string[];
+	/** Whether the tools field was explicitly present. Explicit [] disables all tools. */
+	toolsConfigured?: boolean;
+	/** Discovery-time validation failure. Invalid higher-priority definitions still mask lower-priority agents. */
+	configurationError?: string;
 	model?: string;
 	thinking?: AgentThinkingLevel;
 	systemPrompt: string;
@@ -145,7 +149,14 @@ function loadAgentsFromDir(dir: string, source: "user" | "project", options: Loa
 			if (typeof frontmatter.name !== "string" || typeof frontmatter.description !== "string") continue;
 			if (!frontmatter.name || !frontmatter.description) continue;
 
-			const tools = normalizeTools(frontmatter.tools, format);
+			const toolsConfigured = Object.hasOwn(frontmatter, "tools");
+			let tools: string[] | undefined;
+			let configurationError: string | undefined;
+			try {
+				tools = toolsConfigured ? normalizeTools(frontmatter.tools, format) : undefined;
+			} catch (error) {
+				configurationError = `${filePath}: ${error instanceof Error ? error.message : String(error)}`;
+			}
 			const model = normalizeModel(typeof frontmatter.model === "string" ? frontmatter.model : undefined, format);
 			const thinking = normalizeThinkingLevel(
 				typeof frontmatter.thinking === "string" ? frontmatter.thinking : undefined,
@@ -156,6 +167,8 @@ function loadAgentsFromDir(dir: string, source: "user" | "project", options: Loa
 				name: frontmatter.name,
 				description: frontmatter.description,
 				tools,
+				toolsConfigured,
+				configurationError,
 				model,
 				thinking,
 				systemPrompt: attachCommonSubagentRule(body, runtime),

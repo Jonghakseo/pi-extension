@@ -9,7 +9,7 @@
 import * as fs from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createRunActivityRecorder } from "./activity.js";
-import { discoverAgents } from "./agents.js";
+import { type AgentConfig, discoverAgents } from "./agents.js";
 import { parseSubagentToolCommand, SUBAGENT_CLI_HELP_TEXT } from "./cli.js";
 import {
 	DEFAULT_TURN_COUNT,
@@ -810,9 +810,15 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			const lines = agents.map((agent) => {
 				const model = agent.model ?? "(inherit current model)";
 				const thinking = agent.thinking ?? "(inherit current thinking)";
-				const tools = agent.tools && agent.tools.length > 0 ? agent.tools.join(",") : "default";
+				const tools =
+					(agent.toolsConfigured ?? agent.tools !== undefined)
+						? agent.tools?.length
+							? agent.tools.join(",")
+							: "none"
+						: "default";
 				const description = agent.description ? ` · ${agent.description}` : "";
-				return `${agent.name} [${agent.source}] · model: ${model} · thinking: ${thinking} · tools: ${tools}${description}`;
+				const invalid = agent.configurationError ? ` · INVALID: ${agent.configurationError}` : "";
+				return `${agent.name} [${agent.source}] · model: ${model} · thinking: ${thinking} · tools: ${tools}${description}${invalid}`;
 			});
 
 			return {
@@ -896,6 +902,24 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						{
 							type: "text",
 							text: `❌ Unknown agent${unknownNames.length > 1 ? "s" : ""}: ${unknownNames.map((n) => `"${n}"`).join(", ")}.\n\nAvailable agents: ${available}`,
+						},
+					],
+					details: makeDetails(),
+					isError: true,
+				};
+			}
+
+			const invalidAgents = [...new Set(requestedNames)]
+				.map((name) => agents.find((agent) => agent.name === name))
+				.filter((agent): agent is AgentConfig => Boolean(agent?.configurationError));
+			if (invalidAgents.length > 0) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `❌ Invalid agent configuration:\n${invalidAgents
+								.map((agent) => `- ${agent.name}: ${agent.configurationError}`)
+								.join("\n")}`,
 						},
 					],
 					details: makeDetails(),

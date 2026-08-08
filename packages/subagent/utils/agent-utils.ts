@@ -89,20 +89,38 @@ export const CLAUDE_MODEL_ALIAS_MAP: Record<string, string> = {
  * For "claude" format, maps Claude tool names to pi equivalents.
  */
 export function normalizeTools(rawTools: unknown, format: "pi" | "claude"): string[] | undefined {
-	const parsed = (Array.isArray(rawTools) ? rawTools : typeof rawTools === "string" ? rawTools.split(",") : [])
-		.filter((tool): tool is string => typeof tool === "string")
-		.map((tool) => tool.trim())
-		.filter(Boolean);
+	if (rawTools === undefined) return undefined;
 
-	if (parsed.length === 0) return undefined;
-	if (format === "pi") return parsed;
+	let parsed: string[];
+	if (Array.isArray(rawTools)) {
+		if (rawTools.some((tool) => typeof tool !== "string" || tool.trim().length === 0)) {
+			throw new Error("Explicit tools must contain only non-empty strings.");
+		}
+		parsed = rawTools.map((tool) => (tool as string).trim());
+	} else if (typeof rawTools === "string") {
+		parsed = rawTools
+			.split(",")
+			.map((tool) => tool.trim())
+			.filter(Boolean);
+		if (parsed.length === 0) throw new Error("Explicit tools must not be an empty string.");
+	} else {
+		throw new Error("Explicit tools must be a comma-separated string or an array of strings.");
+	}
 
-	const mapped = parsed
-		.map((tool) => CLAUDE_TOOL_MAP[tool.toLowerCase()] ?? undefined)
-		.filter((tool): tool is string => Boolean(tool));
+	if (format === "pi") return Array.from(new Set(parsed));
 
-	if (mapped.length === 0) return undefined;
-	return Array.from(new Set(mapped));
+	const unsupported = parsed.filter((tool) => !CLAUDE_TOOL_MAP[tool.toLowerCase()]);
+	if (unsupported.length > 0) {
+		throw new Error(
+			`Unsupported Claude tool${unsupported.length > 1 ? "s" : ""}: ${unsupported.join(", ")}. Supported tools: ${Object.keys(
+				CLAUDE_TOOL_MAP,
+			)
+				.filter((tool) => CLAUDE_TOOL_MAP[tool])
+				.join(", ")}`,
+		);
+	}
+
+	return Array.from(new Set(parsed.map((tool) => CLAUDE_TOOL_MAP[tool.toLowerCase()] as string)));
 }
 
 /**

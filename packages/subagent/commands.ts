@@ -969,9 +969,15 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 			const lines = agents.map((agent) => {
 				const model = agent.model ?? "(inherit current model)";
 				const thinking = agent.thinking ?? "(inherit current thinking)";
-				const tools = agent.tools && agent.tools.length > 0 ? agent.tools.join(",") : "default";
+				const tools =
+					(agent.toolsConfigured ?? agent.tools !== undefined)
+						? agent.tools?.length
+							? agent.tools.join(",")
+							: "none"
+						: "default";
 				const description = agent.description ? ` · ${agent.description}` : "";
-				return `${agent.name} [${agent.source}] · model: ${model} · thinking: ${thinking} · tools: ${tools}${description}`;
+				const invalid = agent.configurationError ? ` · INVALID: ${agent.configurationError}` : "";
+				return `${agent.name} [${agent.source}] · model: ${model} · thinking: ${thinking} · tools: ${tools}${description}${invalid}`;
 			});
 
 			return {
@@ -1228,6 +1234,15 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 				}
 
 				taskForAgent = taskForDisplay;
+			}
+
+			const selectedConfig = agents.find((agent) => agent.name === selectedAgent);
+			if (selectedConfig?.configurationError) {
+				ctx.ui.notify(
+					`Invalid agent configuration for "${selectedAgent}": ${selectedConfig.configurationError}`,
+					"error",
+				);
+				return;
 			}
 
 			let runId: number;
@@ -1671,14 +1686,16 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 			if (starterPackNotice) ctx.ui.notify(starterPackNotice, "info");
 
 			const lines = agents.map((a) => {
-				const tools = a.tools?.join(",") ?? "default";
+				const tools =
+					(a.toolsConfigured ?? a.tools !== undefined) ? (a.tools?.length ? a.tools.join(",") : "none") : "default";
 				const model = a.model ?? "(inherit current model)";
 				const thinking = a.thinking ?? "(inherit current thinking)";
 				const description = a.description ? ` · ${a.description}` : "";
+				const invalid = a.configurationError ? ` · INVALID: ${a.configurationError}` : "";
 				const colorCode = AGENT_NAME_PALETTE[agentBgIndex(a.name)];
 				const coloredName = `\x1b[38;5;${colorCode}m${a.name}\x1b[39m`;
 				return truncateText(
-					`${coloredName} [${a.source}] · model: ${model} · thinking: ${thinking} · tools: ${tools}${description}`,
+					`${coloredName} [${a.source}] · model: ${model} · thinking: ${thinking} · tools: ${tools}${description}${invalid}`,
 					220,
 				);
 			});

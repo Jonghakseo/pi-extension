@@ -118,6 +118,51 @@ describe("runClaudeAgentViaSdk", () => {
 		expect(lines[2]).toMatchObject({ type: "subagent_done", exitCode: 0, runtime: "claude" });
 	});
 
+	it("passes explicit empty tool lists to the SDK", async () => {
+		queryMock.mockReturnValue(
+			makeQuery([
+				{
+					type: "result",
+					session_id: "sess-no-tools",
+					uuid: "result-no-tools",
+					is_error: false,
+					stop_reason: "end_turn",
+					result: "done",
+					usage: { input_tokens: 1, output_tokens: 1 },
+					num_turns: 1,
+				},
+			]),
+		);
+
+		const { runClaudeAgentViaSdk } = await import("./claude-sdk-runner.ts");
+		const result = await runClaudeAgentViaSdk(
+			"/tmp/project",
+			{
+				name: "no-tools",
+				description: "No tools",
+				tools: [],
+				toolsConfigured: true,
+				model: "claude-sonnet-4-6",
+				systemPrompt: "Think only.",
+				source: "project",
+				filePath: "/tmp/no-tools.md",
+				runtime: "claude",
+			},
+			"think",
+			undefined,
+			undefined,
+			undefined,
+			(results) => ({ mode: "single", inheritMainContext: false, projectAgentsDir: null, results }),
+		);
+
+		expect(result.exitCode).toBe(0);
+		expect(queryMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				options: expect.objectContaining({ tools: [], allowedTools: [] }),
+			}),
+		);
+	});
+
 	it("returns an error result for unsupported Claude runtime tools", async () => {
 		const { runClaudeAgentViaSdk } = await import("./claude-sdk-runner.ts");
 		const result = await runClaudeAgentViaSdk(

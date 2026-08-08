@@ -221,6 +221,74 @@ describe("runtime frontmatter parsing", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
+	it("preserves explicit empty Claude tools as a no-tools policy", () => {
+		const tmpDir = createTempAgentDir();
+		const agentsDir = path.join(tmpDir, ".claude", "agents");
+		fs.mkdirSync(agentsDir, { recursive: true });
+		writeAgentFile(
+			agentsDir,
+			"no-tools.md",
+			["---", "name: no-tools", "description: No tools", "tools: []", "---", "Think only."].join("\n"),
+		);
+
+		const agent = discoverAgents(tmpDir).agents.find((candidate) => candidate.name === "no-tools");
+		expect(agent?.toolsConfigured).toBe(true);
+		expect(agent?.tools).toEqual([]);
+		expect(agent?.configurationError).toBeUndefined();
+
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("keeps unsupported Claude tool definitions visible but invalid", () => {
+		const tmpDir = createTempAgentDir();
+		const agentsDir = path.join(tmpDir, ".claude", "agents");
+		fs.mkdirSync(agentsDir, { recursive: true });
+		writeAgentFile(
+			agentsDir,
+			"unsafe.md",
+			["---", "name: unsafe", "description: Invalid tools", "tools: Read, WebSearch", "---", "Work."].join("\n"),
+		);
+
+		const agent = discoverAgents(tmpDir).agents.find((candidate) => candidate.name === "unsafe");
+		expect(agent).toBeDefined();
+		expect(agent?.configurationError).toContain("WebSearch");
+		expect(agent?.tools).toBeUndefined();
+
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("lets an invalid higher-priority definition mask a valid user agent", () => {
+		const tmpDir = createTempAgentDir();
+		const customAgentDir = path.join(tmpDir, "user-config");
+		const userAgentsDir = path.join(customAgentDir, "agents");
+		const projectAgentsDir = path.join(tmpDir, ".claude", "agents");
+		fs.mkdirSync(userAgentsDir, { recursive: true });
+		fs.mkdirSync(projectAgentsDir, { recursive: true });
+		writeAgentFile(
+			userAgentsDir,
+			"shared.md",
+			["---", "name: shared", "description: Valid user agent", "tools: read", "---", "User."].join("\n"),
+		);
+		writeAgentFile(
+			projectAgentsDir,
+			"shared.md",
+			["---", "name: shared", "description: Invalid project agent", "tools: WebSearch", "---", "Project."].join("\n"),
+		);
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = customAgentDir;
+
+		try {
+			const matches = discoverAgents(tmpDir).agents.filter((agent) => agent.name === "shared");
+			expect(matches).toHaveLength(1);
+			expect(matches[0]?.description).toBe("Invalid project agent");
+			expect(matches[0]?.configurationError).toContain("WebSearch");
+		} finally {
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+
 	it("respects explicit runtime: claude for project .claude agents", () => {
 		const tmpDir = createTempAgentDir();
 		const agentsDir = path.join(tmpDir, ".claude", "agents");

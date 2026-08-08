@@ -225,6 +225,19 @@ export async function runSingleAgent(
 		};
 	}
 
+	if (agent.configurationError) {
+		return {
+			agent: agent.name,
+			agentSource: agent.source,
+			task,
+			exitCode: 1,
+			messages: [],
+			stderr: `Invalid agent configuration: ${agent.configurationError}`,
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+			step,
+		};
+	}
+
 	if (agent.runtime === "claude") {
 		if (resolveClaudeRuntimeMode(defaultCwd) === "sdk") {
 			const { runClaudeAgentViaSdk } = await import("./claude-sdk-runner.js");
@@ -364,6 +377,7 @@ async function runClaudeAgent(
 		const args = buildClaudeArgs({
 			prompt: normalizeTaskForSubagentPrompt(task),
 			tools: agent.tools ?? [],
+			toolsConfigured: agent.toolsConfigured ?? agent.tools !== undefined,
 			model: agent.model,
 			thinking: agent.thinking,
 			resumeSessionId: resumeId,
@@ -640,7 +654,8 @@ async function runPiAgent(
 	else args.push("--no-session");
 	if (agent.model) args.push("--model", agent.model);
 	if (agent.thinking) args.push("--thinking", agent.thinking);
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+	if ((agent.toolsConfigured ?? agent.tools !== undefined) && agent.tools?.length === 0) args.push("--no-tools");
+	else if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;

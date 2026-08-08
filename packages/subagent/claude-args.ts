@@ -5,6 +5,7 @@ import { mapPiToolsToClaude } from "./utils/agent-utils.js";
 export interface ClaudeArgsConfig {
 	prompt: string;
 	tools: string[];
+	toolsConfigured?: boolean;
 	model?: string;
 	thinking?: string;
 	resumeSessionId?: string;
@@ -63,7 +64,7 @@ export function buildClaudeArgs(config: ClaudeArgsConfig): string[] {
 
 	const claudeTools = mapPiToolsToClaude(config.tools);
 
-	if (claudeTools.length > 0) {
+	if (config.toolsConfigured || claudeTools.length > 0) {
 		args.push("--tools", claudeTools.join(","));
 		args.push("--allowedTools", claudeTools.join(","));
 	}
