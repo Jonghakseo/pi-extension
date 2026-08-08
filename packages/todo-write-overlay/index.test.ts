@@ -5,6 +5,7 @@ import {
 	applyTodoWrite,
 	buildPostCompactionTodoReminder,
 	getTodoOverlayVisibility,
+	normalizeTodoWriteParams,
 	parseTodoOverlayCommand,
 	renderTodoOverlayPlainLines,
 	renderTodoWriteSummary,
@@ -13,6 +14,35 @@ import {
 } from "./index.ts";
 
 describe("todo-write-overlay helpers", () => {
+	it("infers patch when op is omitted but patch fields are present", () => {
+		expect(normalizeTodoWriteParams({ set: [{ id: "task-1", status: "completed" }] })).toEqual({
+			op: "patch",
+			set: [{ id: "task-1", status: "completed" }],
+			add: undefined,
+			remove: undefined,
+		});
+	});
+
+	it("requires explicit todos for replace and explicit todos: [] for clearing", () => {
+		expect(() => normalizeTodoWriteParams({})).toThrow("requires an explicit");
+		expect(() => normalizeTodoWriteParams({ op: "replace" })).toThrow("requires an explicit");
+		expect(normalizeTodoWriteParams({ todos: [] })).toEqual({ op: "replace", todos: [] });
+	});
+
+	it("rejects mixed replace and patch fields before state changes", () => {
+		expect(() => normalizeTodoWriteParams({ todos: [], set: [] })).toThrow("cannot include");
+		expect(() => normalizeTodoWriteParams({ op: "patch", todos: [] })).toThrow('cannot include "todos"');
+	});
+
+	it("preserves explicit empty patches as no-ops", () => {
+		expect(normalizeTodoWriteParams({ op: "patch" })).toEqual({
+			op: "patch",
+			set: undefined,
+			add: undefined,
+			remove: undefined,
+		});
+	});
+
 	it("parses todo overlay command actions", () => {
 		expect(parseTodoOverlayCommand("")).toBe("status");
 		expect(parseTodoOverlayCommand(" show ")).toBe("show");

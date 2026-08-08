@@ -65,6 +65,28 @@ const TodoWriteParams = Type.Object(
 
 type InputTaskType = Static<typeof InputTask>;
 type PatchSetTaskType = Static<typeof PatchSetTask>;
+type TodoWriteParamsType = Static<typeof TodoWriteParams>;
+
+type NormalizedTodoWriteCommand =
+	| { op: "replace"; todos: InputTaskType[] }
+	| { op: "patch"; set?: PatchSetTaskType[]; add?: InputTaskType[]; remove?: string[] };
+
+export function normalizeTodoWriteParams(params: TodoWriteParamsType): NormalizedTodoWriteCommand {
+	const hasOwn = (key: keyof TodoWriteParamsType): boolean => Object.hasOwn(params, key);
+	const hasTodos = hasOwn("todos");
+	const patchFields = (["set", "add", "remove"] as const).filter(hasOwn);
+	const hasPatchFields = patchFields.length > 0;
+	const op = params.op ?? (hasPatchFields ? "patch" : "replace");
+
+	if (op === "replace") {
+		if (!hasTodos) throw new Error('todo_write replace requires an explicit "todos" array. Use todos: [] to clear.');
+		if (hasPatchFields) throw new Error("todo_write replace cannot include set, add, or remove fields.");
+		return { op, todos: params.todos ?? [] };
+	}
+
+	if (hasTodos) throw new Error('todo_write patch cannot include "todos".');
+	return { op, set: params.set, add: params.add, remove: params.remove };
+}
 
 const todoStateStore = new Map<string, TodoState>();
 const todoOverlayStore = new Map<string, TodoOverlayRecord>();
@@ -652,6 +674,7 @@ export default function todoWriteOverlayExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "todo_write",
+		executionMode: "sequential",
 		label: "할 일 관리",
 		description: `현재 코딩 세션의 구조화된 작업 목록을 만들고 관리합니다. 진행 상황을 추적하고, 복잡한 요청을 단계로 나누고, 사용자에게 현재 무엇을 하고 있는지 우측 상단 오버레이로 보여줄 때 사용하세요.
 
@@ -690,19 +713,19 @@ export default function todoWriteOverlayExtension(pi: ExtensionAPI): void {
 - notes: (선택) 추가 맥락`,
 		parameters: TodoWriteParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const op = params.op ?? "replace";
+			const command = normalizeTodoWriteParams(params);
 			let state: TodoState;
 			let warnings: string[] = [];
-			if (op === "patch") {
+			if (command.op === "patch") {
 				const result = applyTodoPatch(readTodoWriteState(ctx), {
-					set: params.set,
-					add: params.add,
-					remove: params.remove,
+					set: command.set,
+					add: command.add,
+					remove: command.remove,
 				});
 				state = result.state;
 				warnings = result.warnings;
 			} else {
-				state = applyTodoWrite(params.todos ?? []).state;
+				state = applyTodoWrite(command.todos).state;
 			}
 			const summary = renderTodoWriteSummary(state);
 			writeTodoWriteState(ctx, state);
