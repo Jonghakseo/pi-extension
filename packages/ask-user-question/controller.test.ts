@@ -116,6 +116,12 @@ describe("ask-user-question/controller", () => {
 			answers: [{ id: "text", type: "text", value: "from submit", wasCustom: true }],
 			cancelled: false,
 		});
+
+		const legacyEditor = createController([{ id: "text", type: "text", prompt: "Explain" }]);
+		(legacyEditor.editor as EditorAdapter).getExpandedText = undefined;
+		legacyEditor.editor.text = "legacy text";
+		legacyEditor.controller.handleInput("\r");
+		expect(legacyEditor.done.mock.calls[0]?.[0].answers[0]).toMatchObject({ value: "legacy text" });
 	});
 
 	it("saves expanded paste content for text and Other answers", () => {
