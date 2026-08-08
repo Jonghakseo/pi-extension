@@ -100,6 +100,20 @@ function makeProcess(lines: string[], trailingNewline = true): MockProc {
 	return proc;
 }
 
+function makeSignaledProcess(lines: string[], signal: NodeJS.Signals): MockProc {
+	const proc = new EventEmitter() as MockProc;
+	proc.stdout = new EventEmitter();
+	proc.stderr = new EventEmitter();
+	proc.exitCode = null;
+	proc.kill = vi.fn(() => true);
+	queueMicrotask(() => {
+		proc.stdout.emit("data", Buffer.from(`${lines.join("\n")}\n`, "utf8"));
+		proc.emit("exit", null, signal);
+		proc.emit("close", null, signal);
+	});
+	return proc;
+}
+
 function makeAbortableProcess(lines: string[]): MockProc {
 	const proc = new EventEmitter() as MockProc;
 	proc.stdout = new EventEmitter();
@@ -136,6 +150,39 @@ describe("runSingleAgent Claude session contract", () => {
 	afterEach(() => {
 		vi.clearAllMocks();
 		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("treats an unexpected signal termination as a failed process", async () => {
+		spawnMock.mockImplementationOnce(() =>
+			makeSignaledProcess(
+				[
+					JSON.stringify({
+						type: "assistant",
+						message: {
+							role: "assistant",
+							model: "claude-sonnet-4-6",
+							content: [{ type: "text", text: "Starting edit" }],
+						},
+					}),
+				],
+				"SIGSEGV",
+			),
+		);
+
+		const result = await runSingleAgent(
+			"/tmp/project",
+			[makeClaudeAgent()],
+			"claude-worker",
+			"test task",
+			undefined,
+			undefined,
+			undefined,
+			makeDetails,
+			{ sessionFile: sidecarFile, sidecarSessionFile: sidecarFile },
+		);
+
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("process terminated by signal SIGSEGV");
 	});
 
 	it("continues a Claude run with separate resumeSessionId and sidecarSessionFile", async () => {

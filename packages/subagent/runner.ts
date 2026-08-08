@@ -82,6 +82,12 @@ function appendStderrDiagnostic(result: SingleResult, message: string): void {
 	result.stderr = result.stderr ? `${result.stderr.trimEnd()}\n${line}\n` : `${line}\n`;
 }
 
+function normalizeChildExitCode(code: number | null, signal: NodeJS.Signals | null, fallbackCode = 0): number {
+	if (code !== null) return code;
+	if (signal !== null) return 1;
+	return fallbackCode;
+}
+
 /**
  * Prevent tasks starting with `/` from being treated as slash commands
  * inside the spawned pi process.
@@ -559,13 +565,16 @@ async function runClaudeAgent(
 
 			proc.on("exit", (code, terminationSignal) => {
 				procExited = true;
-				lastExitCode = code ?? 0;
+				lastExitCode = normalizeChildExitCode(code, terminationSignal, lastExitCode);
 				lastProcessSignal = terminationSignal;
 				diagnose({ event: "exit", childPid: proc.pid, code, signal: terminationSignal });
 				if (streamState.resultReceived) {
 					settleReason = "exit_after_result";
 					resolveOnce(0);
 					return;
+				}
+				if (terminationSignal && !settled && !wasAborted) {
+					stderrBuf += `[runner] process terminated by signal ${terminationSignal}\n`;
 				}
 				exitFallbackTimer = setTimeout(() => {
 					settleReason = "exit_fallback_timeout";
@@ -579,7 +588,7 @@ async function runClaudeAgent(
 				diagnose({ event: "close", childPid: proc.pid, code, signal: terminationSignal });
 				if (!settled) {
 					settleReason = "close";
-					resolveOnce(streamState.resultReceived ? 0 : (code ?? lastExitCode ?? 0));
+					resolveOnce(streamState.resultReceived ? 0 : normalizeChildExitCode(code, lastProcessSignal, lastExitCode));
 				}
 			});
 
@@ -1081,9 +1090,12 @@ async function runPiAgent(
 
 			proc.on("exit", (code, terminationSignal) => {
 				procExited = true;
-				lastExitCode = code ?? 0;
+				lastExitCode = normalizeChildExitCode(code, terminationSignal, lastExitCode);
 				lastProcessSignal = terminationSignal;
 				diagnose({ event: "exit", childPid: proc.pid, code, signal: terminationSignal });
+				if (terminationSignal && !settled && !wasAborted) {
+					appendStderrDiagnostic(currentResult, `process terminated by signal ${terminationSignal}`);
+				}
 				// In rare cases stdout/stderr pipes may stay open after process exit.
 				// Use a short fallback so runs cannot stay "running" forever.
 				exitFallbackTimer = setTimeout(() => {
@@ -1097,7 +1109,7 @@ async function runPiAgent(
 				lastProcessSignal = terminationSignal ?? lastProcessSignal;
 				diagnose({ event: "close", childPid: proc.pid, code, signal: terminationSignal });
 				settleReason = "close";
-				resolveOnce(code ?? lastExitCode ?? 0);
+				resolveOnce(normalizeChildExitCode(code, lastProcessSignal, lastExitCode));
 			});
 
 			proc.on("error", (error) => {

@@ -644,7 +644,7 @@ describe("runSingleAgent pi terminal message fallback", () => {
 		expect(persisted).toContain('"type":"subagent_done"');
 	});
 
-	it("records the child signal on exit and close without adding it to the result", async () => {
+	it("records an unexpected child signal and returns a failed process result", async () => {
 		const { runSingleAgent } = await import("./runner.ts");
 		const diagnostics: RunnerDiagnosticEvent[] = [];
 		spawnMock.mockImplementationOnce(() => {
@@ -703,8 +703,9 @@ describe("runSingleAgent pi terminal message fallback", () => {
 				stopReason: "toolUse",
 			}),
 		);
+		expect(result.exitCode).toBe(1);
 		expect(result).not.toHaveProperty("signal");
-		expect(result.stderr).not.toContain("SIGTERM");
+		expect(result.stderr).toContain("process terminated by signal SIGTERM");
 	});
 
 	it("writes aborted marker with non-zero exitCode on signal abort", async () => {

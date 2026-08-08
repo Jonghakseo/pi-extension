@@ -34,11 +34,19 @@ describe("diagnoseResultFailure", () => {
 		expect(diagnosis.reason).toContain("settleReason=close");
 	});
 
-	it("fails with explicit exit code reason", () => {
-		const result = makeResult({ exitCode: 2 });
+	it("fails with explicit exit code reason and includes the underlying diagnostic", () => {
+		const result = makeResult({ exitCode: 2, stderr: "process terminated by signal SIGSEGV" });
 		const diagnosis = diagnoseResultFailure(result);
 		expect(diagnosis.failed).toBe(true);
 		expect(diagnosis.reason).toContain("code 2");
+		expect(diagnosis.reason).toContain("process terminated by signal SIGSEGV");
+	});
+
+	it("prefers an explicit error message over stderr for exit failures", () => {
+		const result = makeResult({ exitCode: 1, errorMessage: "provider stream crashed", stderr: "fallback stderr" });
+		const diagnosis = diagnoseResultFailure(result);
+		expect(diagnosis.reason).toContain("provider stream crashed");
+		expect(diagnosis.reason).not.toContain("fallback stderr");
 	});
 
 	it("fails when stopReason is error", () => {

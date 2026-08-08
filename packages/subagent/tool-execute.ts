@@ -313,8 +313,15 @@ export function diagnoseResultFailure(result: SingleResult): ResultFailureDiagno
 			};
 		}
 	}
-	if (result.exitCode !== 0)
-		return { failed: true, errorClass, reason: `Subagent process exited with code ${result.exitCode}.` };
+	if (result.exitCode !== 0) {
+		const detail = (result.errorMessage || result.stderr || "").trim();
+		const detailPreview = detail ? truncateLines(detail, 4).slice(0, STATUS_OUTPUT_PREVIEW_MAX_CHARS).trimEnd() : "";
+		return {
+			failed: true,
+			errorClass,
+			reason: `Subagent process exited with code ${result.exitCode}.${detailPreview ? ` Cause: ${detailPreview}` : ""}`,
+		};
+	}
 	if (result.stopReason === "error")
 		return { failed: true, errorClass, reason: result.errorMessage || "Subagent reported stopReason=error." };
 	if (result.stopReason === "aborted")
