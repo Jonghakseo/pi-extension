@@ -130,15 +130,14 @@ describe("codex fast mode", () => {
 		);
 	});
 
-	it.each(SUPPORTED_MODEL_IDS)(
-		"keeps %s registered on the openai-codex provider with openai-codex-responses api",
-		(modelId) => {
-			const model = getModel("openai-codex", modelId);
-			expect(model.provider).toBe("openai-codex");
-			expect(model.id).toBe(modelId);
-			expect(model.api).toBe("openai-codex-responses");
-		},
-	);
+	it.each(
+		SUPPORTED_MODEL_IDS,
+	)("keeps %s registered on the openai-codex provider with openai-codex-responses api", (modelId) => {
+		const model = getModel("openai-codex", modelId);
+		expect(model.provider).toBe("openai-codex");
+		expect(model.id).toBe(modelId);
+		expect(model.api).toBe("openai-codex-responses");
+	});
 
 	it("shows the enabled status message when persisted state is on", async () => {
 		vi.mocked(readFileSync).mockReturnValue('{"enabled":true}');
