@@ -65,6 +65,8 @@ export interface RenderTheme {
 export interface EditorAdapter {
 	onSubmit?: (value: string) => void;
 	getText(): string;
+	/** Returns original pasted content when the editor has compacted it into paste markers. */
+	getExpandedText?(): string;
 	setText(text: string): void;
 	handleInput(data: string): void;
 	render(width: number): string[];

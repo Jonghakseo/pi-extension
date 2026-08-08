@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { createAnswerState, normalizeQuestions } from "./state.ts";
 import type { RenderFormInput, RenderTheme } from "./types.ts";
-import { renderFooter, renderForm, renderQuestion, renderSubmitTab, renderTabBar } from "./view.ts";
+import {
+	formatAnswerPreview,
+	renderFooter,
+	renderForm,
+	renderQuestion,
+	renderSubmitTab,
+	renderTabBar,
+} from "./view.ts";
 
 const theme: RenderTheme = {
 	fg: (_color, text) => text,
@@ -49,6 +56,14 @@ function createInput(overrides: Partial<RenderFormInput> = {}): RenderFormInput 
 }
 
 describe("ask-user-question/view", () => {
+	it("bounds long answer previews without changing short answers", () => {
+		expect(formatAnswerPreview("short")).toBe("short");
+		const long = "x".repeat(1_001);
+		const preview = formatAnswerPreview(long);
+		expect(preview.length).toBeLessThan(long.length);
+		expect(preview).toContain("1001 chars");
+	});
+
 	it("renders the review tab with missing required answers", () => {
 		const input = createInput({ currentTab: 2 });
 		const output = renderForm(input).join("\n");

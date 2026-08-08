@@ -4,6 +4,13 @@ import { SYM } from "./constants.ts";
 import { allRequiredAnswered, isAnswered } from "./state.ts";
 import type { RenderFormInput } from "./types.ts";
 
+const ANSWER_PREVIEW_MAX_CHARS = 400;
+
+export function formatAnswerPreview(value: string): string {
+	if (value.length <= ANSWER_PREVIEW_MAX_CHARS) return value;
+	return `${value.slice(0, ANSWER_PREVIEW_MAX_CHARS)}… (${value.length} chars)`;
+}
+
 function createLineHelpers(width: number, theme: RenderFormInput["theme"]) {
 	const lines: string[] = [];
 	const maxWidth = Math.min(width, 120);
@@ -23,7 +30,7 @@ export function renderSubmitTab(input: RenderFormInput, add: (text: string) => v
 			const answer = answerState.radioAnswers.get(question.id);
 			if (answer) {
 				const prefix = answer.wasCustom ? theme.fg("dim", "(직접 입력) ") : "";
-				add(` ${label} ${prefix}${answer.label}`);
+				add(` ${label} ${prefix}${formatAnswerPreview(answer.label)}`);
 			} else {
 				add(` ${label} ${theme.fg("warning", "(미응답)")}`);
 			}
@@ -34,14 +41,14 @@ export function renderSubmitTab(input: RenderFormInput, add: (text: string) => v
 			const selected = answerState.checkAnswers.get(question.id) ?? new Set<string>();
 			const custom = answerState.checkCustom.get(question.id)?.trim();
 			const values = [...selected];
-			if (custom) values.push(`${theme.fg("dim", "(직접 입력)")} ${custom}`);
+			if (custom) values.push(`${theme.fg("dim", "(직접 입력)")} ${formatAnswerPreview(custom)}`);
 			add(` ${label} ${values.length ? values.join(", ") : theme.fg("warning", "(미응답)")}`);
 			continue;
 		}
 
 		const answer = answerState.textAnswers.get(question.id)?.trim();
 		if (answer) {
-			add(` ${label} ${answer}`);
+			add(` ${label} ${formatAnswerPreview(answer)}`);
 		} else {
 			add(` ${label} ${theme.fg("warning", "(미응답)")}`);
 		}

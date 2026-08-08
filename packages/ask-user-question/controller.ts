@@ -17,6 +17,10 @@ export interface FormController {
 	};
 }
 
+function getAnswerText(editor: EditorAdapter): string {
+	return editor.getExpandedText?.() ?? editor.getText();
+}
+
 interface CreateFormControllerInput {
 	title?: string;
 	description?: string;
@@ -55,11 +59,11 @@ export function createFormController(input: CreateFormControllerInput): FormCont
 	function saveCurrentTextQuestion(): void {
 		const question = getCurrentQuestion();
 		if (question?.type !== "text") return;
-		saveTextAnswer(answerState, question.id, editor.getText());
+		saveTextAnswer(answerState, question.id, getAnswerText(editor));
 	}
 
 	function saveOtherModeText(questionId: string): void {
-		saveOtherAnswer(answerState, questions, questionId, editor.getText());
+		saveOtherAnswer(answerState, questions, questionId, getAnswerText(editor));
 		otherMode = false;
 		otherQuestionId = null;
 		editor.setText("");

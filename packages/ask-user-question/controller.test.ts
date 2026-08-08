@@ -6,6 +6,7 @@ import type { EditorAdapter, FormResult, RenderTheme } from "./types.ts";
 
 class FakeEditor implements EditorAdapter {
 	text = "";
+	expandedText: string | undefined;
 	onSubmit?: (value: string) => void;
 	isShowingAutocomplete?: () => boolean;
 	handledInputs: string[] = [];
@@ -14,8 +15,13 @@ class FakeEditor implements EditorAdapter {
 		return this.text;
 	}
 
+	getExpandedText(): string {
+		return this.expandedText ?? this.text;
+	}
+
 	setText(text: string): void {
 		this.text = text;
+		this.expandedText = undefined;
 	}
 
 	handleInput(data: string): void {
@@ -110,6 +116,26 @@ describe("ask-user-question/controller", () => {
 			answers: [{ id: "text", type: "text", value: "from submit", wasCustom: true }],
 			cancelled: false,
 		});
+	});
+
+	it("saves expanded paste content for text and Other answers", () => {
+		const expandedText = "x".repeat(1_001);
+		const text = createController([{ id: "text", type: "text", prompt: "Explain" }]);
+		text.editor.text = "[paste #1 1001 chars]";
+		text.editor.expandedText = expandedText;
+		text.controller.handleInput("\r");
+		expect(text.done.mock.calls[0]?.[0].answers[0]).toMatchObject({ value: expandedText });
+
+		const other = createController([
+			{ id: "radio", type: "radio", prompt: "Pick one", options: [{ value: "a", label: "Alpha" }] },
+			{ id: "text", type: "text", prompt: "Explain" },
+		]);
+		other.controller.handleInput("\u001b[B");
+		other.controller.handleInput("\r");
+		other.editor.text = "[paste #1 1001 chars]";
+		other.editor.expandedText = expandedText;
+		other.controller.handleInput("\r");
+		expect(other.answerState.radioAnswers.get("radio")).toMatchObject({ value: expandedText, label: expandedText });
 	});
 
 	it("handles radio other-mode editing, tab navigation, and cancellation", () => {

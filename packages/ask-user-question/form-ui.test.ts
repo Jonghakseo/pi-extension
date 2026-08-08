@@ -92,6 +92,28 @@ describe("ask-user-question/form-ui", () => {
 		});
 	});
 
+	it("preserves large bracketed paste content through the real Editor", async () => {
+		const questions = normalizeQuestions([{ id: "text", type: "text", prompt: "Explain" }]);
+		const pasted = "한글-log-line\n".repeat(100);
+		let captured: FormResult | undefined;
+		const done = (result: unknown) => {
+			captured = result as FormResult;
+		};
+		const custom = vi.fn(async (factory: Parameters<NonNullable<ExtensionContext["ui"]>["custom"]>[0]) => {
+			const component = (await factory({ requestRender: vi.fn() } as never, theme as never, {} as never, done)) as {
+				handleInput(data: string): void;
+			};
+			component.handleInput(`\u001b[200~${pasted}\u001b[201~`);
+			component.handleInput("\r");
+			if (!captured) throw new Error("result was not captured");
+			return captured;
+		});
+		const ctx = { hasUI: true, cwd: process.cwd(), ui: { custom } } as unknown as ExtensionContext;
+
+		const result = await runAskUserQuestionForm(ctx, {}, questions);
+		expect(result.answers).toEqual([{ id: "text", type: "text", value: pasted.trim(), wasCustom: true }]);
+	});
+
 	it("wires the custom UI factory to the controller", async () => {
 		const questions = normalizeQuestions([{ id: "text", type: "text", prompt: "Explain", default: "seed" }]);
 		let captured: FormResult | undefined;
