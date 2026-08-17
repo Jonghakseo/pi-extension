@@ -198,9 +198,9 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 
 		expect(result.content[0]?.text).toContain("Started async subagent run #1");
 		await waitForAssertion(() => {
-			expect(sent).toHaveLength(2);
+			expect(sent).toHaveLength(1);
 		});
-		expect(sent[1]?.message.content).toContain("ASYNC_DONE");
+		expect(sent[0]?.message.content).toContain("ASYNC_DONE");
 	});
 
 	it("emits only grouped batch follow-up and no per-member follow-ups", async () => {

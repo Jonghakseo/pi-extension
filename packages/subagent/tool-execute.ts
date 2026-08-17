@@ -1473,7 +1473,6 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				existingRunState: continueFromRun,
 			});
 			const launchSummary = toLaunchSummary(runState, continueFromRun ? "continue" : "run");
-			const startedState = continueFromRun ? "resumed" : "started";
 
 			if (!shouldRunAsync) {
 				let finalized: FinalizedRun;
@@ -1506,7 +1505,6 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				};
 			}
 
-			pi.sendMessage(buildRunStartMessage(runState, startedState), { deliverAs: "followUp", triggerTurn: false });
 			ctx.ui?.notify?.(
 				`${continueFromRun ? `Resumed subagent #${runState.id}` : `Started subagent #${runState.id}`}: ${resolvedAgent}`,
 				"info",
