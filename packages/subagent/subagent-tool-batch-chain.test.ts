@@ -137,7 +137,7 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 		vi.clearAllMocks();
 	});
 
-	it("propagates parent tool abort signal to headless synchronous child run", async () => {
+	it("reports a parent-aborted headless synchronous child as aborted", async () => {
 		setStdioTty(false);
 		const parentAbortController = new AbortController();
 		mockRunSingleAgent.mockImplementation(
@@ -164,8 +164,8 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 			ctx,
 		);
 
-		expect(result.content[0]?.text).toContain("[subagent:worker#1] completed");
-		expect(result.content[0]?.text).toContain("HEADLESS_DONE");
+		expect(result.content[0]?.text).toContain("[subagent:worker#1] aborted");
+		expect(result.content[0]?.text).not.toContain("HEADLESS_DONE");
 		expect(sent).toHaveLength(0);
 	});
 
@@ -366,6 +366,268 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 		expect(store.commandRuns.get(1)?.abortController).toBeUndefined();
 	});
 
+	it("separates an aborted async batch member from failures", async () => {
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			if (agentName === "worker") throw new Error("Subagent was aborted");
+			return makeResult(agentName, task, "BATCH_DONE");
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+
+		const launch = await execute(
+			"call-batch-abort-rejection",
+			{
+				command: 'subagent batch --main --agent worker --task "cancel me" --agent reviewer --task "finish me"',
+			},
+			undefined,
+			undefined,
+			createCtx(),
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+		expect(sent[0]?.message.content).toContain(`[subagent-batch#${batchId}] aborted`);
+		expect(sent[0]?.message.content).toContain("Runs: #1 aborted, #2 done");
+		expect(sent[0]?.message.content).toContain("Outcomes: 1 aborted");
+		expect(sent[0]?.message.content).not.toContain("failed");
+		expect(sent[0]?.message.details).toMatchObject({ status: "aborted" });
+		expect(store.commandRuns.get(1)).toMatchObject({ status: "error", errorClass: "aborted" });
+		expect(store.finishedGroups.get(batchId)).toMatchObject({
+			terminalStatus: "aborted",
+			failed: 0,
+			aborted: 1,
+		});
+	});
+
+	it("reports failed and aborted async batch members separately", async () => {
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			if (task.includes("abort member")) throw new Error("Subagent was aborted");
+			if (task.includes("fail member")) {
+				return makeResult(agentName, task, "", { exitCode: 1, stopReason: "error", errorMessage: "provider failed" });
+			}
+			return makeResult(agentName, task, "BATCH_DONE");
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+
+		const launch = await execute(
+			"call-batch-mixed-terminal",
+			{
+				command:
+					'subagent batch --main --agent worker --task "abort member" --agent reviewer --task "fail member" --agent worker --task "done member"',
+			},
+			undefined,
+			undefined,
+			createCtx(),
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+		expect(sent[0]?.message.content).toContain(`[subagent-batch#${batchId}] error`);
+		expect(sent[0]?.message.content).toContain("Runs: #1 aborted, #2 error, #3 done");
+		expect(sent[0]?.message.content).toContain("Outcomes: 1 failed, 1 aborted");
+		expect(store.finishedGroups.get(batchId)).toMatchObject({
+			terminalStatus: "error",
+			failed: 1,
+			aborted: 1,
+		});
+	});
+
+	it("separates aborted results in a synchronous batch", async () => {
+		setStdioTty(false);
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			if (agentName === "worker") {
+				return makeResult(agentName, task, "", { exitCode: 1, stopReason: "aborted" });
+			}
+			return makeResult(agentName, task, "BATCH_DONE");
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const execute = createSubagentToolExecute(createPi([]) as never, store);
+
+		const result = await execute(
+			"call-sync-batch-abort",
+			{ command: 'subagent batch --main --agent worker --task "cancel me" --agent reviewer --task "finish me"' },
+			undefined,
+			undefined,
+			{ ...createCtx(), hasUI: false },
+		);
+		const batchId = result.details.launches?.[0]?.batchId as string;
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0]?.text).toContain(`[subagent-batch#${batchId}] aborted`);
+		expect(store.finishedGroups.get(batchId)).toMatchObject({ failed: 0, aborted: 1 });
+	});
+
+	it("marks an aborted async chain step and group separately from failure", async () => {
+		mockRunSingleAgent.mockRejectedValue(new Error("Subagent was aborted"));
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+
+		const launch = await execute(
+			"call-chain-abort-rejection",
+			{ command: 'subagent chain --main --agent worker --task "cancel me" --agent reviewer --task "never run"' },
+			undefined,
+			undefined,
+			createCtx(),
+		);
+		const pipelineId = /Started async subagent chain (p_[^ ]+)/.exec(launch.content[0]?.text ?? "")?.[1] as string;
+
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+		expect(mockRunSingleAgent).toHaveBeenCalledTimes(1);
+		expect(sent[0]?.message.content).toContain(`[subagent-chain#${pipelineId}] aborted`);
+		expect(sent[0]?.message.content).toContain("Outcomes: 1 aborted");
+		expect(sent[0]?.message.content).toContain("#1 worker · aborted");
+		expect(sent[0]?.message.content).not.toContain("failed");
+		expect(sent[0]?.message.details).toMatchObject({ status: "aborted" });
+		expect(store.finishedGroups.get(pipelineId)).toMatchObject({
+			terminalStatus: "aborted",
+			failed: 0,
+			aborted: 1,
+		});
+	});
+
+	it("marks an aborted synchronous chain separately from failure", async () => {
+		setStdioTty(false);
+		mockRunSingleAgent.mockResolvedValue(makeResult("worker", "cancel me", "", { exitCode: 1, stopReason: "aborted" }));
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const execute = createSubagentToolExecute(createPi([]) as never, store);
+
+		const result = await execute(
+			"call-sync-chain-abort",
+			{ command: 'subagent chain --main --agent worker --task "cancel me" --agent reviewer --task "never run"' },
+			undefined,
+			undefined,
+			{ ...createCtx(), hasUI: false },
+		);
+		const pipelineId = result.details.launches?.[0]?.pipelineId as string;
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0]?.text).toContain(`[subagent-chain#${pipelineId}] aborted`);
+		expect(result.content[0]?.text).toContain("#1 worker · aborted");
+		expect(mockRunSingleAgent).toHaveBeenCalledTimes(1);
+		expect(store.finishedGroups.get(pipelineId)).toMatchObject({ failed: 0, aborted: 1 });
+	});
+
+	it("keeps a queued batch member aborted when removed before invocation starts", async () => {
+		const queuedJobs: Array<() => Promise<unknown>> = [];
+		mockEnqueueSubagentInvocation.mockImplementation(
+			(fn: () => Promise<unknown>) =>
+				new Promise((resolve, reject) => {
+					queuedJobs.push(async () => {
+						try {
+							const value = await fn();
+							resolve(value);
+							return value;
+						} catch (error: unknown) {
+							reject(error);
+							throw error;
+						}
+					});
+				}),
+		);
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			return makeResult(agentName, task, "BATCH_DONE");
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-queued-batch-remove",
+			{
+				command: 'subagent batch --main --agent worker --task "remove queued" --agent reviewer --task "finish queued"',
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+		expect(queuedJobs).toHaveLength(2);
+
+		const removed = await execute(
+			"call-remove-queued-member",
+			{ command: "subagent remove 1" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(removed.content[0]?.text).toContain("aborting in background");
+
+		await expect(queuedJobs[0]?.()).rejects.toThrow("Subagent was aborted");
+		await queuedJobs[1]?.();
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+
+		expect(mockRunSingleAgent).toHaveBeenCalledTimes(1);
+		await waitForAssertion(() => {
+			expect(store.commandRuns.get(1)).toMatchObject({ removed: true, abortPending: false, errorClass: "aborted" });
+		});
+		expect(sent[0]?.message.content).toContain(`[subagent-batch#${batchId}] aborted`);
+		expect(sent[0]?.message.content).toContain("Outcomes: 1 aborted");
+		expect(store.finishedGroups.get(batchId)).toMatchObject({ failed: 0, aborted: 1 });
+	});
+
+	it("reports aborted live batch members separately while other runs continue", async () => {
+		let releaseReviewer: () => void = () => {};
+		const reviewerGate = new Promise<void>((resolve) => {
+			releaseReviewer = resolve;
+		});
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			if (agentName === "worker") throw new Error("Subagent was aborted");
+			await reviewerGate;
+			return makeResult(agentName, task, "BATCH_DONE");
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-live-batch-aborted",
+			{ command: 'subagent batch --main --agent worker --task "cancel me" --agent reviewer --task "keep running"' },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+		await waitForAssertion(() => {
+			expect(store.batchGroups.get(batchId)?.abortedRunIds.size).toBe(1);
+		});
+
+		const status = await execute(
+			"call-live-batch-aborted-status",
+			{ command: `subagent status ${batchId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(status.content[0]?.text).toContain("1/2 finished, 1 aborted");
+		expect(status.content[0]?.text).not.toContain("failed");
+
+		releaseReviewer();
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+	});
+
 	it("reports live batch progress when queried by groupId", async () => {
 		let releaseRuns: () => void = () => {};
 		const gate = new Promise<void>((resolve) => {
@@ -517,6 +779,7 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 			finishedAt: Date.now() - FINISHED_GROUP_TTL_MS - 1,
 			total: 1,
 			failed: 0,
+			aborted: 0,
 			members: [{ summaryLine: "#1 [done] worker", output: "expired" }],
 		});
 		const sent: SentCall[] = [];

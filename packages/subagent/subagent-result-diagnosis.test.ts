@@ -96,11 +96,13 @@ describe("diagnoseResultFailure", () => {
 		expect(diagnoseResultFailure(result).errorClass).toBe("overloaded");
 	});
 
-	it("fails when stopReason is aborted", () => {
-		const result = makeResult({ stopReason: "aborted" });
+	it("prioritizes aborted stopReason over the non-zero exit code used by runners", () => {
+		const result = makeResult({ exitCode: 1, stopReason: "aborted" });
 		const diagnosis = diagnoseResultFailure(result);
 		expect(diagnosis.failed).toBe(true);
+		expect(diagnosis.errorClass).toBe("aborted");
 		expect(diagnosis.reason).toContain("aborted");
+		expect(diagnosis.reason).not.toContain("exited with code");
 	});
 
 	it("fails when messages exist but assistant text is empty", () => {

@@ -112,6 +112,7 @@ describe("subagent extension lifecycle", () => {
 			runIds: [run.id],
 			completedRunIds: new Set(),
 			failedRunIds: new Set(),
+			abortedRunIds: new Set(),
 			originSessionFile: "/tmp/main.jsonl",
 			createdAt: Date.now(),
 			pendingResults: new Map(),
@@ -144,7 +145,13 @@ describe("subagent extension lifecycle", () => {
 		expect(pi.sendMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				customType: "subagent-command",
-				details: expect.objectContaining({ runId: 1, status: "error" }),
+				content: expect.stringContaining("[subagent:worker#1] aborted"),
+				details: expect.objectContaining({
+					runId: 1,
+					status: "error",
+					errorClass: "aborted",
+					stopReason: "aborted",
+				}),
 			}),
 			expect.objectContaining({ deliverAs: "followUp", triggerTurn: false }),
 		);

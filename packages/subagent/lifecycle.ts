@@ -36,6 +36,7 @@ function reconcileRunWithPersistedSession(run: CommandRunState): void {
 		snapshot.completionMarker?.exitCode ??
 		(snapshot.terminalStopReason === "error" || snapshot.terminalStopReason === "aborted" ? 1 : 0);
 	run.status = exitCode === 0 ? "done" : "error";
+	if (snapshot.terminalStopReason === "aborted") run.errorClass = "aborted";
 	if (snapshot.finalOutput) {
 		run.lastOutput = snapshot.finalOutput;
 		run.lastLine = getLastNonEmptyLine(snapshot.finalOutput) || run.lastLine;
@@ -90,7 +91,7 @@ export function shutdownSubagentRuns(store: SubagentStore, pi: ExtensionAPI, rea
 			pi.sendMessage(
 				{
 					customType: run.source === "tool" ? "subagent-tool" : "subagent-command",
-					content: `[subagent:${run.agent}#${runId}] failed\n\n${message}`,
+					content: `[subagent:${run.agent}#${runId}] aborted\n\n${message}`,
 					display: false,
 					details: {
 						runId,
@@ -100,6 +101,7 @@ export function shutdownSubagentRuns(store: SubagentStore, pi: ExtensionAPI, rea
 						status: "error",
 						error: message,
 						errorClass: run.errorClass,
+						stopReason: "aborted",
 						peakContextTokens: run.peakContextTokens,
 						lastToolName: run.lastToolName,
 						lastToolOutputChars: run.lastToolOutputChars,
@@ -155,7 +157,9 @@ export function checkForHungRuns(store: SubagentStore, _pi: ExtensionAPI): void 
 		run.lastLine = reason;
 		run.lastOutput = reason;
 		run.status = "error";
+		run.errorClass = "aborted";
 		run.autoAbortReason = reason;
+		run.abortPending = Boolean(controller);
 
 		if (controller) {
 			controller.abort({ source: "hang_timeout", runId, idleMs, reason });

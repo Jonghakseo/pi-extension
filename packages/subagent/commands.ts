@@ -36,6 +36,12 @@ import {
 	summarizeSubagentDisplayTask,
 } from "./display-task.js";
 import {
+	classifySubagentFailure,
+	getSubagentRunStatusLabel,
+	getSubagentTerminalLabel,
+	isSubagentAbort,
+} from "./failure-telemetry.js";
+import {
 	AGENT_NAME_PALETTE,
 	agentBgIndex,
 	formatUsageStats,
@@ -215,10 +221,11 @@ class SubagentHistoryOverlay {
 			const marker = isSelected ? "▸" : " ";
 
 			// Status color
+			const statusLabel = getSubagentRunStatusLabel(run.status, run.errorClass);
 			let statusColor: "success" | "error" | "warning" | "dim" = "dim";
-			if (run.status === "done") statusColor = "success";
-			else if (run.status === "error") statusColor = "error";
-			else if (run.status === "running") statusColor = "warning";
+			if (statusLabel === "done") statusColor = "success";
+			else if (statusLabel === "error") statusColor = "error";
+			else if (statusLabel === "running" || statusLabel === "aborted") statusColor = "warning";
 
 			const timeLabel = new Date(run.startedAt).toLocaleTimeString([], {
 				hour: "2-digit",
@@ -227,7 +234,7 @@ class SubagentHistoryOverlay {
 			});
 
 			const removedBadge = run.removed ? theme.fg("dim", " [removed]") : "";
-			const statusStr = theme.fg(statusColor, `[${run.status}]`);
+			const statusStr = theme.fg(statusColor, `[${statusLabel}]`);
 			const agentStr = theme.fg("accent", run.agent);
 			const taskPreview = run.task
 				.replace(/\s*\n+\s*/g, " ")
@@ -395,7 +402,7 @@ function attachRunResponseToEditor(ctx: ExtensionContext, run: CommandRunState, 
 async function showRunLatestResponseOverlay(ctx: ExtensionContext, run: CommandRunState): Promise<void> {
 	const response = getRunLatestResponse(run);
 	const contextLabel = run.contextMode === "main" ? "main" : "sub";
-	const subtitle = `#${run.id} · ${run.agent} · ${run.status} · ctx:${contextLabel} · turn:${run.turnCount ?? DEFAULT_TURN_COUNT}`;
+	const subtitle = `#${run.id} · ${run.agent} · ${getSubagentRunStatusLabel(run.status, run.errorClass)} · ctx:${contextLabel} · turn:${run.turnCount ?? DEFAULT_TURN_COUNT}`;
 
 	await ctx.ui.custom(
 		(tui, theme, _kb, done) => {
@@ -520,7 +527,11 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 	try {
 		const entries = ctx.sessionManager.getEntries();
 		const restoredRuns = new Map<number, CommandRunState>();
-		const removedRunIds = new Set<number>();
+		const removedRuns = new Map<
+			number,
+			{ entryIndex: number; startedAt?: number; aborted: boolean; message?: string }
+		>();
+		const latestRunEntryIndexes = new Map<number, number>();
 		const displayTaskUpdates = new Map<number, { task?: string; displayTask?: string; startedAt?: number }>();
 		let maxRunId = 0;
 
@@ -541,13 +552,19 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 		store.currentParentSessionFile = latestParentSessionFile;
 
 		// First pass: collect removed run IDs and persisted displayTask updates
-		for (const entry of entries) {
+		for (const [entryIndex, entry] of entries.entries()) {
 			if (entry.type === "custom") {
 				const ce = entry as any;
 				if (ce.customType === "subagent-removed") {
 					sawSubagentMarkers = true;
 					if (ce.data?.runId != null) {
-						removedRunIds.add(ce.data.runId);
+						removedRuns.set(ce.data.runId, {
+							entryIndex,
+							startedAt: toValidTimestampMs(ce.data?.startedAt),
+							aborted:
+								ce.data?.status === "aborted" || ce.data?.errorClass === "aborted" || ce.data?.stopReason === "aborted",
+							message: typeof ce.data?.message === "string" ? ce.data.message : undefined,
+						});
 					}
 					continue;
 				}
@@ -562,7 +579,7 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 			}
 		}
 
-		for (const entry of entries) {
+		for (const [entryIndex, entry] of entries.entries()) {
 			if (entry.type !== "custom_message") continue;
 			const cm = entry as any;
 			if (cm.customType !== "subagent-command" && cm.customType !== "subagent-tool") continue;
@@ -571,6 +588,7 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 			if (!d || typeof d.runId !== "number") continue;
 
 			const runId = d.runId;
+			latestRunEntryIndexes.set(runId, entryIndex);
 			if (runId > maxRunId) maxRunId = runId;
 
 			const existing = restoredRuns.get(runId);
@@ -584,11 +602,12 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 
 			// Determine final status primarily from structured metadata.
 			const content = typeof cm.content === "string" ? cm.content : "";
+			const firstContentLine = content.split("\n", 1)[0]?.trim() ?? "";
 			const statusRaw = typeof d.status === "string" ? d.status.trim().toLowerCase() : "";
 			const statusFromDetails: "done" | "error" | null =
 				statusRaw === "done" || statusRaw === "completed"
 					? "done"
-					: statusRaw === "error" || statusRaw === "failed"
+					: statusRaw === "error" || statusRaw === "failed" || statusRaw === "aborted"
 						? "error"
 						: null;
 			const statusFromExitCode: "done" | "error" | null =
@@ -597,13 +616,25 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 				typeof d.error === "string" && d.error.trim() ? "error" : null;
 
 			// Legacy fallback for old sessions where structured fields are missing.
-			const legacyStatusFromContent: "done" | "error" | null = content.includes("] completed")
+			const legacyStatusFromContent: "done" | "error" | null = firstContentLine.includes("] completed")
 				? "done"
-				: content.includes("] failed") || content.includes("] error")
+				: firstContentLine.includes("] failed") ||
+						firstContentLine.includes("] error") ||
+						firstContentLine.includes("] aborted")
 					? "error"
 					: null;
 
 			const finalStatus = statusFromDetails ?? statusFromExitCode ?? statusFromErrorField ?? legacyStatusFromContent;
+			const hasStructuredTerminalOutcome =
+				statusFromDetails !== null ||
+				statusFromExitCode !== null ||
+				typeof d.stopReason === "string" ||
+				typeof d.errorClass === "string";
+			const isAbortedCompletion =
+				d.stopReason === "aborted" ||
+				d.errorClass === "aborted" ||
+				statusRaw === "aborted" ||
+				(!hasStructuredTerminalOutcome && firstContentLine.includes("] aborted"));
 
 			// Derive source from customType for backward-compatible restored run metadata.
 			const restoredSource: "tool" | "command" = cm.customType === "subagent-tool" ? "tool" : "command";
@@ -648,7 +679,7 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 					contextMode: d.contextMode ?? existing?.contextMode,
 					usage: d.usage ?? existing?.usage,
 					model: d.model ?? existing?.model,
-					errorClass: d.errorClass ?? existing?.errorClass,
+					errorClass: d.errorClass ?? (isAbortedCompletion ? "aborted" : existing?.errorClass),
 					peakContextTokens: d.peakContextTokens ?? existing?.peakContextTokens,
 					lastToolName: d.lastToolName ?? existing?.lastToolName,
 					lastToolOutputChars: d.lastToolOutputChars ?? existing?.lastToolOutputChars,
@@ -723,8 +754,26 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 		}
 
 		for (const [id, run] of restoredRuns) {
-			if (removedRunIds.has(id)) {
-				store.commandRuns.set(id, { ...run, removed: true }); // restore removed runs while preserving removed=true
+			const removal = removedRuns.get(id);
+			const latestRunEntryIndex = latestRunEntryIndexes.get(id) ?? -1;
+			const removalApplies = removal
+				? removal.startedAt !== undefined
+					? removal.startedAt === run.startedAt
+					: removal.entryIndex > latestRunEntryIndex
+				: false;
+			if (removal && removalApplies) {
+				store.commandRuns.set(id, {
+					...run,
+					...(removal.aborted
+						? {
+								status: "error" as const,
+								errorClass: "aborted" as const,
+								lastLine: removal.message ?? run.lastLine,
+								lastOutput: removal.message ?? run.lastOutput,
+							}
+						: {}),
+					removed: true,
+				});
 				continue;
 			}
 			store.commandRuns.set(id, run);
@@ -1107,6 +1156,13 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 				const targetRunId = Number(firstToken);
 				const targetRun = continuationRun;
 
+				if (targetRun.abortPending) {
+					ctx.ui.notify(
+						`Subagent #${targetRunId} is still aborting. Wait for cancellation to settle before continuing it.`,
+						"warning",
+					);
+					return;
+				}
 				if (targetRun.status === "running") {
 					ctx.ui.notify(`Subagent #${targetRunId} is already running.`, "warning");
 					return;
@@ -1274,6 +1330,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 				runState.lastRetryReason = undefined;
 				runState.errorClass = undefined;
 				runState.autoAbortReason = undefined;
+				runState.abortPending = false;
 				runState.removed = false;
 				runState.deliveryMode = deliveryMode;
 				runState.turnCount = Math.max(DEFAULT_TURN_COUNT, runState.turnCount || DEFAULT_TURN_COUNT) + 1;
@@ -1509,6 +1566,22 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 					updateRunFromResult(runState, result);
 					const isError = result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
 					runState.status = isError ? "error" : "done";
+					if (isError) {
+						runState.errorClass =
+							result.errorClass ??
+							classifySubagentFailure({
+								failed: true,
+								stopReason: result.stopReason,
+								exitCode: result.exitCode,
+								errorMessage: result.errorMessage,
+								stderr: result.stderr,
+								output: getFinalOutput(result.messages),
+							});
+					}
+					const terminalLabel = getSubagentTerminalLabel(isError, {
+						stopReason: result.stopReason,
+						errorClass: runState.errorClass,
+					});
 					runState.elapsedMs = Date.now() - runState.startedAt;
 					updateCommandRunsWidget(store);
 
@@ -1527,7 +1600,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 					const completionMessage = {
 						customType: "subagent-command" as const,
 						content:
-							`[subagent:${selectedAgent}#${runId}] ${isError ? "failed" : "completed"}` +
+							`[subagent:${selectedAgent}#${runId}] ${terminalLabel}` +
 							`\nPrompt: ${truncateLines(taskForDisplay, 2)}` +
 							(usage ? `\nUsage: ${usage}` : "") +
 							(runState.retryCount ? `\nRetries: ${runState.retryCount}/${MAX_SUBAGENT_AUTO_RETRIES}` : "") +
@@ -1548,6 +1621,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 							elapsedMs: runState.elapsedMs,
 							lastActivityAt: runState.lastActivityAt,
 							exitCode: result.exitCode,
+							stopReason: result.stopReason,
 							usage: result.usage,
 							model: result.model,
 							source: result.agentSource,
@@ -1570,24 +1644,27 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 							runId,
 							`Hidden subagent #${runId} · ${selectedAgent}`,
 							completionMessage.content,
-							isError
-								? `hidden subagent #${runId} (${selectedAgent}) failed`
-								: `hidden subagent #${runId} (${selectedAgent}) completed`,
-							isError ? "error" : "info",
+							`hidden subagent #${runId} (${selectedAgent}) ${terminalLabel}`,
+							terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
 						);
 					} else {
 						deliverOrQueueCompletion(store, pi, ctx, runId, runState, completionMessage);
 						ctx.ui.notify(
-							isError
-								? `subagent #${runId} (${selectedAgent}) failed`
-								: `subagent #${runId} (${selectedAgent}) completed`,
-							isError ? "error" : "info",
+							`subagent #${runId} (${selectedAgent}) ${terminalLabel}`,
+							terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
 						);
 					}
 				} catch (error: any) {
 					if (runState.removed || store.disposed) return;
 					runState.status = "error";
-					runState.errorClass = "process_error";
+					runState.errorClass = isSubagentAbort({
+						signal: runState.abortController?.signal,
+						autoAbortReason: runState.autoAbortReason,
+						error,
+					})
+						? "aborted"
+						: "process_error";
+					const terminalLabel = getSubagentTerminalLabel(true, { errorClass: runState.errorClass });
 					runState.elapsedMs = Date.now() - runState.startedAt;
 					runState.lastLine =
 						runState.autoAbortReason ?? (error?.message ? String(error.message) : "Subagent execution failed");
@@ -1596,7 +1673,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 					const cmdErrorMessage = {
 						customType: "subagent-command" as const,
 						content:
-							`[subagent:${selectedAgent}#${runId}] failed` +
+							`[subagent:${selectedAgent}#${runId}] ${terminalLabel}` +
 							`\nPrompt: ${truncateLines(taskForDisplay, 2)}` +
 							`\n\n${runState.lastLine}`,
 						display: true,
@@ -1615,6 +1692,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 							lastActivityAt: runState.lastActivityAt,
 							error: runState.lastLine,
 							errorClass: runState.errorClass,
+							stopReason: runState.errorClass === "aborted" ? "aborted" : undefined,
 							peakContextTokens: runState.peakContextTokens,
 							lastToolName: runState.lastToolName,
 							lastToolOutputChars: runState.lastToolOutputChars,
@@ -1632,16 +1710,20 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 							runId,
 							`Hidden subagent #${runId} · ${selectedAgent}`,
 							cmdErrorMessage.content,
-							`hidden subagent #${runId} failed: ${runState.lastLine}`,
-							"error",
+							`hidden subagent #${runId} ${terminalLabel}: ${runState.lastLine}`,
+							terminalLabel === "aborted" ? "warning" : "error",
 						);
 					} else {
 						deliverOrQueueCompletion(store, pi, ctx, runId, runState, cmdErrorMessage);
-						ctx.ui.notify(`subagent #${runId} failed: ${runState.lastLine}`, "error");
+						ctx.ui.notify(
+							`subagent #${runId} ${terminalLabel}: ${runState.lastLine}`,
+							terminalLabel === "aborted" ? "warning" : "error",
+						);
 					}
 				} finally {
 					clearInterval(tick);
 					runState.abortController = undefined;
+					runState.abortPending = false;
 					if (!store.disposed) {
 						trimCommandRunHistory(store, {
 							maxRuns: 10,
@@ -1783,7 +1865,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 				run.status === "running" ? "(still running; no final output yet)" : run.lastLine || "(no output captured)";
 			const contextLabel = run.contextMode === "main" ? "main" : "isolated";
 			const content =
-				`Subagent #${run.id} [${run.status}] ${run.agent} ctx:${contextLabel} turn:${run.turnCount ?? DEFAULT_TURN_COUNT} ${elapsedSec}s tools:${run.toolCalls}` +
+				`Subagent #${run.id} [${getSubagentRunStatusLabel(run.status, run.errorClass)}] ${run.agent} ctx:${contextLabel} turn:${run.turnCount ?? DEFAULT_TURN_COUNT} ${elapsedSec}s tools:${run.toolCalls}` +
 				`\n${run.task}` +
 				usageLine +
 				`\n\n${output || fallback}`;
@@ -1840,7 +1922,7 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 						.replace(/\s*\n+\s*/g, " ")
 						.trim()
 						.slice(0, COMMAND_TASK_PREVIEW_CHARS);
-					return `#${r.id} [${r.status}]${removed} ${r.agent}: ${task}`;
+					return `#${r.id} [${getSubagentRunStatusLabel(r.status, r.errorClass)}]${removed} ${r.agent}: ${task}`;
 				});
 				ctx.ui.notify(lines.join("\n"), "info");
 				return;

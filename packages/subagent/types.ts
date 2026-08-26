@@ -106,6 +106,8 @@ export interface CommandRunState {
 	lastToolOutputChars?: number;
 	/** Hang detector reason preserved until the normal finalizer emits the sole completion. */
 	autoAbortReason?: string;
+	/** True while a removed invocation is still settling; blocks same-ID continuation races. */
+	abortPending?: boolean;
 	runtime?: AgentRuntime;
 	claudeSessionId?: string;
 	claudeProjectDir?: string;
@@ -172,6 +174,7 @@ export interface BatchGroupState {
 	runIds: number[];
 	completedRunIds: Set<number>;
 	failedRunIds: Set<number>;
+	abortedRunIds: Set<number>;
 	originSessionFile: string;
 	createdAt: number;
 	pendingResults: Map<number, string>;
@@ -183,7 +186,7 @@ export interface PipelineStepResult {
 	agent: string;
 	task: string;
 	output: string;
-	status: "done" | "error";
+	status: "done" | "error" | "aborted";
 }
 
 export interface PipelineState {
@@ -213,10 +216,11 @@ export interface FinishedGroupMember {
 export interface FinishedGroupSnapshot {
 	groupId: string;
 	kind: "batch" | "chain";
-	terminalStatus: "completed" | "error" | "stopped";
+	terminalStatus: "completed" | "error" | "aborted" | "stopped";
 	finishedAt: number;
 	total: number;
 	failed: number;
+	aborted: number;
 	members: FinishedGroupMember[];
 }
 

@@ -5,6 +5,7 @@
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { Box, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { HANG_WARNING_IDLE_MS, PARENT_HINT } from "./constants.js";
+import { getSubagentRunStatusLabel } from "./failure-telemetry.js";
 import {
 	AGENT_NAME_PALETTE,
 	agentBgIndex,
@@ -79,9 +80,12 @@ export function cleanupCommandRunsWidgetTimer(): void {
 }
 
 function getStatusVisual(run: CommandRunState): { statusColor: ThemeColor; statusIcon: string } {
-	const statusColor: ThemeColor = run.status === "running" ? "warning" : run.status === "done" ? "success" : "error";
+	const statusLabel = getSubagentRunStatusLabel(run.status, run.errorClass);
+	const statusColor: ThemeColor =
+		statusLabel === "running" || statusLabel === "aborted" ? "warning" : statusLabel === "done" ? "success" : "error";
 	const spinnerFrame = SPINNER_FRAMES[Math.floor(Date.now() / SPINNER_INTERVAL_MS) % SPINNER_FRAMES.length];
-	const statusIcon = run.status === "running" ? spinnerFrame : run.status === "done" ? "✓" : "✗";
+	const statusIcon =
+		statusLabel === "running" ? spinnerFrame : statusLabel === "done" ? "✓" : statusLabel === "aborted" ? "■" : "✗";
 	return { statusColor, statusIcon };
 }
 

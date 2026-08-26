@@ -18,6 +18,36 @@ export interface FailureTelemetryInput {
 	output?: string;
 }
 
+export interface AbortTelemetryInput {
+	stopReason?: string;
+	errorClass?: SubagentErrorClass;
+	signal?: AbortSignal;
+	autoAbortReason?: string;
+	error?: unknown;
+}
+
+export function isSubagentAbort(input: AbortTelemetryInput): boolean {
+	return (
+		input.stopReason === "aborted" ||
+		input.errorClass === "aborted" ||
+		input.signal?.aborted === true ||
+		Boolean(input.autoAbortReason) ||
+		(input.error instanceof Error && input.error.message === "Subagent was aborted")
+	);
+}
+
+export function getSubagentTerminalLabel(
+	failed: boolean,
+	input: AbortTelemetryInput,
+): "completed" | "aborted" | "failed" {
+	if (!failed) return "completed";
+	return isSubagentAbort(input) ? "aborted" : "failed";
+}
+
+export function getSubagentRunStatusLabel(status: string, errorClass?: SubagentErrorClass): string {
+	return errorClass === "aborted" ? "aborted" : status;
+}
+
 const OVERLOADED_PATTERNS = [
 	/servers? (?:are|is) currently overloaded/i,
 	/server overloaded/i,
@@ -38,10 +68,10 @@ export function classifySubagentFailure(input: FailureTelemetryInput): SubagentE
 	if (!input.failed) return undefined;
 	const text = [input.errorMessage, input.stderr, input.output].filter(Boolean).join("\n");
 
+	if (input.stopReason === "aborted") return "aborted";
 	if (isContextOverflowText(text)) return "context_overflow";
 	if (OVERLOADED_PATTERNS.some((pattern) => pattern.test(text))) return "overloaded";
 	if (RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(text))) return "rate_limit";
-	if (input.stopReason === "aborted") return "aborted";
 	if (TOOL_ERROR_PATTERNS.some((pattern) => pattern.test(text))) return "tool_error";
 	if ((input.exitCode ?? 0) !== 0) return "process_error";
 	return "unknown";

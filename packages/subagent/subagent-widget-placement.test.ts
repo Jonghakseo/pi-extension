@@ -72,6 +72,35 @@ describe("subagent run status widget placement", () => {
 		expect(widget?.render(100).join("\n")).toContain("50%");
 	});
 
+	it("renders aborted runs with a stopped warning icon instead of a failure icon", () => {
+		const store = createStore();
+		store.commandRuns.set(1, makeRun({ status: "error", errorClass: "aborted", lastLine: "Subagent was aborted" }));
+		let factory:
+			| ((
+					tui: unknown,
+					theme: {
+						fg: (color: string, text: string) => string;
+						bold: (text: string) => string;
+						bg: (color: string, text: string) => string;
+					},
+			  ) => { render: (width: number) => string[] })
+			| undefined;
+
+		updateCommandRunsWidget(store, {
+			hasUI: true,
+			ui: {
+				setWidget: (key: string, content: unknown) => {
+					if (key === "sub-1" && typeof content === "function") factory = content as typeof factory;
+				},
+			},
+		});
+
+		const widget = factory?.({}, { fg: (_color, text) => text, bold: (text) => text, bg: (_color, text) => text });
+		const rendered = widget?.render(100).join("\n") ?? "";
+		expect(rendered).toContain("■ #1");
+		expect(rendered).not.toContain("✗ #1");
+	});
+
 	it("renders the parent session hint above the editor", () => {
 		const store = createStore();
 		store.currentParentSessionFile = "/tmp/parent.jsonl";

@@ -80,6 +80,7 @@ describe("subagent hang detection with persisted session fallback", () => {
 		checkForHungRuns(store, pi);
 
 		expect(run.status).toBe("error");
+		expect(run.errorClass).toBe("aborted");
 		expect(run.lastLine).toContain("Auto-aborted");
 		expect(run.autoAbortReason).toBe(run.lastLine);
 		// The normal run finalizer owns the single user-facing completion.

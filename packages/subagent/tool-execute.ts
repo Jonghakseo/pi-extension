@@ -32,7 +32,13 @@ import {
 	summarizeSubagentDisplayTask,
 } from "./display-task.js";
 import { ESCALATION_EXIT_CODE, readAndConsumeEscalation } from "./escalation.js";
-import { classifySubagentFailure, type SubagentErrorClass } from "./failure-telemetry.js";
+import {
+	classifySubagentFailure,
+	getSubagentRunStatusLabel,
+	getSubagentTerminalLabel,
+	isSubagentAbort,
+	type SubagentErrorClass,
+} from "./failure-telemetry.js";
 import {
 	formatContextUsageBar,
 	formatUsageStats,
@@ -299,6 +305,9 @@ export function diagnoseResultFailure(result: SingleResult): ResultFailureDiagno
 			output: finalOutput,
 		});
 
+	if (result.stopReason === "aborted") {
+		return { failed: true, errorClass: "aborted", reason: "Subagent execution was aborted." };
+	}
 	if (result.exitCode !== 0 || result.stopReason === "error") {
 		const overflowText = result.errorMessage || result.stderr || finalOutput;
 		if (isContextOverflowText(overflowText)) {
@@ -324,8 +333,6 @@ export function diagnoseResultFailure(result: SingleResult): ResultFailureDiagno
 	}
 	if (result.stopReason === "error")
 		return { failed: true, errorClass, reason: result.errorMessage || "Subagent reported stopReason=error." };
-	if (result.stopReason === "aborted")
-		return { failed: true, errorClass: errorClass ?? "aborted", reason: "Subagent execution was aborted." };
 
 	const hasAssistantText = finalOutput.length > 0;
 	if (hasAssistantText) return { failed: false };
@@ -469,13 +476,42 @@ function buildRunStartMessage(runState: CommandRunState, status: "started" | "re
 	};
 }
 
+function getFinalizedRunLabel(finalized: FinalizedRun): "completed" | "aborted" | "failed" {
+	return getSubagentTerminalLabel(finalized.isError, {
+		stopReason: finalized.result?.stopReason,
+		errorClass: finalized.runState.errorClass,
+		autoAbortReason: finalized.runState.autoAbortReason,
+	});
+}
+
+function getFinalizedRunStatus(finalized: FinalizedRun): PipelineStepResult["status"] {
+	const label = getFinalizedRunLabel(finalized);
+	return label === "completed" ? "done" : label === "aborted" ? "aborted" : "error";
+}
+
+function resolveGroupTerminalStatus(failed: number, aborted: number): "completed" | "error" | "aborted" {
+	if (failed > 0) return "error";
+	if (aborted > 0) return "aborted";
+	return "completed";
+}
+
+function recordBatchResult(batch: BatchGroupState, finalized: FinalizedRun): void {
+	const runId = finalized.runState.id;
+	const status = finalized.runState.removed ? "aborted" : getFinalizedRunStatus(finalized);
+	batch.completedRunIds.add(runId);
+	if (status === "aborted") batch.abortedRunIds.add(runId);
+	else if (status === "error") batch.failedRunIds.add(runId);
+	batch.pendingResults.set(runId, finalized.rawOutput);
+}
+
 function buildRunCompletionMessage(finalized: FinalizedRun, options?: { display?: boolean }) {
-	const { runState, result, isError, rawOutput } = finalized;
+	const { runState, result, rawOutput } = finalized;
 	const usage = result ? formatUsageStats(result.usage, result.model) : "";
+	const terminalLabel = getFinalizedRunLabel(finalized);
 	return {
 		customType: "subagent-tool" as const,
 		content:
-			`[subagent:${runState.agent}#${runState.id}] ${isError ? "failed" : "completed"}` +
+			`[subagent:${runState.agent}#${runState.id}] ${terminalLabel}` +
 			`\nPrompt: ${truncateLines(runState.task, 2)}` +
 			(usage ? `\nUsage: ${usage}` : "") +
 			(runState.thoughtText ? `\nThought: ${runState.thoughtText}` : "") +
@@ -495,6 +531,7 @@ function buildRunCompletionMessage(finalized: FinalizedRun, options?: { display?
 			elapsedMs: runState.elapsedMs,
 			lastActivityAt: runState.lastActivityAt,
 			exitCode: result?.exitCode,
+			stopReason: result?.stopReason ?? (runState.errorClass === "aborted" ? "aborted" : undefined),
 			usage: result?.usage,
 			model: result?.model,
 			source: result?.agentSource,
@@ -560,6 +597,7 @@ function finalizeRunState(runState: CommandRunState, result: SingleResult): Fina
 
 	if (runState.autoAbortReason) {
 		runState.status = "error";
+		runState.errorClass = "aborted";
 		runState.elapsedMs = Date.now() - runState.startedAt;
 		runState.lastOutput = runState.autoAbortReason;
 		runState.lastLine = runState.autoAbortReason;
@@ -606,29 +644,46 @@ function finalizeRunState(runState: CommandRunState, result: SingleResult): Fina
 	return { runState, result, isError, rawOutput };
 }
 
-function formatBatchSummary(batchId: string, runs: CommandRunState[], terminalStatus: "completed" | "error"): string {
-	const headerStatus = runs.map((run) => `#${run.id} ${run.status === "done" ? "done" : "error"}`).join(", ");
+function formatOutcomeCounts(failed: number, aborted: number): string {
+	return [failed > 0 ? `${failed} failed` : "", aborted > 0 ? `${aborted} aborted` : ""].filter(Boolean).join(", ");
+}
+
+function formatBatchSummary(
+	batchId: string,
+	runs: CommandRunState[],
+	terminalStatus: "completed" | "error" | "aborted",
+): string {
+	const statuses = runs.map((run) => getSubagentRunStatusLabel(run.status, run.errorClass));
+	const headerStatus = runs.map((run, index) => `#${run.id} ${statuses[index]}`).join(", ");
+	const outcomeCounts = formatOutcomeCounts(
+		statuses.filter((status) => status === "error").length,
+		statuses.filter((status) => status === "aborted").length,
+	);
 	const body = runs
 		.map((run) => {
 			const summary = run.lastOutput?.trim() || run.lastLine?.trim() || "(no output)";
 			return `#${run.id} ${run.agent}\n- ${summary}`;
 		})
 		.join("\n\n");
-	return `[subagent-batch#${batchId}] ${terminalStatus}\nRuns: ${headerStatus}\n\n${body}`;
+	return `[subagent-batch#${batchId}] ${terminalStatus}\nRuns: ${headerStatus}${outcomeCounts ? `\nOutcomes: ${outcomeCounts}` : ""}\n\n${body}`;
 }
 
 function formatPipelineSummary(
 	pipelineId: string,
 	stepResults: PipelineStepResult[],
-	terminalStatus: "completed" | "stopped" | "error",
+	terminalStatus: "completed" | "stopped" | "error" | "aborted",
 ): string {
+	const outcomeCounts = formatOutcomeCounts(
+		stepResults.filter((step) => step.status === "error").length,
+		stepResults.filter((step) => step.status === "aborted").length,
+	);
 	const steps = stepResults
 		.map(
 			(step, index) =>
 				`Step ${index + 1} · #${step.runId} ${step.agent} · ${step.status}\nTask: ${step.task}\n${step.output}`,
 		)
 		.join("\n\n");
-	return `[subagent-chain#${pipelineId}] ${terminalStatus}\n\n${steps}`;
+	return `[subagent-chain#${pipelineId}] ${terminalStatus}${outcomeCounts ? `\nOutcomes: ${outcomeCounts}` : ""}\n\n${steps}`;
 }
 
 function previewOutput(output: string): string {
@@ -642,9 +697,10 @@ function formatBatchGroupStatus(store: SubagentStore, batch: BatchGroupState, de
 	const total = batch.runIds.length;
 	const done = batch.completedRunIds.size;
 	const failed = batch.failedRunIds.size;
+	const aborted = batch.abortedRunIds.size;
 	const header = `[subagent-batch#${batch.batchId}] running · ${done}/${total} finished${
 		failed > 0 ? `, ${failed} failed` : ""
-	}`;
+	}${aborted > 0 ? `, ${aborted} aborted` : ""}`;
 	const body = batch.runIds
 		.map((runId) => {
 			const run = store.commandRuns.get(runId);
@@ -735,7 +791,13 @@ function isInteractiveTuiContext(ctx: SubagentToolExecuteContext): boolean {
 
 function finalizeRunError(runState: CommandRunState, error: unknown): FinalizedRun {
 	runState.status = "error";
-	runState.errorClass = "process_error";
+	runState.errorClass = isSubagentAbort({
+		signal: runState.abortController?.signal,
+		autoAbortReason: runState.autoAbortReason,
+		error,
+	})
+		? "aborted"
+		: "process_error";
 	runState.elapsedMs = Date.now() - runState.startedAt;
 	runState.lastLine =
 		runState.autoAbortReason ?? (error instanceof Error ? error.message : "Subagent execution failed");
@@ -1266,6 +1328,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 		function clearRunAbortState(runState: CommandRunState): void {
 			clearParentAbortListener(runState.id);
 			runState.abortController = undefined;
+			runState.abortPending = false;
 		}
 
 		function registerRunLaunch(config: RunLaunchConfig): CommandRunState {
@@ -1289,6 +1352,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				runState.lastRetryReason = undefined;
 				runState.errorClass = undefined;
 				runState.autoAbortReason = undefined;
+				runState.abortPending = false;
 				runState.removed = false;
 				runState.turnCount = Math.max(DEFAULT_TURN_COUNT, runState.turnCount || DEFAULT_TURN_COUNT) + 1;
 				runState.contextMode = runState.contextMode ?? (config.inheritMainContext ? "main" : "sub");
@@ -1350,15 +1414,17 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 
 		function launchRunInBackground(runState: CommandRunState, taskForAgent: string): Promise<FinalizedRun> {
 			let claudeCheckpointSent = !!runState.claudeSessionId;
+			const abortSignal = runState.abortController?.signal;
 			const recordActivity = createRunActivityRecorder(pi, runState, (model) => resolveContextWindow(ctx, model));
-			return enqueueSubagentInvocation(() =>
-				runSingleAgent(
+			return enqueueSubagentInvocation(async () => {
+				if (runState.removed || abortSignal?.aborted) throw new Error("Subagent was aborted");
+				return runSingleAgent(
 					ctx.cwd,
 					agents,
 					runState.agent,
 					taskForAgent,
 					runState.pipelineStepIndex,
-					runState.abortController?.signal,
+					abortSignal,
 					(partial) => {
 						if (runState.removed || store.disposed) return;
 						const current = partial.details?.results?.[0];
@@ -1382,8 +1448,12 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
 						onDiagnostic: createRunDiagnosticSink(pi, runState),
 					},
-				),
-			).then((result) => finalizeRunState(runState, result));
+				);
+			}).then((result) =>
+				runState.removed || abortSignal?.aborted
+					? finalizeRunError(runState, new Error("Subagent was aborted"))
+					: finalizeRunState(runState, result),
+			);
 		}
 
 		if (hasSingle) {
@@ -1398,6 +1468,20 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 								type: "text",
 								text: withIdleRunWarning(
 									`Unknown subagent run #${continuationRunId}. Use \`subagent runs\` to see available runs.`,
+								),
+							},
+						],
+						details: makeDetails("single"),
+						isError: true,
+					};
+				}
+				if (continueFromRun.abortPending) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: withIdleRunWarning(
+									`Subagent #${continuationRunId} is still aborting. Wait for cancellation to settle before continuing it.`,
 								),
 							},
 						],
@@ -1530,6 +1614,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						return;
 					}
 
+					const terminalLabel = getFinalizedRunLabel(finalized);
 					const completionMessage = buildRunCompletionMessage(finalized);
 					if (isInOriginSession(ctx, originSessionFile)) {
 						pi.sendMessage(completionMessage, { deliverAs: "followUp", triggerTurn: true });
@@ -1540,14 +1625,13 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 					}
 
 					ctx.ui?.notify?.(
-						finalized.isError
-							? `subagent tool run #${runState.id} (${resolvedAgent}) failed`
-							: `subagent tool run #${runState.id} (${resolvedAgent}) completed`,
-						finalized.isError ? "error" : "info",
+						`subagent tool run #${runState.id} (${resolvedAgent}) ${terminalLabel}`,
+						terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
 					);
 				} catch (error: unknown) {
 					if (runState.removed || store.disposed) return;
 					const finalized = finalizeRunError(runState, error);
+					const terminalLabel = getFinalizedRunLabel(finalized);
 					const errorMessage = buildRunCompletionMessage(finalized);
 					if (isInOriginSession(ctx, originSessionFile)) {
 						pi.sendMessage(errorMessage, { deliverAs: "followUp", triggerTurn: true });
@@ -1556,7 +1640,10 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						const entry = store.globalLiveRuns.get(runState.id);
 						if (entry) entry.pendingCompletion = makePendingCompletion(errorMessage, true);
 					}
-					ctx.ui?.notify?.(`subagent tool run #${runState.id} failed: ${runState.lastLine}`, "error");
+					ctx.ui?.notify?.(
+						`subagent tool run #${runState.id} ${terminalLabel}: ${runState.lastLine}`,
+						terminalLabel === "aborted" ? "warning" : "error",
+					);
 					updateCommandRunsWidget(store);
 				} finally {
 					clearRunAbortState(runState);
@@ -1627,6 +1714,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				runIds: runStates.map(({ runState }) => runState.id),
 				completedRunIds: new Set(),
 				failedRunIds: new Set(),
+				abortedRunIds: new Set(),
 				originSessionFile,
 				createdAt: Date.now(),
 				pendingResults: new Map(),
@@ -1646,11 +1734,18 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 					}),
 				);
 				const orderedRuns = runStates.map(({ runState }) => runState);
-				const hasError = finalizedRuns.some((finalized) => finalized.isError);
-				const content = formatBatchSummary(batchId, orderedRuns, hasError ? "error" : "completed");
 				const batchForSnapshot = store.batchGroups.get(batchId);
-				if (batchForSnapshot)
-					retireFinishedGroup(store, snapshotBatchGroup(store, batchForSnapshot, hasError ? "error" : "completed"));
+				if (batchForSnapshot) {
+					for (const finalized of finalizedRuns) recordBatchResult(batchForSnapshot, finalized);
+				}
+				const terminalStatus = resolveGroupTerminalStatus(
+					batchForSnapshot?.failedRunIds.size ?? 0,
+					batchForSnapshot?.abortedRunIds.size ?? 0,
+				);
+				const content = formatBatchSummary(batchId, orderedRuns, terminalStatus);
+				if (batchForSnapshot) {
+					retireFinishedGroup(store, snapshotBatchGroup(store, batchForSnapshot, terminalStatus));
+				}
 				for (const { runState } of runStates) cleanupRunAfterFinalDelivery(runState.id);
 				clearPendingGroupCompletion("batch", batchId);
 				store.batchGroups.delete(batchId);
@@ -1672,7 +1767,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 							.filter((result): result is SingleResult => Boolean(result)),
 						runStates.map(({ runState }) => toLaunchSummary(runState, "batch")),
 					),
-					isError: hasError,
+					isError: terminalStatus !== "completed",
 				};
 			}
 
@@ -1683,16 +1778,14 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 
 						const batch = store.batchGroups.get(batchId);
 						if (!batch) return;
-						batch.completedRunIds.add(runState.id);
-						if (finalized.isError) batch.failedRunIds.add(runState.id);
-						batch.pendingResults.set(runState.id, finalized.rawOutput);
+						recordBatchResult(batch, finalized);
 						updateCommandRunsWidget(store);
 
 						if (batch.completedRunIds.size === batch.runIds.length) {
 							const orderedRuns = batch.runIds
 								.map((runId) => store.commandRuns.get(runId))
 								.filter((run): run is CommandRunState => Boolean(run));
-							const batchTerminalStatus = batch.failedRunIds.size > 0 ? "error" : "completed";
+							const batchTerminalStatus = resolveGroupTerminalStatus(batch.failedRunIds.size, batch.abortedRunIds.size);
 							const content = formatBatchSummary(batchId, orderedRuns, batchTerminalStatus);
 							const message = {
 								customType: "subagent-tool" as const,
@@ -1701,7 +1794,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 								details: {
 									batchId,
 									runIds: batch.runIds,
-									status: batch.failedRunIds.size > 0 ? "error" : "done",
+									status: batchTerminalStatus === "completed" ? "done" : batchTerminalStatus,
 									runSummaries: orderedRuns.map((run) => buildRunAnalyticsSummary(run)),
 								},
 							};
@@ -1729,38 +1822,36 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 								removalReason: "trim",
 							});
 							ctx.ui?.notify?.(
-								batch.failedRunIds.size > 0
+								batchTerminalStatus === "error"
 									? `subagent batch ${batchId} finished with errors`
-									: `subagent batch ${batchId} completed`,
-								batch.failedRunIds.size > 0 ? "error" : "info",
+									: batchTerminalStatus === "aborted"
+										? `subagent batch ${batchId} aborted`
+										: `subagent batch ${batchId} completed`,
+								batchTerminalStatus === "error" ? "error" : batchTerminalStatus === "aborted" ? "warning" : "info",
 							);
 						}
 					} catch (error: unknown) {
-						runState.status = "error";
-						runState.elapsedMs = Date.now() - runState.startedAt;
-						runState.lastLine = error instanceof Error ? error.message : "Subagent execution failed";
-						runState.lastOutput = runState.lastLine;
+						const finalized = finalizeRunError(runState, error);
 						const batch = store.batchGroups.get(batchId);
 						if (!batch) return;
-						batch.completedRunIds.add(runState.id);
-						batch.failedRunIds.add(runState.id);
-						batch.pendingResults.set(runState.id, runState.lastLine);
+						recordBatchResult(batch, finalized);
 						if (batch.completedRunIds.size === batch.runIds.length) {
 							const orderedRuns = batch.runIds
 								.map((runId) => store.commandRuns.get(runId))
 								.filter((run): run is CommandRunState => Boolean(run));
+							const batchTerminalStatus = resolveGroupTerminalStatus(batch.failedRunIds.size, batch.abortedRunIds.size);
 							const message = {
 								customType: "subagent-tool" as const,
-								content: formatBatchSummary(batchId, orderedRuns, "error"),
+								content: formatBatchSummary(batchId, orderedRuns, batchTerminalStatus),
 								display: true,
 								details: {
 									batchId,
 									runIds: batch.runIds,
-									status: "error",
+									status: batchTerminalStatus,
 									runSummaries: orderedRuns.map((run) => buildRunAnalyticsSummary(run)),
 								},
 							};
-							retireFinishedGroup(store, snapshotBatchGroup(store, batch, "error"));
+							retireFinishedGroup(store, snapshotBatchGroup(store, batch, batchTerminalStatus));
 							if (isInOriginSession(ctx, batch.originSessionFile)) {
 								pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
 								clearPendingGroupCompletion("batch", batchId);
@@ -1778,6 +1869,8 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 							}
 						}
 						updateCommandRunsWidget(store);
+					} finally {
+						clearRunAbortState(runState);
 					}
 				})();
 			}
@@ -1829,7 +1922,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 
 			if (!shouldRunAsync) {
 				let previousOutput = "";
-				let terminalStatus: "completed" | "stopped" | "error" = "completed";
+				let terminalStatus: "completed" | "stopped" | "error" | "aborted" = "completed";
 				const finalizedRuns: FinalizedRun[] = [];
 				const pipeline = store.pipelines.get(pipelineId);
 				if (!pipeline) {
@@ -1896,29 +1989,30 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						finalizedRuns.push(finalized);
 
 						if (runState.removed) {
-							terminalStatus = finalized.isError ? "error" : "stopped";
+							terminalStatus = "aborted";
 							pipeline.stepResults.push({
 								runId: runState.id,
 								agent: runState.agent,
 								task: step.task,
 								output: finalized.rawOutput || "Run removed before pipeline completion.",
-								status: "error",
+								status: "aborted",
 							});
 							break;
 						}
 
+						const stepStatus = getFinalizedRunStatus(finalized);
 						pipeline.stepResults.push({
 							runId: runState.id,
 							agent: runState.agent,
 							task: step.task,
 							output: finalized.rawOutput,
-							status: finalized.isError ? "error" : "done",
+							status: stepStatus,
 						});
 						previousOutput = finalized.rawOutput;
 						updateCommandRunsWidget(store);
 
-						if (finalized.isError) {
-							terminalStatus = "error";
+						if (stepStatus !== "done") {
+							terminalStatus = stepStatus;
 							break;
 						}
 					}
@@ -1934,7 +2028,9 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				}
 
 				const hasError = pipeline.stepResults.some((step) => step.status === "error");
-				if (terminalStatus === "completed" && hasError) terminalStatus = "error";
+				const hasAborted = pipeline.stepResults.some((step) => step.status === "aborted");
+				if (hasError) terminalStatus = "error";
+				else if (terminalStatus === "completed" && hasAborted) terminalStatus = "aborted";
 				const content = formatPipelineSummary(pipelineId, pipeline.stepResults, terminalStatus);
 				retireFinishedGroup(store, snapshotPipeline(pipeline, terminalStatus));
 				for (const runId of pipeline.stepRunIds) cleanupRunAfterFinalDelivery(runId);
@@ -1964,7 +2060,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 
 			void (async () => {
 				let previousOutput = "";
-				let terminalStatus: "completed" | "stopped" | "error" = "completed";
+				let terminalStatus: "completed" | "stopped" | "error" | "aborted" = "completed";
 				try {
 					for (let index = 0; index < steps.length; index++) {
 						const pipeline = store.pipelines.get(pipelineId);
@@ -2022,13 +2118,13 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 							clearRunAbortState(runState);
 						}
 						if (runState.removed) {
-							terminalStatus = finalized.isError ? "error" : "stopped";
+							terminalStatus = "aborted";
 							pipeline.stepResults.push({
 								runId: runState.id,
 								agent: runState.agent,
 								task: step.task,
 								output: finalized.rawOutput || "Run removed before pipeline completion.",
-								status: "error",
+								status: "aborted",
 							});
 							break;
 						}
@@ -2038,14 +2134,14 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 							agent: runState.agent,
 							task: step.task,
 							output: finalized.rawOutput,
-							status: finalized.isError ? "error" : "done",
+							status: getFinalizedRunStatus(finalized),
 						};
 						pipeline.stepResults.push(stepResult);
 						previousOutput = finalized.rawOutput;
 						updateCommandRunsWidget(store);
 
-						if (finalized.isError) {
-							terminalStatus = "error";
+						if (stepResult.status !== "done") {
+							terminalStatus = stepResult.status;
 							break;
 						}
 					}
@@ -2065,9 +2161,9 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 					const pipeline = store.pipelines.get(pipelineId);
 					if (pipeline) {
 						const hasError = pipeline.stepResults.some((step) => step.status === "error");
-						if (terminalStatus === "completed" && hasError) {
-							terminalStatus = "error";
-						}
+						const hasAborted = pipeline.stepResults.some((step) => step.status === "aborted");
+						if (hasError) terminalStatus = "error";
+						else if (terminalStatus === "completed" && hasAborted) terminalStatus = "aborted";
 						const orderedRuns = pipeline.stepRunIds
 							.map((runId) => store.commandRuns.get(runId))
 							.filter((run): run is CommandRunState => Boolean(run));

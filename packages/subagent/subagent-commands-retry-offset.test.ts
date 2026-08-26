@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HANG_TIMEOUT_MS } from "./constants.ts";
+import { checkForHungRuns } from "./lifecycle.ts";
 import { createStore } from "./store.ts";
 import type { SingleResult } from "./types.ts";
 
@@ -125,6 +127,133 @@ describe("commands retry persisted-session offset refresh", () => {
 		expect(store.commandRuns.get(1)?.autoAbortReason).toBeUndefined();
 		expect(store.commandRuns.get(1)?.errorClass).toBeUndefined();
 		await vi.runAllTicks();
+	});
+
+	it("blocks continuation while a hang-timeout abort is still settling", async () => {
+		const { registerAll } = await import("./commands.ts");
+		const store = createStore();
+		const { pi } = createPi();
+		const { commands } = registerAll(pi as never, store);
+		const abortController = new AbortController();
+		const run = {
+			id: 1,
+			agent: "worker",
+			task: "hung task",
+			status: "running" as const,
+			startedAt: Date.now() - HANG_TIMEOUT_MS - 2000,
+			elapsedMs: HANG_TIMEOUT_MS + 2000,
+			toolCalls: 0,
+			lastLine: "running",
+			turnCount: 1,
+			lastActivityAt: Date.now() - HANG_TIMEOUT_MS - 1000,
+			abortController,
+		};
+		store.commandRuns.set(1, run);
+		store.globalLiveRuns.set(1, {
+			runState: run,
+			abortController,
+			originSessionFile: path.join(tmpDir, "main.jsonl"),
+		});
+		checkForHungRuns(store, pi as never);
+		expect(abortController.signal.aborted).toBe(true);
+		expect(run).toMatchObject({ status: "error", errorClass: "aborted", abortPending: true });
+		const handler = commands.get("sub:isolate")?.handler;
+		const ctx = {
+			cwd: tmpDir,
+			hasUI: false,
+			ui: {
+				notify: vi.fn(),
+				select: vi.fn(),
+				getEditorText: vi.fn(() => ""),
+				setEditorText: vi.fn(),
+			},
+			sessionManager: {
+				getSessionFile: () => path.join(tmpDir, "main.jsonl"),
+				getEntries: () => [],
+			},
+		};
+
+		await handler?.("1 continue now", ctx as never);
+
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("still aborting"), "warning");
+		expect(mockRunSingleAgent).not.toHaveBeenCalled();
+		expect(store.commandRuns.get(1)).toMatchObject({ status: "error", abortPending: true, errorClass: "aborted" });
+	});
+
+	it("reports thrown command aborts as aborted with structured provenance", async () => {
+		const { registerAll } = await import("./commands.ts");
+		const store = createStore();
+		const { pi } = createPi();
+		const { commands } = registerAll(pi as never, store);
+		mockRunSingleAgent.mockRejectedValue(new Error("Subagent was aborted"));
+		const handler = commands.get("sub:isolate")?.handler;
+		const ctx = {
+			cwd: tmpDir,
+			hasUI: false,
+			ui: {
+				notify: vi.fn(),
+				select: vi.fn(),
+				getEditorText: vi.fn(() => ""),
+				setEditorText: vi.fn(),
+			},
+			sessionManager: {
+				getSessionFile: () => path.join(tmpDir, "main.jsonl"),
+				getEntries: () => [],
+			},
+		};
+
+		await handler?.("worker cancel task", ctx as never);
+		await vi.waitFor(() => {
+			expect(
+				pi.sendMessage.mock.calls.some(([message]) => message.content?.includes("[subagent:worker#1] aborted")),
+			).toBe(true);
+		});
+
+		expect(pi.sendMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				content: expect.stringContaining("[subagent:worker#1] aborted"),
+				details: expect.objectContaining({ errorClass: "aborted", stopReason: "aborted" }),
+			}),
+			expect.objectContaining({ deliverAs: "followUp" }),
+		);
+	});
+
+	it("reports returned command aborts as aborted with structured provenance", async () => {
+		const { registerAll } = await import("./commands.ts");
+		const store = createStore();
+		const { pi } = createPi();
+		const { commands } = registerAll(pi as never, store);
+		mockRunSingleAgent.mockResolvedValue(makeResult({ exitCode: 1, stopReason: "aborted", messages: [] }));
+		const handler = commands.get("sub:isolate")?.handler;
+		const ctx = {
+			cwd: tmpDir,
+			hasUI: false,
+			ui: {
+				notify: vi.fn(),
+				select: vi.fn(),
+				getEditorText: vi.fn(() => ""),
+				setEditorText: vi.fn(),
+			},
+			sessionManager: {
+				getSessionFile: () => path.join(tmpDir, "main.jsonl"),
+				getEntries: () => [],
+			},
+		};
+
+		await handler?.("worker cancel task", ctx as never);
+		await vi.waitFor(() => {
+			expect(
+				pi.sendMessage.mock.calls.some(([message]) => message.content?.includes("[subagent:worker#1] aborted")),
+			).toBe(true);
+		});
+
+		expect(pi.sendMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				content: expect.stringContaining("[subagent:worker#1] aborted"),
+				details: expect.objectContaining({ errorClass: "aborted", stopReason: "aborted" }),
+			}),
+			expect.objectContaining({ deliverAs: "followUp" }),
+		);
 	});
 
 	it("refreshes persistedSessionBaseOffset before each retry attempt", async () => {

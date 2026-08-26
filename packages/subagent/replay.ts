@@ -44,6 +44,7 @@ import {
 	TOOL_RESULT_DETAILS_SUMMARY_MAX_CHARS,
 	USAGE_EXTRA_ROWS,
 } from "./constants.js";
+import { getSubagentRunStatusLabel } from "./failure-telemetry.js";
 import { formatUsageStats, truncatePlainToWidth } from "./format.js";
 import type { CommandRunState, SessionReplayItem } from "./types.js";
 import { formatDuration, formatDurationBetween } from "./utils/time-utils.js";
@@ -351,7 +352,7 @@ export class SubagentSessionReplayOverlay {
 					theme.fg("toolTitle", theme.bold(`#${this.run.id} ${this.run.agent}`)) +
 					theme.fg(
 						"dim",
-						`  [${this.run.status}] ctx:${contextLabel} turn:${this.run.turnCount ?? DEFAULT_TURN_COUNT}  ${elapsedLabel}  tools:${this.run.toolCalls}`,
+						`  [${getSubagentRunStatusLabel(this.run.status, this.run.errorClass)}] ctx:${contextLabel} turn:${this.run.turnCount ?? DEFAULT_TURN_COUNT}  ${elapsedLabel}  tools:${this.run.toolCalls}`,
 					),
 				0,
 				0,

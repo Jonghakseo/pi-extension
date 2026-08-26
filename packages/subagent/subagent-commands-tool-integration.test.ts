@@ -214,6 +214,64 @@ describe("T09: command/tool runtime metadata integration", () => {
 			});
 		});
 
+		it("reports returned abort results as aborted with structured provenance", async () => {
+			mockRunSingleAgent.mockResolvedValue(
+				makeResult("worker", "cancel task", "", {
+					exitCode: 1,
+					stopReason: "aborted",
+				}),
+			);
+			const { createSubagentToolExecute } = await loadToolExecute();
+			const store = createStore();
+			const sent: SentCall[] = [];
+			const execute = createSubagentToolExecute(createPi(sent) as never, store);
+
+			await execute(
+				"call-returned-abort",
+				{ command: "subagent run worker -- cancel task" },
+				undefined,
+				undefined,
+				createCtx(),
+			);
+
+			await waitForAssertion(() => {
+				const aborted = sent.find(
+					(call) => typeof call.message.content === "string" && call.message.content.includes("] aborted"),
+				);
+				expect(aborted?.message.content).not.toContain("] failed");
+				expect(aborted?.message.details).toMatchObject({
+					errorClass: "aborted",
+					stopReason: "aborted",
+				});
+			});
+		});
+
+		it("reports thrown aborts as aborted instead of process failures", async () => {
+			mockRunSingleAgent.mockRejectedValue(new Error("Subagent was aborted"));
+			const { createSubagentToolExecute } = await loadToolExecute();
+			const store = createStore();
+			const sent: SentCall[] = [];
+			const execute = createSubagentToolExecute(createPi(sent) as never, store);
+
+			await execute(
+				"call-thrown-abort",
+				{ command: "subagent run worker -- cancel task" },
+				undefined,
+				undefined,
+				createCtx(),
+			);
+
+			await waitForAssertion(() => {
+				const aborted = sent.find(
+					(call) => typeof call.message.content === "string" && call.message.content.includes("] aborted"),
+				);
+				expect(aborted?.message.details).toMatchObject({
+					errorClass: "aborted",
+					stopReason: "aborted",
+				});
+			});
+		});
+
 		it("propagates runtime metadata to run state via updateRunFromResult", () => {
 			const run: CommandRunState = {
 				id: 1,

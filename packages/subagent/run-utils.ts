@@ -8,6 +8,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { FINISHED_GROUP_TTL_MS, MAX_FINISHED_GROUPS, STATUS_OUTPUT_PREVIEW_MAX_CHARS } from "./constants.js";
+import { getSubagentRunStatusLabel } from "./failure-telemetry.js";
 import type { SubagentStore } from "./store.js";
 import type {
 	BatchGroupState,
@@ -57,7 +58,7 @@ export interface ClearFinishedRunsOptions {
 export function formatCommandRunSummary(run: CommandRunState): string {
 	const elapsedSec = Math.max(0, Math.round(run.elapsedMs / 1000));
 	const contextLabel = run.contextMode === "main" ? "main" : "isolated";
-	return `#${run.id} [${run.status}] ${run.agent} ctx:${contextLabel} turn:${run.turnCount ?? 1} ${elapsedSec}s tools:${run.toolCalls}`;
+	return `#${run.id} [${getSubagentRunStatusLabel(run.status, run.errorClass)}] ${run.agent} ctx:${contextLabel} turn:${run.turnCount ?? 1} ${elapsedSec}s tools:${run.toolCalls}`;
 }
 
 /**
@@ -95,12 +96,19 @@ export function removeRun(store: SubagentStore, runId: number, options: RemoveRu
 	const globalEntry = store.globalLiveRuns.get(runId);
 	const controller = run.abortController ?? globalEntry?.abortController;
 
-	if (abortIfRunning && run.status === "running" && controller) {
+	if (abortIfRunning && run.status === "running") {
 		const reason = options.reason ?? "Aborting by remove...";
+		run.status = "error";
+		run.errorClass = "aborted";
+		run.elapsedMs = Date.now() - run.startedAt;
+		run.lastActivityAt = Date.now();
 		run.lastLine = reason;
 		run.lastOutput = reason;
-		controller.abort({ source: "remove_run", runId, reason, removalReason: options.removalReason });
-		aborted = true;
+		run.abortPending = Boolean(controller);
+		if (controller) {
+			controller.abort({ source: "remove_run", runId, reason, removalReason: options.removalReason });
+			aborted = true;
+		}
 	}
 
 	run.abortController = undefined;
@@ -112,6 +120,13 @@ export function removeRun(store: SubagentStore, runId: number, options: RemoveRu
 	if (persistRemovedEntry && options.pi && run.deliveryMode !== "humanOnly") {
 		const payload: Record<string, unknown> = { runId };
 		if (options.removalReason) payload.reason = options.removalReason;
+		if (run.errorClass === "aborted") {
+			payload.startedAt = run.startedAt;
+			payload.status = "aborted";
+			payload.errorClass = "aborted";
+			payload.stopReason = "aborted";
+			payload.message = run.lastLine;
+		}
 		try {
 			options.pi.appendEntry("subagent-removed", payload);
 		} catch {
@@ -225,16 +240,19 @@ export function snapshotBatchGroup(
 	terminalStatus: FinishedGroupSnapshot["terminalStatus"],
 ): FinishedGroupSnapshot {
 	let failed = 0;
+	let aborted = 0;
 	const members: FinishedGroupMember[] = batch.runIds.map((runId) => {
 		const run = store.commandRuns.get(runId);
 		if (!run) {
-			if (batch.failedRunIds.has(runId)) failed++;
+			if (batch.abortedRunIds.has(runId)) aborted++;
+			else if (batch.failedRunIds.has(runId)) failed++;
 			return {
 				summaryLine: `#${runId} [gone] (run no longer available)`,
 				output: batch.pendingResults.get(runId)?.trim() || "(no output)",
 			};
 		}
-		if (run.status === "error" || batch.failedRunIds.has(runId)) failed++;
+		if (run.errorClass === "aborted" || batch.abortedRunIds.has(runId)) aborted++;
+		else if (run.status === "error" || batch.failedRunIds.has(runId)) failed++;
 		return { summaryLine: formatCommandRunSummary(run), output: memberOutput(run, batch.pendingResults.get(runId)) };
 	});
 	return {
@@ -244,6 +262,7 @@ export function snapshotBatchGroup(
 		finishedAt: Date.now(),
 		total: batch.runIds.length,
 		failed,
+		aborted,
 		members,
 	};
 }
@@ -265,6 +284,7 @@ export function snapshotPipeline(
 		finishedAt: Date.now(),
 		total: pipeline.stepResults.length,
 		failed: pipeline.stepResults.filter((step) => step.status === "error").length,
+		aborted: pipeline.stepResults.filter((step) => step.status === "aborted").length,
 		members,
 	};
 }
@@ -304,9 +324,10 @@ function formatFinishedAge(finishedAt: number, now = Date.now()): string {
 export function formatFinishedGroupStatus(snapshot: FinishedGroupSnapshot, detailed: boolean): string {
 	const label = snapshot.kind === "batch" ? "subagent-batch" : "subagent-chain";
 	const failedSuffix = snapshot.failed > 0 ? `, ${snapshot.failed} failed` : "";
+	const abortedSuffix = snapshot.aborted > 0 ? `, ${snapshot.aborted} aborted` : "";
 	const header = `[${label}#${snapshot.groupId}] ${snapshot.terminalStatus} · ${snapshot.total} ${
 		snapshot.kind === "batch" ? "runs" : "steps"
-	}${failedSuffix} · finished ${formatFinishedAge(snapshot.finishedAt)}`;
+	}${failedSuffix}${abortedSuffix} · finished ${formatFinishedAge(snapshot.finishedAt)}`;
 	const body = snapshot.members
 		.map((member) => {
 			if (!detailed) return member.summaryLine;
