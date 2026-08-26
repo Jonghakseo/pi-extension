@@ -1505,6 +1505,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				};
 			}
 
+			// No run-start sendMessage here: mid-turn triggerTurn:false messages land between tool call and result (pi #8537).
 			ctx.ui?.notify?.(
 				`${continueFromRun ? `Resumed subagent #${runState.id}` : `Started subagent #${runState.id}`}: ${resolvedAgent}`,
 				"info",
