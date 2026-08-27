@@ -49,6 +49,7 @@ import {
 import { clearPendingGroupCompletion, upsertPendingGroupCompletion } from "./group-pending.js";
 import { enqueueSubagentInvocation } from "./invocation-queue.js";
 import { appendDisplayTaskUpdate, getSessionFileSize } from "./persisted-session.js";
+import { invokeWithAutoRetry, MAX_SUBAGENT_AUTO_RETRIES } from "./retry.js";
 import {
 	clearFinishedRuns,
 	evictStaleFinishedGroups,
@@ -1416,44 +1417,60 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			let claudeCheckpointSent = !!runState.claudeSessionId;
 			const abortSignal = runState.abortController?.signal;
 			const recordActivity = createRunActivityRecorder(pi, runState, (model) => resolveContextWindow(ctx, model));
-			return enqueueSubagentInvocation(async () => {
-				if (runState.removed || abortSignal?.aborted) throw new Error("Subagent was aborted");
-				return runSingleAgent(
-					ctx.cwd,
-					agents,
-					runState.agent,
-					taskForAgent,
-					runState.pipelineStepIndex,
-					abortSignal,
-					(partial) => {
-						if (runState.removed || store.disposed) return;
-						const current = partial.details?.results?.[0];
-						if (!current) return;
-						updateRunFromResult(runState, current);
-						recordActivity();
-						if (shouldRunAsync && !claudeCheckpointSent && runState.claudeSessionId) {
-							claudeCheckpointSent = true;
-							pi.sendMessage(buildRunStartMessage(runState, "started"), {
-								deliverAs: "followUp",
-								triggerTurn: false,
-							});
-						}
-						updateCommandRunsWidget(store);
-					},
-					(results) => makeDetails(mode, results),
-					{
-						sessionFile: runState.sessionFile,
-						resumeSessionId: runState.claudeSessionId,
-						sidecarSessionFile: runState.sessionFile,
-						persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
-						onDiagnostic: createRunDiagnosticSink(pi, runState),
-					},
-				);
-			}).then((result) =>
-				runState.removed || abortSignal?.aborted
+			return invokeWithAutoRetry({
+				maxRetries: MAX_SUBAGENT_AUTO_RETRIES,
+				signal: abortSignal,
+				onRetryScheduled: ({ retryIndex, maxRetries, delayMs, reason }) => {
+					runState.retryCount = retryIndex;
+					runState.lastRetryReason = reason;
+					runState.lastActivityAt = Date.now();
+					runState.lastLine = `Auto-retrying ${retryIndex}/${maxRetries} in ${Math.ceil(delayMs / 1000)}s: ${reason}`;
+					runState.lastOutput = runState.lastLine;
+					updateCommandRunsWidget(store);
+				},
+				invoke: () => {
+					runState.persistedSessionBaseOffset = getSessionFileSize(runState.sessionFile);
+					return enqueueSubagentInvocation(async () => {
+						if (runState.removed || abortSignal?.aborted) throw new Error("Subagent was aborted");
+						return runSingleAgent(
+							ctx.cwd,
+							agents,
+							runState.agent,
+							taskForAgent,
+							runState.pipelineStepIndex,
+							abortSignal,
+							(partial) => {
+								if (runState.removed || store.disposed) return;
+								const current = partial.details?.results?.[0];
+								if (!current) return;
+								updateRunFromResult(runState, current);
+								recordActivity();
+								if (shouldRunAsync && !claudeCheckpointSent && runState.claudeSessionId) {
+									claudeCheckpointSent = true;
+									pi.sendMessage(buildRunStartMessage(runState, "started"), {
+										deliverAs: "followUp",
+										triggerTurn: false,
+									});
+								}
+								updateCommandRunsWidget(store);
+							},
+							(results) => makeDetails(mode, results),
+							{
+								sessionFile: runState.sessionFile,
+								resumeSessionId: runState.claudeSessionId,
+								sidecarSessionFile: runState.sessionFile,
+								persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
+								onDiagnostic: createRunDiagnosticSink(pi, runState),
+							},
+						);
+					});
+				},
+			}).then(({ result, retryCount }) => {
+				runState.retryCount = retryCount;
+				return runState.removed || abortSignal?.aborted
 					? finalizeRunError(runState, new Error("Subagent was aborted"))
-					: finalizeRunState(runState, result),
-			);
+					: finalizeRunState(runState, result);
+			});
 		}
 
 		if (hasSingle) {

@@ -66,6 +66,7 @@ const TOOL_ERROR_PATTERNS = [
 ];
 
 const NETWORK_PATTERNS = [/\bwebsocket\b/i, /\bconnection error\b/i];
+const PROCESS_SIGNAL_TERMINATION_PATTERN = /\bprocess terminated by signal\b/i;
 
 export function classifySubagentFailure(input: FailureTelemetryInput): SubagentErrorClass | undefined {
 	if (!input.failed) return undefined;
@@ -76,9 +77,11 @@ export function classifySubagentFailure(input: FailureTelemetryInput): SubagentE
 	if (OVERLOADED_PATTERNS.some((pattern) => pattern.test(text))) return "overloaded";
 	if (RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(text))) return "rate_limit";
 	if (TOOL_ERROR_PATTERNS.some((pattern) => pattern.test(text))) return "tool_error";
+	const signalTerminated = PROCESS_SIGNAL_TERMINATION_PATTERN.test(input.stderr ?? "");
 	if (
-		NETWORK_PATTERNS.some((pattern) => pattern.test(text)) ||
-		/^terminated\.?$/i.test(input.errorMessage?.trim() ?? "")
+		!signalTerminated &&
+		(NETWORK_PATTERNS.some((pattern) => pattern.test(text)) ||
+			/^terminated\.?$/i.test(input.errorMessage?.trim() ?? ""))
 	) {
 		return "network_error";
 	}

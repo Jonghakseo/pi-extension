@@ -176,6 +176,42 @@ describe("T09: command/tool runtime metadata integration", () => {
 			});
 		});
 
+		it("auto-retries transient network failures via the tool path", async () => {
+			vi.useFakeTimers();
+			try {
+				mockRunSingleAgent
+					.mockResolvedValueOnce(
+						makeResult("worker", "network task", "", {
+							exitCode: 1,
+							stopReason: "error",
+							errorMessage: "WebSocket error",
+						}),
+					)
+					.mockResolvedValueOnce(makeResult("worker", "network task", "recovered"));
+				const { createSubagentToolExecute } = await loadToolExecute();
+				const store = createStore();
+				const sent: SentCall[] = [];
+				const execute = createSubagentToolExecute(createPi(sent) as never, store);
+
+				await execute(
+					"call-network-retry",
+					{ command: "subagent run worker -- network task" },
+					undefined,
+					undefined,
+					createCtx(),
+				);
+
+				await waitForAssertion(() => expect(mockRunSingleAgent).toHaveBeenCalledTimes(1));
+				await vi.advanceTimersByTimeAsync(2_000);
+				await waitForAssertion(() => {
+					expect(mockRunSingleAgent).toHaveBeenCalledTimes(2);
+					expect(sent.some((call) => call.message.content?.includes("] completed"))).toBe(true);
+				});
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it("propagates failure telemetry in completion details", async () => {
 			mockRunSingleAgent.mockResolvedValue(
 				makeResult("worker", "heavy task", "", {

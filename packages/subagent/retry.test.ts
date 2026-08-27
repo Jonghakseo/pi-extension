@@ -25,11 +25,14 @@ describe("diagnoseRetryableResult", () => {
 		expect(diagnoseRetryableResult(makeResult({ errorMessage: " Terminated. " })).retryable).toBe(true);
 	});
 
-	it("does not retry a runner signal termination diagnostic", () => {
+	it.each([
+		undefined,
+		"WebSocket error",
+		"Terminated.",
+	])("does not retry a runner signal termination diagnostic with errorMessage %s", (errorMessage) => {
 		expect(
-			diagnoseRetryableResult(
-				makeResult({ errorMessage: undefined, stderr: "[runner] process terminated by signal 15" }),
-			).retryable,
+			diagnoseRetryableResult(makeResult({ errorMessage, stderr: "[runner] process terminated by signal 15" }))
+				.retryable,
 		).toBe(false);
 	});
 

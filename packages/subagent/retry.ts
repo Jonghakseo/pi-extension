@@ -34,6 +34,8 @@ function buildFailureText(result: SingleResult): string {
 		.join("\n");
 }
 
+const PROCESS_SIGNAL_TERMINATION_PATTERN = /\bprocess terminated by signal\b/i;
+
 const TRANSIENT_FAILURE_PATTERNS: RegExp[] = [
 	/\bnetwork\b/i,
 	/\bwebsocket\b/i,
@@ -72,6 +74,7 @@ function matchesTransientPattern(text: string): boolean {
 
 export function diagnoseRetryableResult(result: SingleResult): RetryDecision {
 	if (result.stopReason === "aborted") return { retryable: false };
+	if (PROCESS_SIGNAL_TERMINATION_PATTERN.test(result.stderr)) return { retryable: false };
 
 	const finalOutput = getFinalOutput(result.messages).trim();
 	if (result.exitCode === 0 && result.stopReason !== "error" && finalOutput) {

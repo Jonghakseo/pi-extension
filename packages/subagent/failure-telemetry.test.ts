@@ -31,11 +31,16 @@ describe("classifySubagentFailure", () => {
 		}
 	});
 
-	it("does not classify a runner signal termination diagnostic as a network error", () => {
+	it.each([
+		undefined,
+		"WebSocket error",
+		"Terminated.",
+	])("does not classify a runner signal termination diagnostic with errorMessage %s as a network error", (errorMessage) => {
 		expect(
 			classifySubagentFailure({
 				failed: true,
 				exitCode: 143,
+				errorMessage,
 				stderr: "[runner] process terminated by signal 15",
 			}),
 		).toBe("process_error");
