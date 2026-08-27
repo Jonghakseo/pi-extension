@@ -11,7 +11,6 @@ export const STARTER_AGENT_NAMES = [
 	"reviewer",
 	"searcher",
 	"security-auditor",
-	"simplifier",
 	"verifier",
 	"worker",
 ] as const;
@@ -220,7 +219,7 @@ export async function offerStarterPackIfEmpty(
 
 	const accepted = await ctx.ui.confirm(
 		"Install starter subagents?",
-		"No subagent definitions were found. Install 9 portable English agents, the stress-interview and self-healing skills, and missing subagent settings? Existing files and configured values will not be overwritten.",
+		"No subagent definitions were found. Install 8 portable English agents, the stress-interview and self-healing skills, and missing subagent settings? Existing files and configured values will not be overwritten.",
 	);
 	if (!accepted) return { status: "declined", discovery };
 

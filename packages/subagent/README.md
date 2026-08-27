@@ -68,7 +68,7 @@ Run `/subagents`, `subagent agents`, or the `list-agents` tool to inspect discov
 
 ### Optional starter pack
 
-If no agents are found, `/subagents` can offer an optional, opinionated starter pack. It copies nine agent templates, two example workflow skills, and missing global `subagent` settings. Existing files and configured values are not overwritten.
+If no agents are found, `/subagents` can offer an optional, opinionated starter pack. It copies eight agent templates, two example workflow skills, and missing global `subagent` settings. Existing files and configured values are not overwritten.
 
 The starter pack is not required. Decline it if you prefer to define agents manually. It fills a missing `claudeRuntime` setting with `cli`; without that setting, the extension default is `sdk`.
 

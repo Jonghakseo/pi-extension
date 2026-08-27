@@ -12,7 +12,6 @@ const AGENT_NAMES = [
 	"reviewer",
 	"searcher",
 	"security-auditor",
-	"simplifier",
 	"verifier",
 	"worker",
 ] as const;
@@ -38,7 +37,7 @@ describe("subagent starter pack", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("installs nine portable English agents, two skills, and missing subagent settings", () => {
+	it("installs eight portable English agents, two skills, and missing subagent settings", () => {
 		const result = installStarterPack();
 
 		expect(result.createdAgents).toEqual(AGENT_NAMES);
@@ -126,7 +125,7 @@ describe("subagent starter pack", () => {
 		expect(first.status).toBe("declined");
 		expect(second.status).toBe("installed");
 		expect(confirm).toHaveBeenCalledTimes(2);
-		expect(second.discovery.agents).toHaveLength(9);
+		expect(second.discovery.agents).toHaveLength(8);
 	});
 
 	it("does not prompt when an agent already exists", async () => {
@@ -136,7 +135,7 @@ describe("subagent starter pack", () => {
 		const result = await offerStarterPackIfEmpty({ cwd: tmpDir, hasUI: true, ui: { confirm } });
 
 		expect(result.status).toBe("not-needed");
-		expect(result.discovery.agents).toHaveLength(9);
+		expect(result.discovery.agents).toHaveLength(8);
 		expect(confirm).not.toHaveBeenCalled();
 	});
 
