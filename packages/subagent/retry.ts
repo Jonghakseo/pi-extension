@@ -36,7 +36,9 @@ function buildFailureText(result: SingleResult): string {
 
 const TRANSIENT_FAILURE_PATTERNS: RegExp[] = [
 	/\bnetwork\b/i,
+	/\bwebsocket\b/i,
 	/\bfetch failed\b/i,
+	/\bconnection error\b/i,
 	/\bconnection reset\b/i,
 	/\bsocket hang up\b/i,
 	/\btemporar(?:y|ily) unavailable\b/i,
@@ -74,6 +76,11 @@ export function diagnoseRetryableResult(result: SingleResult): RetryDecision {
 	const finalOutput = getFinalOutput(result.messages).trim();
 	if (result.exitCode === 0 && result.stopReason !== "error" && finalOutput) {
 		return { retryable: false };
+	}
+
+	const errorMessage = result.errorMessage?.trim();
+	if (errorMessage && /^terminated\.?$/i.test(errorMessage)) {
+		return { retryable: true, reason: errorMessage };
 	}
 
 	const failureText = buildFailureText(result);

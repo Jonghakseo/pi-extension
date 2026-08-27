@@ -5,6 +5,7 @@ export type SubagentErrorClass =
 	| "overloaded"
 	| "rate_limit"
 	| "tool_error"
+	| "network_error"
 	| "aborted"
 	| "process_error"
 	| "unknown";
@@ -64,6 +65,8 @@ const TOOL_ERROR_PATTERNS = [
 	/invalid tool/i,
 ];
 
+const NETWORK_PATTERNS = [/\bwebsocket\b/i, /\bconnection error\b/i];
+
 export function classifySubagentFailure(input: FailureTelemetryInput): SubagentErrorClass | undefined {
 	if (!input.failed) return undefined;
 	const text = [input.errorMessage, input.stderr, input.output].filter(Boolean).join("\n");
@@ -73,6 +76,12 @@ export function classifySubagentFailure(input: FailureTelemetryInput): SubagentE
 	if (OVERLOADED_PATTERNS.some((pattern) => pattern.test(text))) return "overloaded";
 	if (RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(text))) return "rate_limit";
 	if (TOOL_ERROR_PATTERNS.some((pattern) => pattern.test(text))) return "tool_error";
+	if (
+		NETWORK_PATTERNS.some((pattern) => pattern.test(text)) ||
+		/^terminated\.?$/i.test(input.errorMessage?.trim() ?? "")
+	) {
+		return "network_error";
+	}
 	if ((input.exitCode ?? 0) !== 0) return "process_error";
 	return "unknown";
 }

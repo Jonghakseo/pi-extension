@@ -25,10 +25,30 @@ describe("classifySubagentFailure", () => {
 		);
 	});
 
+	it("classifies transient network failures", () => {
+		for (const errorMessage of ["WebSocket error", "Connection error.", " Terminated. "]) {
+			expect(classifySubagentFailure({ failed: true, exitCode: 1, errorMessage })).toBe("network_error");
+		}
+	});
+
+	it("does not classify a runner signal termination diagnostic as a network error", () => {
+		expect(
+			classifySubagentFailure({
+				failed: true,
+				exitCode: 143,
+				stderr: "[runner] process terminated by signal 15",
+			}),
+		).toBe("process_error");
+	});
+
 	it("classifies tool, aborted, process, and unknown failures", () => {
-		expect(classifySubagentFailure({ failed: true, stopReason: "error", errorMessage: "Tool execution failed" })).toBe(
-			"tool_error",
-		);
+		expect(
+			classifySubagentFailure({
+				failed: true,
+				stopReason: "error",
+				errorMessage: "Tool execution failed: WebSocket error",
+			}),
+		).toBe("tool_error");
 		expect(classifySubagentFailure({ failed: true, stopReason: "aborted" })).toBe("aborted");
 		expect(classifySubagentFailure({ failed: true, exitCode: 2 })).toBe("process_error");
 		expect(classifySubagentFailure({ failed: true, stopReason: "error", errorMessage: "unexpected" })).toBe("unknown");
