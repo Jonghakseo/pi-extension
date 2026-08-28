@@ -242,18 +242,18 @@ export function snapshotBatchGroup(
 	let failed = 0;
 	let aborted = 0;
 	const members: FinishedGroupMember[] = batch.runIds.map((runId) => {
-		const run = store.commandRuns.get(runId);
+		const run = batch.completedRuns.get(runId) ?? store.commandRuns.get(runId);
 		if (!run) {
 			if (batch.abortedRunIds.has(runId)) aborted++;
 			else if (batch.failedRunIds.has(runId)) failed++;
 			return {
 				summaryLine: `#${runId} [gone] (run no longer available)`,
-				output: batch.pendingResults.get(runId)?.trim() || "(no output)",
+				output: "(no output)",
 			};
 		}
 		if (run.errorClass === "aborted" || batch.abortedRunIds.has(runId)) aborted++;
 		else if (run.status === "error" || batch.failedRunIds.has(runId)) failed++;
-		return { summaryLine: formatCommandRunSummary(run), output: memberOutput(run, batch.pendingResults.get(runId)) };
+		return { summaryLine: formatCommandRunSummary(run), output: memberOutput(run) };
 	});
 	return {
 		groupId: batch.batchId,

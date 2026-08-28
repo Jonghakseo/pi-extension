@@ -177,7 +177,8 @@ export interface BatchGroupState {
 	abortedRunIds: Set<number>;
 	originSessionFile: string;
 	createdAt: number;
-	pendingResults: Map<number, string>;
+	/** Immutable member states captured as each batch run completes. */
+	completedRuns: Map<number, CommandRunState>;
 	pendingCompletion?: PendingCompletion;
 }
 
@@ -192,6 +193,8 @@ export interface PipelineStepResult {
 export interface PipelineState {
 	pipelineId: string;
 	currentIndex: number;
+	/** Set by `abort <pipelineId>` to prevent any subsequent step from launching. */
+	abortRequested: boolean;
 	stepRunIds: number[];
 	stepResults: PipelineStepResult[];
 	originSessionFile: string;

@@ -79,6 +79,26 @@ describe("subagent CLI batch/chain parsing", () => {
 		});
 	});
 
+	it("parses abort with a batch/chain groupId", () => {
+		expect(parseSubagentToolCommand("subagent abort b_1712_abc")).toEqual({
+			type: "params",
+			params: { asyncAction: "abort", groupId: "b_1712_abc" },
+		});
+		expect(parseSubagentToolCommand("subagent abort p_1712_xyz")).toEqual({
+			type: "params",
+			params: { asyncAction: "abort", groupId: "p_1712_xyz" },
+		});
+	});
+
+	it("keeps numeric abort targets and rejects group IDs for remove", () => {
+		expect(parseSubagentToolCommand("subagent abort 12")).toEqual({
+			type: "params",
+			params: { asyncAction: "abort", runId: 12 },
+		});
+		const parsed = parseSubagentToolCommand("subagent remove p_1712_xyz");
+		expect(parsed.type).toBe("error");
+	});
+
 	it("still parses numeric runId for status/detail", () => {
 		expect(parseSubagentToolCommand("subagent status 12")).toEqual({
 			type: "params",

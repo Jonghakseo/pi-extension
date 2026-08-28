@@ -115,7 +115,7 @@ describe("subagent extension lifecycle", () => {
 			abortedRunIds: new Set(),
 			originSessionFile: "/tmp/main.jsonl",
 			createdAt: Date.now(),
-			pendingResults: new Map(),
+			completedRuns: new Map(),
 		});
 		const pi = { appendEntry: vi.fn(), sendMessage: vi.fn() };
 

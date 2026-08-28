@@ -64,7 +64,7 @@ export const SUBAGENT_CLI_HELP_TEXT = [
 	"    subagent chain [--main|--isolated] --agent <agent> --task <task> --agent <agent> --task <task> ...",
 	"",
 	"  Cleanup:",
-	"    subagent abort <runId|runId,runId|all>",
+	"    subagent abort <runId|groupId|runId,runId|all>",
 	"    subagent remove <runId|runId,runId|all>",
 	"",
 	"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
@@ -88,6 +88,7 @@ export const SUBAGENT_CLI_HELP_TEXT = [
 	"    subagent status 22",
 	"    subagent detail 22",
 	"    subagent abort 22",
+	"    subagent abort p_1712...",
 	"    subagent remove all",
 	"",
 	"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
@@ -508,8 +509,14 @@ export function parseSubagentToolCommand(
 			if (!target)
 				return {
 					type: "error",
-					message: `❌ ${verb} requires <runId|runId,runId|all>\n\n✓ Examples:\n  subagent ${verb} 22\n  subagent ${verb} 22,23,24\n  subagent ${verb} all`,
+					message:
+						verb === "abort"
+							? "❌ abort requires <runId|groupId|runId,runId|all>\n\n✓ Examples:\n  subagent abort 22\n  subagent abort p_1712_abcd\n  subagent abort 22,23,24\n  subagent abort all"
+							: "❌ remove requires <runId|runId,runId|all>\n\n✓ Examples:\n  subagent remove 22\n  subagent remove 22,23,24\n  subagent remove all",
 				};
+			if (verb === "abort" && isGroupId(target)) {
+				return { type: "params", params: { asyncAction: "abort", groupId: target } };
+			}
 			const parsedTarget = parseRunTarget(target, options.knownRunIds);
 			if ("error" in parsedTarget)
 				return {

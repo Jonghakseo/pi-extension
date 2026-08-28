@@ -115,6 +115,14 @@ async function waitForAssertion(assertion: () => void, attempts = 20): Promise<v
 	throw lastError instanceof Error ? lastError : new Error("Assertion did not pass in time");
 }
 
+function waitForAbort(signal: AbortSignal): Promise<never> {
+	return new Promise((_, reject) => {
+		const rejectAsAborted = () => reject(new Error("Subagent was aborted"));
+		if (signal.aborted) rejectAsAborted();
+		else signal.addEventListener("abort", rejectAsAborted, { once: true });
+	});
+}
+
 describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 	beforeEach(() => {
 		setStdioTty(true);
@@ -626,6 +634,511 @@ describe("createSubagentToolExecute batch/chain grouped behavior", () => {
 		await waitForAssertion(() => {
 			expect(sent).toHaveLength(1);
 		});
+	});
+
+	it("aborts every running batch member by groupId", async () => {
+		mockRunSingleAgent.mockImplementation(
+			async (_cwd: unknown, _agents: unknown, _agentName: string, _task: string, _step: unknown, signal: AbortSignal) =>
+				await waitForAbort(signal),
+		);
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-abort-live-batch-launch",
+			{ command: 'subagent batch --main --agent worker --task "live a" --agent reviewer --task "live b"' },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+		const aborted = await execute(
+			"call-abort-live-batch",
+			{ command: `subagent abort ${batchId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+
+		expect(aborted.isError).toBeFalsy();
+		expect(aborted.content[0]?.text).toContain(batchId);
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+		expect(mockRunSingleAgent).toHaveBeenCalledTimes(2);
+		expect(sent[0]?.message.content).toContain("Outcomes: 2 aborted");
+		expect(store.commandRuns.get(1)?.removed).not.toBe(true);
+		expect(store.commandRuns.get(2)?.removed).not.toBe(true);
+	});
+
+	it("does not abort a continued batch member that no longer owns the batch", async () => {
+		let continuationSignal: AbortSignal | undefined;
+		let releaseContinuation: () => void = () => {};
+		const continuationGate = new Promise<void>((resolve) => {
+			releaseContinuation = resolve;
+		});
+		mockRunSingleAgent.mockImplementation(
+			async (_cwd: unknown, _agents: unknown, agentName: string, task: string, _step: unknown, signal: AbortSignal) => {
+				if (task.includes("initial batch member")) return makeResult(agentName, task, "BATCH_MEMBER_DONE");
+				if (task.includes("independent batch continuation")) {
+					continuationSignal = signal;
+					await continuationGate;
+					return makeResult(agentName, task, "CONTINUATION_DONE");
+				}
+				return await waitForAbort(signal);
+			},
+		);
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-batch-continuation-launch",
+			{
+				command:
+					'subagent batch --main --agent worker --task "initial batch member" --agent reviewer --task "active batch member"',
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+		await waitForAssertion(() => {
+			expect(store.commandRuns.get(1)?.status).toBe("done");
+		});
+
+		await execute(
+			"call-batch-member-continuation",
+			{ command: "subagent continue 1 -- independent batch continuation" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		await waitForAssertion(() => {
+			expect(continuationSignal).toBeDefined();
+		});
+		expect(store.commandRuns.get(1)?.batchId).toBeUndefined();
+
+		const aborted = await execute(
+			"call-batch-abort-stale-member",
+			{ command: `subagent abort ${batchId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(aborted.content[0]?.text).toContain("Aborting: #2.");
+		expect(aborted.content[0]?.text).not.toContain("#1");
+		expect(continuationSignal?.aborted).toBe(false);
+
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+		releaseContinuation();
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(2);
+		});
+	});
+
+	it("does not abort a continued chain step that no longer owns the pipeline", async () => {
+		let continuationSignal: AbortSignal | undefined;
+		let releaseContinuation: () => void = () => {};
+		const continuationGate = new Promise<void>((resolve) => {
+			releaseContinuation = resolve;
+		});
+		mockRunSingleAgent.mockImplementation(
+			async (_cwd: unknown, _agents: unknown, agentName: string, task: string, _step: unknown, signal: AbortSignal) => {
+				if (task.includes("initial chain step")) return makeResult(agentName, task, "CHAIN_STEP_DONE");
+				if (task.includes("independent chain continuation")) {
+					continuationSignal = signal;
+					await continuationGate;
+					return makeResult(agentName, task, "CONTINUATION_DONE");
+				}
+				return await waitForAbort(signal);
+			},
+		);
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-chain-continuation-launch",
+			{
+				command:
+					'subagent chain --main --agent worker --task "initial chain step" --agent reviewer --task "active chain step"',
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+		const pipelineId = /Started async subagent chain (p_[^ ]+)/.exec(launch.content[0]?.text ?? "")?.[1] as string;
+		await waitForAssertion(() => {
+			expect(store.commandRuns.get(1)?.status).toBe("done");
+			expect(store.commandRuns.get(2)?.status).toBe("running");
+		});
+
+		await execute(
+			"call-chain-step-continuation",
+			{ command: "subagent continue 1 -- independent chain continuation" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		await waitForAssertion(() => {
+			expect(continuationSignal).toBeDefined();
+		});
+		expect(store.commandRuns.get(1)?.pipelineId).toBeUndefined();
+
+		const aborted = await execute(
+			"call-chain-abort-stale-step",
+			{ command: `subagent abort ${pipelineId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(aborted.content[0]?.text).toContain("Aborting: #2.");
+		expect(aborted.content[0]?.text).not.toContain("#1");
+		expect(continuationSignal?.aborted).toBe(false);
+
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+		releaseContinuation();
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(2);
+		});
+	});
+
+	it("keeps a continued batch member live for its cross-session pending completion after group cleanup", async () => {
+		let currentSessionFile = "/tmp/main-session.jsonl";
+		let releaseSecondMember: () => void = () => {};
+		let releaseContinuation: () => void = () => {};
+		const secondMemberGate = new Promise<void>((resolve) => {
+			releaseSecondMember = resolve;
+		});
+		const continuationGate = new Promise<void>((resolve) => {
+			releaseContinuation = resolve;
+		});
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			if (task.includes("first batch member")) return makeResult(agentName, task, "FIRST_BATCH_DONE");
+			if (task.includes("second batch member")) {
+				await secondMemberGate;
+				return makeResult(agentName, task, "SECOND_BATCH_DONE");
+			}
+			if (task.includes("preserved continuation")) {
+				await continuationGate;
+				return makeResult(agentName, task, "CONTINUATION_DONE");
+			}
+			throw new Error(`Unexpected task: ${task}`);
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+		ctx.sessionManager.getSessionFile = () => currentSessionFile;
+
+		const launch = await execute(
+			"call-continuation-cleanup-launch",
+			{
+				command:
+					'subagent batch --main --agent worker --task "first batch member" --agent reviewer --task "second batch member"',
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+		await waitForAssertion(() => {
+			expect(store.commandRuns.get(1)?.status).toBe("done");
+		});
+
+		await execute(
+			"call-continuation-cleanup-continue",
+			{ command: "subagent continue 1 -- preserved continuation" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		await waitForAssertion(() => {
+			expect(store.commandRuns.get(1)?.batchId).toBeUndefined();
+			expect(store.globalLiveRuns.has(1)).toBe(true);
+		});
+
+		releaseSecondMember();
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+			expect(sent[0]?.message.content).toContain(`[subagent-batch#${batchId}] completed`);
+			expect(store.globalLiveRuns.has(1)).toBe(true);
+		});
+
+		currentSessionFile = "/tmp/other-session.jsonl";
+		releaseContinuation();
+		await waitForAssertion(() => {
+			expect(store.globalLiveRuns.get(1)?.pendingCompletion?.message.content).toContain("CONTINUATION_DONE");
+		});
+	});
+
+	it("uses completed batch member states in its summary and retained snapshot", async () => {
+		let releaseSecondMember: () => void = () => {};
+		let releaseContinuation: () => void = () => {};
+		const secondMemberGate = new Promise<void>((resolve) => {
+			releaseSecondMember = resolve;
+		});
+		const continuationGate = new Promise<void>((resolve) => {
+			releaseContinuation = resolve;
+		});
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			if (task.includes("snapshot first member")) return makeResult(agentName, task, "ORIGINAL_BATCH_OUTPUT");
+			if (task.includes("snapshot second member")) {
+				await secondMemberGate;
+				return makeResult(agentName, task, "SECOND_BATCH_OUTPUT");
+			}
+			if (task.includes("snapshot continuation")) {
+				await continuationGate;
+				return makeResult(agentName, task, "CONTINUATION_OUTPUT");
+			}
+			throw new Error(`Unexpected task: ${task}`);
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-snapshot-batch-launch",
+			{
+				command:
+					'subagent batch --main --agent worker --task "snapshot first member" --agent reviewer --task "snapshot second member"',
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+		await waitForAssertion(() => {
+			expect(store.commandRuns.get(1)?.status).toBe("done");
+		});
+		await execute(
+			"call-snapshot-batch-continue",
+			{ command: "subagent continue 1 -- snapshot continuation" },
+			undefined,
+			undefined,
+			ctx,
+		);
+
+		releaseSecondMember();
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+		expect(sent[0]?.message.content).toContain("ORIGINAL_BATCH_OUTPUT");
+		expect(sent[0]?.message.content).toContain("SECOND_BATCH_OUTPUT");
+		expect(store.finishedGroups.get(batchId)?.members[0]?.output).toBe("ORIGINAL_BATCH_OUTPUT");
+
+		releaseContinuation();
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(2);
+		});
+	});
+
+	it("aborts batch members owned only by globalLiveRuns after commandRuns is cleared", async () => {
+		mockRunSingleAgent.mockImplementation(
+			async (_cwd: unknown, _agents: unknown, _agentName: string, _task: string, _step: unknown, signal: AbortSignal) =>
+				await waitForAbort(signal),
+		);
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-global-batch-launch",
+			{ command: 'subagent batch --main --agent worker --task "live a" --agent reviewer --task "live b"' },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const batchId = launch.details.launches?.[0]?.batchId as string;
+		store.commandRuns.clear();
+
+		const aborted = await execute(
+			"call-global-batch-abort",
+			{ command: `subagent abort ${batchId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(aborted.content[0]?.text).toContain("Aborting: #1, #2.");
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+	});
+
+	it("aborts the active chain step owned only by globalLiveRuns after commandRuns is cleared", async () => {
+		mockRunSingleAgent.mockImplementation(
+			async (_cwd: unknown, _agents: unknown, _agentName: string, _task: string, _step: unknown, signal: AbortSignal) =>
+				await waitForAbort(signal),
+		);
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-global-chain-launch",
+			{ command: 'subagent chain --main --agent worker --task "step 1" --agent reviewer --task "step 2"' },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const pipelineId = /Started async subagent chain (p_[^ ]+)/.exec(launch.content[0]?.text ?? "")?.[1] as string;
+		store.commandRuns.clear();
+
+		const aborted = await execute(
+			"call-global-chain-abort",
+			{ command: `subagent abort ${pipelineId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(aborted.content[0]?.text).toContain("Aborting: #1.");
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+	});
+
+	it("keeps numeric abort and remove behavior distinct from group abort", async () => {
+		mockRunSingleAgent.mockImplementation(
+			async (_cwd: unknown, _agents: unknown, _agentName: string, _task: string, _step: unknown, signal: AbortSignal) =>
+				await waitForAbort(signal),
+		);
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const ctx = createCtx();
+
+		const abortStore = createStore();
+		const abortSent: SentCall[] = [];
+		const abortExecute = createSubagentToolExecute(createPi(abortSent) as never, abortStore);
+		await abortExecute(
+			"call-numeric-abort-launch",
+			{ command: "subagent run worker -- numeric abort" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const aborted = await abortExecute(
+			"call-numeric-abort",
+			{ command: "subagent abort 1" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(aborted.content[0]?.text).toBe("Aborting subagent run #1...");
+		await waitForAssertion(() => {
+			expect(abortSent).toHaveLength(1);
+		});
+		expect(abortStore.commandRuns.get(1)?.removed).not.toBe(true);
+
+		const removeStore = createStore();
+		const removeExecute = createSubagentToolExecute(createPi([]) as never, removeStore);
+		await removeExecute(
+			"call-numeric-remove-launch",
+			{ command: "subagent run worker -- numeric remove" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const removed = await removeExecute(
+			"call-numeric-remove",
+			{ command: "subagent remove 1" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(removed.content[0]?.text).toContain("Removed subagent run #1 (aborting in background).");
+		expect(removeStore.commandRuns.get(1)?.removed).toBe(true);
+	});
+
+	it("aborts the active chain step by groupId and does not launch the next step", async () => {
+		mockRunSingleAgent.mockImplementation(
+			async (_cwd: unknown, _agents: unknown, _agentName: string, _task: string, _step: unknown, signal: AbortSignal) =>
+				await waitForAbort(signal),
+		);
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-abort-live-chain-launch",
+			{ command: 'subagent chain --main --agent worker --task "step 1" --agent reviewer --task "step 2"' },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const pipelineId = /Started async subagent chain (p_[^ ]+)/.exec(launch.content[0]?.text ?? "")?.[1] as string;
+		const aborted = await execute(
+			"call-abort-live-chain",
+			{ command: `subagent abort ${pipelineId}` },
+			undefined,
+			undefined,
+			ctx,
+		);
+
+		expect(aborted.isError).toBeFalsy();
+		expect(aborted.content[0]?.text).toContain(pipelineId);
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+		expect(mockRunSingleAgent).toHaveBeenCalledTimes(1);
+		expect(sent[0]?.message.content).toContain("Outcomes: 1 aborted");
+	});
+
+	it("latches a chain group abort when the active step completes during cancellation", async () => {
+		let releaseFirstStep: () => void = () => {};
+		const firstStepGate = new Promise<void>((resolve) => {
+			releaseFirstStep = resolve;
+		});
+		mockRunSingleAgent.mockImplementation(async (_cwd: unknown, _agents: unknown, agentName: string, task: string) => {
+			if (agentName === "worker") {
+				await firstStepGate;
+				return makeResult(agentName, task, "FIRST_STEP_DONE");
+			}
+			return makeResult(agentName, task, "SECOND_STEP_SHOULD_NOT_RUN");
+		});
+		const { createSubagentToolExecute } = await loadToolExecute();
+		const store = createStore();
+		const sent: SentCall[] = [];
+		const execute = createSubagentToolExecute(createPi(sent) as never, store);
+		const ctx = createCtx();
+
+		const launch = await execute(
+			"call-latched-chain-launch",
+			{ command: 'subagent chain --main --agent worker --task "step 1" --agent reviewer --task "step 2"' },
+			undefined,
+			undefined,
+			ctx,
+		);
+		const pipelineId = /Started async subagent chain (p_[^ ]+)/.exec(launch.content[0]?.text ?? "")?.[1] as string;
+		await execute("call-latched-chain-abort", { command: `subagent abort ${pipelineId}` }, undefined, undefined, ctx);
+		expect(store.pipelines.get(pipelineId)?.abortRequested).toBe(true);
+
+		releaseFirstStep();
+		await waitForAssertion(() => {
+			expect(sent).toHaveLength(1);
+		});
+		expect(mockRunSingleAgent).toHaveBeenCalledTimes(1);
+		expect(sent[0]?.message.content).toContain(`[subagent-chain#${pipelineId}] aborted`);
+		expect(store.commandRuns.get(1)?.removed).not.toBe(true);
 	});
 
 	it("reports live batch progress when queried by groupId", async () => {

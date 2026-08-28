@@ -98,9 +98,9 @@ subagent run <agent> [--main|--isolated] -- <task>
 subagent continue <runId> [--agent <agent>] [--main|--isolated] -- <task>
 subagent batch [--main|--isolated] --agent <agent> --task <task> ...
 subagent chain [--main|--isolated] --agent <agent> --task <task> ...
-subagent status <runId>
-subagent detail <runId>
-subagent abort <runId|runId,runId|all>
+subagent status <runId|groupId>
+subagent detail <runId|groupId>
+subagent abort <runId|groupId|runId,runId|all>
 subagent remove <runId|runId,runId|all>
 ```
 

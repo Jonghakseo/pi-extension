@@ -502,7 +502,13 @@ function recordBatchResult(batch: BatchGroupState, finalized: FinalizedRun): voi
 	batch.completedRunIds.add(runId);
 	if (status === "aborted") batch.abortedRunIds.add(runId);
 	else if (status === "error") batch.failedRunIds.add(runId);
-	batch.pendingResults.set(runId, finalized.rawOutput);
+	batch.completedRuns.set(runId, { ...finalized.runState, abortController: undefined });
+}
+
+function getCompletedBatchRuns(batch: BatchGroupState): CommandRunState[] {
+	return batch.runIds
+		.map((runId) => batch.completedRuns.get(runId))
+		.filter((run): run is CommandRunState => Boolean(run));
 }
 
 function buildRunCompletionMessage(finalized: FinalizedRun, options?: { display?: boolean }) {
@@ -1040,6 +1046,45 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			};
 		}
 
+		let abortGroupTarget: { groupId: string; kind: "batch" | "chain" } | undefined;
+		if (asyncAction === "abort" && typeof cmdParams.groupId === "string") {
+			evictStaleFinishedGroups(store);
+			const groupId = cmdParams.groupId;
+			const finished = store.finishedGroups.get(groupId);
+			if (finished) {
+				return {
+					content: [{ type: "text", text: `Subagent ${finished.kind} ${groupId} has already finished.` }],
+					details: makeDetails("single"),
+				};
+			}
+
+			const batch = store.batchGroups.get(groupId);
+			const pipeline = store.pipelines.get(groupId);
+			if (!batch && !pipeline) {
+				return {
+					content: [{ type: "text", text: `Unknown subagent group "${groupId}".` }],
+					details: makeDetails("single"),
+					isError: true,
+				};
+			}
+
+			abortGroupTarget = { groupId, kind: batch ? "batch" : "chain" };
+			if (pipeline) pipeline.abortRequested = true;
+			const groupRunIds = (batch?.runIds ?? pipeline?.stepRunIds ?? []).filter((runId) => {
+				const run = store.globalLiveRuns.get(runId)?.runState ?? store.commandRuns.get(runId);
+				return batch ? run?.batchId === groupId : run?.pipelineId === groupId;
+			});
+			if (groupRunIds.length === 0) {
+				return {
+					content: [
+						{ type: "text", text: `Subagent ${abortGroupTarget.kind} ${groupId} has no started runs to abort.` },
+					],
+					details: makeDetails("single"),
+				};
+			}
+			cmdParams.runIds = groupRunIds;
+		}
+
 		if ((asyncAction === "status" || asyncAction === "detail") && typeof cmdParams.groupId === "string") {
 			evictStaleFinishedGroups(store);
 			const groupId = cmdParams.groupId;
@@ -1178,7 +1223,9 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				const unknown: number[] = [];
 
 				for (const runId of targetRunIds) {
-					const run = store.commandRuns.get(runId);
+					const run = abortGroupTarget
+						? (store.globalLiveRuns.get(runId)?.runState ?? store.commandRuns.get(runId))
+						: store.commandRuns.get(runId);
 					if (!run) {
 						unknown.push(runId);
 						continue;
@@ -1200,7 +1247,13 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 					updateCommandRunsWidget(store, ctx as WidgetRenderCtx);
 				}
 
-				if (targetRunIds.length === 1 && aborting.length === 1 && notRunning.length === 0 && unknown.length === 0) {
+				if (
+					!abortGroupTarget &&
+					targetRunIds.length === 1 &&
+					aborting.length === 1 &&
+					notRunning.length === 0 &&
+					unknown.length === 0
+				) {
 					return {
 						content: [{ type: "text", text: `Aborting subagent run #${aborting[0]}...` }],
 						details: makeDetails("single"),
@@ -1208,6 +1261,9 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				}
 
 				const lines: string[] = [];
+				if (abortGroupTarget) {
+					lines.push(`Subagent ${abortGroupTarget.kind} ${abortGroupTarget.groupId}:`);
+				}
 				if (aborting.length > 0) lines.push(`Aborting: ${aborting.map((id) => `#${id}`).join(", ")}.`);
 				if (notRunning.length > 0) lines.push(`Not running: ${notRunning.map((id) => `#${id}`).join(", ")}.`);
 				if (unknown.length > 0) lines.push(`Unknown: ${unknown.map((id) => `#${id}`).join(", ")}.`);
@@ -1411,6 +1467,13 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			clearParentAbortListener(runId);
 			store.globalLiveRuns.delete(runId);
 			store.recentLaunchTimestamps.delete(runId);
+		}
+
+		function cleanupGroupRunAfterFinalDelivery(runId: number, groupId: string, kind: "batch" | "chain") {
+			const run = store.globalLiveRuns.get(runId)?.runState ?? store.commandRuns.get(runId);
+			const ownsGroup = kind === "batch" ? run?.batchId === groupId : run?.pipelineId === groupId;
+			if (run && !ownsGroup) return;
+			cleanupRunAfterFinalDelivery(runId);
 		}
 
 		function launchRunInBackground(runState: CommandRunState, taskForAgent: string): Promise<FinalizedRun> {
@@ -1734,7 +1797,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				abortedRunIds: new Set(),
 				originSessionFile,
 				createdAt: Date.now(),
-				pendingResults: new Map(),
+				completedRuns: new Map(),
 			});
 			updateCommandRunsWidget(store, ctx as WidgetRenderCtx);
 
@@ -1750,11 +1813,13 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						}
 					}),
 				);
-				const orderedRuns = runStates.map(({ runState }) => runState);
 				const batchForSnapshot = store.batchGroups.get(batchId);
 				if (batchForSnapshot) {
 					for (const finalized of finalizedRuns) recordBatchResult(batchForSnapshot, finalized);
 				}
+				const orderedRuns = batchForSnapshot
+					? getCompletedBatchRuns(batchForSnapshot)
+					: runStates.map(({ runState }) => runState);
 				const terminalStatus = resolveGroupTerminalStatus(
 					batchForSnapshot?.failedRunIds.size ?? 0,
 					batchForSnapshot?.abortedRunIds.size ?? 0,
@@ -1763,7 +1828,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				if (batchForSnapshot) {
 					retireFinishedGroup(store, snapshotBatchGroup(store, batchForSnapshot, terminalStatus));
 				}
-				for (const { runState } of runStates) cleanupRunAfterFinalDelivery(runState.id);
+				for (const { runState } of runStates) cleanupGroupRunAfterFinalDelivery(runState.id, batchId, "batch");
 				clearPendingGroupCompletion("batch", batchId);
 				store.batchGroups.delete(batchId);
 				trimCommandRunHistory(store, {
@@ -1799,9 +1864,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						updateCommandRunsWidget(store);
 
 						if (batch.completedRunIds.size === batch.runIds.length) {
-							const orderedRuns = batch.runIds
-								.map((runId) => store.commandRuns.get(runId))
-								.filter((run): run is CommandRunState => Boolean(run));
+							const orderedRuns = getCompletedBatchRuns(batch);
 							const batchTerminalStatus = resolveGroupTerminalStatus(batch.failedRunIds.size, batch.abortedRunIds.size);
 							const content = formatBatchSummary(batchId, orderedRuns, batchTerminalStatus);
 							const message = {
@@ -1819,7 +1882,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 							if (isInOriginSession(ctx, batch.originSessionFile)) {
 								pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
 								clearPendingGroupCompletion("batch", batchId);
-								for (const runId of batch.runIds) cleanupRunAfterFinalDelivery(runId);
+								for (const runId of batch.runIds) cleanupGroupRunAfterFinalDelivery(runId, batchId, "batch");
 								store.batchGroups.delete(batchId);
 							} else {
 								batch.pendingCompletion = makePendingCompletion(message, true);
@@ -1853,9 +1916,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						if (!batch) return;
 						recordBatchResult(batch, finalized);
 						if (batch.completedRunIds.size === batch.runIds.length) {
-							const orderedRuns = batch.runIds
-								.map((runId) => store.commandRuns.get(runId))
-								.filter((run): run is CommandRunState => Boolean(run));
+							const orderedRuns = getCompletedBatchRuns(batch);
 							const batchTerminalStatus = resolveGroupTerminalStatus(batch.failedRunIds.size, batch.abortedRunIds.size);
 							const message = {
 								customType: "subagent-tool" as const,
@@ -1872,7 +1933,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 							if (isInOriginSession(ctx, batch.originSessionFile)) {
 								pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
 								clearPendingGroupCompletion("batch", batchId);
-								for (const runId of batch.runIds) cleanupRunAfterFinalDelivery(runId);
+								for (const runId of batch.runIds) cleanupGroupRunAfterFinalDelivery(runId, batchId, "batch");
 								store.batchGroups.delete(batchId);
 							} else {
 								batch.pendingCompletion = makePendingCompletion(message, true);
@@ -1931,6 +1992,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			store.pipelines.set(pipelineId, {
 				pipelineId,
 				currentIndex: 0,
+				abortRequested: false,
 				stepRunIds: [],
 				stepResults: [],
 				originSessionFile,
@@ -1952,6 +2014,10 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 
 				try {
 					for (let index = 0; index < steps.length; index++) {
+						if (pipeline.abortRequested) {
+							terminalStatus = "aborted";
+							break;
+						}
 						pipeline.currentIndex = index;
 						const step = steps[index];
 						const pipelineReferenceSection =
@@ -2005,26 +2071,20 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						}
 						finalizedRuns.push(finalized);
 
-						if (runState.removed) {
-							terminalStatus = "aborted";
-							pipeline.stepResults.push({
-								runId: runState.id,
-								agent: runState.agent,
-								task: step.task,
-								output: finalized.rawOutput || "Run removed before pipeline completion.",
-								status: "aborted",
-							});
-							break;
-						}
-
-						const stepStatus = getFinalizedRunStatus(finalized);
+						const stepStatus = runState.removed ? "aborted" : getFinalizedRunStatus(finalized);
 						pipeline.stepResults.push({
 							runId: runState.id,
 							agent: runState.agent,
 							task: step.task,
-							output: finalized.rawOutput,
+							output: runState.removed
+								? finalized.rawOutput || "Run removed before pipeline completion."
+								: finalized.rawOutput,
 							status: stepStatus,
 						});
+						if (runState.removed || pipeline.abortRequested) {
+							terminalStatus = "aborted";
+							break;
+						}
 						previousOutput = finalized.rawOutput;
 						updateCommandRunsWidget(store);
 
@@ -2050,7 +2110,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 				else if (terminalStatus === "completed" && hasAborted) terminalStatus = "aborted";
 				const content = formatPipelineSummary(pipelineId, pipeline.stepResults, terminalStatus);
 				retireFinishedGroup(store, snapshotPipeline(pipeline, terminalStatus));
-				for (const runId of pipeline.stepRunIds) cleanupRunAfterFinalDelivery(runId);
+				for (const runId of pipeline.stepRunIds) cleanupGroupRunAfterFinalDelivery(runId, pipelineId, "chain");
 				clearPendingGroupCompletion("chain", pipelineId);
 				store.pipelines.delete(pipelineId);
 				trimCommandRunHistory(store, {
@@ -2082,6 +2142,10 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 					for (let index = 0; index < steps.length; index++) {
 						const pipeline = store.pipelines.get(pipelineId);
 						if (!pipeline) return;
+						if (pipeline.abortRequested) {
+							terminalStatus = "aborted";
+							break;
+						}
 						pipeline.currentIndex = index;
 
 						const step = steps[index];
@@ -2134,26 +2198,20 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						} finally {
 							clearRunAbortState(runState);
 						}
-						if (runState.removed) {
-							terminalStatus = "aborted";
-							pipeline.stepResults.push({
-								runId: runState.id,
-								agent: runState.agent,
-								task: step.task,
-								output: finalized.rawOutput || "Run removed before pipeline completion.",
-								status: "aborted",
-							});
-							break;
-						}
-
 						const stepResult: PipelineStepResult = {
 							runId: runState.id,
 							agent: runState.agent,
 							task: step.task,
-							output: finalized.rawOutput,
-							status: getFinalizedRunStatus(finalized),
+							output: runState.removed
+								? finalized.rawOutput || "Run removed before pipeline completion."
+								: finalized.rawOutput,
+							status: runState.removed ? "aborted" : getFinalizedRunStatus(finalized),
 						};
 						pipeline.stepResults.push(stepResult);
+						if (runState.removed || pipeline.abortRequested) {
+							terminalStatus = "aborted";
+							break;
+						}
 						previousOutput = finalized.rawOutput;
 						updateCommandRunsWidget(store);
 
@@ -2199,7 +2257,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						if (isInOriginSession(ctx, pipeline.originSessionFile)) {
 							pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
 							clearPendingGroupCompletion("chain", pipelineId);
-							for (const runId of pipeline.stepRunIds) cleanupRunAfterFinalDelivery(runId);
+							for (const runId of pipeline.stepRunIds) cleanupGroupRunAfterFinalDelivery(runId, pipelineId, "chain");
 							store.pipelines.delete(pipelineId);
 						} else {
 							pipeline.pendingCompletion = makePendingCompletion(message, true);
