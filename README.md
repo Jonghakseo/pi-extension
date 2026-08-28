@@ -34,6 +34,10 @@ packages/
 
 This repository uses pnpm workspaces for local management and npm-compatible package manifests for publishing.
 
+## Maintenance notes
+
+- [Pi upstream compatibility](docs/pi-upstream-compatibility.md): release, `main`, and experimental `dev` API differences, extension impact, and the upgrade recheck procedure.
+
 ## Quality gates
 
 This monorepo uses Biome as the single formatter/linter, Vitest for automated tests, and Lefthook for local Git hooks.
