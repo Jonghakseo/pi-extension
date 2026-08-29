@@ -1,0 +1,57 @@
+{
+	"name": "@ryan_nookpi/pi-extension-cron",
+	"version": "0.1.0",
+	"description": "Persistent scheduled Pi jobs backed by a detached daemon and macOS launchd.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/cron"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/cron#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"cron",
+		"scheduler",
+		"launchd"
+	],
+	"files": [
+		"index.ts",
+		"cli.ts",
+		"daemon-client.ts",
+		"daemon.mjs",
+		"launchd.ts",
+		"schedule.ts",
+		"store.ts",
+		"types.ts",
+		"README.md"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"typebox": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		},
+		"@earendil-works/pi-tui": {
+			"optional": true
+		},
+		"typebox": {
+			"optional": true
+		}
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

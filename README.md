@@ -8,6 +8,7 @@ Standalone pi extensions managed in one repository and published as separate npm
 packages/
   ask-user-question/
   auto-name/
+  bash-async/
   cc-system-prompt/
   claude-hooks-bridge/
   claude-mcp-bridge/
@@ -16,6 +17,7 @@ packages/
   codex-fast-mode/
   codex-large-context/   (deprecated)
   cross-agent/
+  cron/
   delayed-action/
   diff-review/
   generative-ui/
@@ -93,6 +95,7 @@ Interactive/runtime-heavy extension entrypoints remain validated by the normal t
 ```bash
 pi install npm:@ryan_nookpi/pi-extension-ask-user-question
 pi install npm:@ryan_nookpi/pi-extension-auto-name
+pi install npm:@ryan_nookpi/pi-extension-bash-async
 pi install npm:@ryan_nookpi/pi-extension-cc-system-prompt
 pi install npm:@ryan_nookpi/pi-extension-claude-hooks-bridge
 pi install npm:@ryan_nookpi/pi-extension-claude-mcp-bridge
@@ -100,6 +103,7 @@ pi install npm:@ryan_nookpi/pi-extension-claude-spinner
 pi install npm:@ryan_nookpi/pi-extension-clipboard
 pi install npm:@ryan_nookpi/pi-extension-codex-fast-mode
 pi install npm:@ryan_nookpi/pi-extension-cross-agent
+pi install npm:@ryan_nookpi/pi-extension-cron
 pi install npm:@ryan_nookpi/pi-extension-delayed-action
 pi install npm:@ryan_nookpi/pi-extension-diff-review
 pi install npm:@ryan_nookpi/pi-extension-generative-ui

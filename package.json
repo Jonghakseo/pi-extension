@@ -36,6 +36,7 @@
 		"publish:all": "pnpm run verify:strict && pnpm -r --filter './packages/*' publish --access public --no-git-checks",
 		"publish:ask-user-question": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-ask-user-question publish --access public --no-git-checks",
 		"publish:auto-name": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-auto-name publish --access public --no-git-checks",
+		"publish:bash-async": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-bash-async publish --access public --no-git-checks",
 		"publish:clipboard": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-clipboard publish --access public --no-git-checks",
 		"publish:cc-system-prompt": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-cc-system-prompt publish --access public --no-git-checks",
 		"publish:codex-fast-mode": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-codex-fast-mode publish --access public --no-git-checks",
@@ -50,6 +51,7 @@
 		"publish:claude-mcp-bridge": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-claude-mcp-bridge publish --access public --no-git-checks",
 		"publish:claude-spinner": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-claude-spinner publish --access public --no-git-checks",
 		"publish:cross-agent": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-cross-agent publish --access public --no-git-checks",
+		"publish:cron": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-cron publish --access public --no-git-checks",
 		"publish:diff-review": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-diff-review publish --access public --no-git-checks",
 		"publish:open-pr": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-open-pr publish --access public --no-git-checks",
 		"publish:memory-layer": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-memory-layer publish --access public --no-git-checks",
@@ -67,6 +69,7 @@
 		"@types/node": "^25.7.0",
 		"@vitest/coverage-v8": "^4.1.6",
 		"lefthook": "^2.1.6",
+		"typebox": "^1.3.7",
 		"typescript": "^6.0.3",
 		"vitest": "^4.1.6"
 	}
