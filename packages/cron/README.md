@@ -29,7 +29,7 @@ The scheduler is macOS-first. On macOS, its LaunchAgent keeps jobs running after
 - Runs jobs through a headless Pi process: `pi -p --no-session @prompt.md`.
 - Extensions and MCP tools are loaded as in interactive mode so scheduled prompts can call MCP tools (Slack, Jira, etc.).
 - Uses a detached daemon and macOS `launchd` LaunchAgent so jobs continue after Pi exits and after reboot/login.
-- Keeps one-shot jobs as disabled history after they run.
+- Moves one-shot jobs out of the current job list and into history after their first execution attempt.
 - Deletes jobs immediately when `cron remove` or `/cron remove` is called. LaunchAgent uninstall still requires confirmation unless `cron uninstall-launchd --yes` is used.
 
 ## Files
@@ -59,7 +59,8 @@ The LLM-facing `cron` tool intentionally exposes only one parameter: `command`. 
 ```text
 cron help
 cron status
-cron list [--include-prompt]
+cron list [--include-prompt]       # current jobs only
+cron history [--include-prompt]    # completed one-shot jobs
 cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--cwd <path>] [--enabled <true|false>] [--once] -- <promptMarkdown>
 cron update <id> [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [-- <promptMarkdown>]
 cron run <id>
@@ -80,7 +81,8 @@ Human-facing slash commands are still available for convenience:
 /cron uninstall     # confirm, then remove LaunchAgent (`/cron uninstall --yes` skips extra UI confirm)
 /cron start         # start daemon for current boot
 /cron stop          # stop daemon
-/cron list
+/cron list          # current jobs only
+/cron history       # completed one-shot jobs
 /cron run <id>
 /cron remove <id>   # deletes immediately
 /cron enable <id>
@@ -91,17 +93,9 @@ Human-facing slash commands are still available for convenience:
 
 `kind: "at"` and `kind: "delay"` are always one-shot. A `kind: "cron"` job can also be one-shot with `once: true`.
 
-After a one-shot job runs, it is not deleted. It is updated with:
+After the first execution attempt, a one-shot job is atomically removed from the current `jobs` array and appended to the `history` array in `jobs.json`. The archived entry keeps its full metadata, prompt file, exit code, completion timestamp, and run log path.
 
-```json
-{
-  "enabled": false,
-  "disabledReason": "completed_once",
-  "completedAt": "..."
-}
-```
-
-This keeps the job visible for later audit while preventing future execution.
+`cron list` and `/cron list` show current jobs only. Use `cron history [--include-prompt]` or `/cron history` to inspect completed one-shot jobs. Existing version 1 stores are migrated in memory, so previously completed one-shot jobs appear in history after upgrading.
 
 ## Safety
 
@@ -110,6 +104,7 @@ This keeps the job visible for later audit while preventing future execution.
 - In non-UI contexts, launchd uninstall is denied unless `--yes` is provided.
 - Job IDs are restricted to `[a-zA-Z0-9._-]`.
 - Prompt files are written only under `~/.pi/agent/cron/prompts/`.
+- Archived job IDs remain reserved so a future job cannot overwrite a preserved history prompt.
 
 ## Updating the package
 

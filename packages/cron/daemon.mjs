@@ -8,7 +8,8 @@ import { join } from "node:path";
 const TICK_INTERVAL_MS = Number.parseInt(process.env.PI_CRON_TICK_INTERVAL_MS || "30000", 10);
 const RETRY_LOCK_INTERVAL_MS = Number.parseInt(process.env.PI_CRON_RETRY_LOCK_INTERVAL_MS || "60000", 10);
 const DEFAULT_TIMEOUT_MS = Number.parseInt(process.env.PI_CRON_JOB_TIMEOUT_MS || String(10 * 60 * 1000), 10);
-const STORE_VERSION = 1;
+const KILL_GRACE_MS = Number.parseInt(process.env.PI_CRON_JOB_KILL_GRACE_MS || "5000", 10);
+const STORE_VERSION = 2;
 
 const agentDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
 const cronDir = join(agentDir, "cron");
@@ -86,33 +87,80 @@ function releaseLock() {
 	lockHeld = false;
 }
 
-function loadJobs() {
+function emptyStore() {
+	return { version: STORE_VERSION, jobs: [], history: [] };
+}
+
+function isCompletedOneShot(job) {
+	return job.disabledReason === "completed_once";
+}
+
+function loadStore() {
 	ensureDirs();
-	if (!existsSync(jobsPath)) return [];
+	if (!existsSync(jobsPath)) return emptyStore();
 	try {
 		const parsed = JSON.parse(readFileSync(jobsPath, "utf-8"));
-		if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.jobs)) return [];
-		return parsed.jobs;
+		if (!Array.isArray(parsed?.jobs)) return emptyStore();
+		if (parsed.version === 1) {
+			return {
+				version: STORE_VERSION,
+				jobs: parsed.jobs.filter((job) => !isCompletedOneShot(job)),
+				history: parsed.jobs.filter(isCompletedOneShot),
+			};
+		}
+		if (parsed.version !== STORE_VERSION || !Array.isArray(parsed.history)) return emptyStore();
+		return { version: STORE_VERSION, jobs: parsed.jobs, history: parsed.history };
 	} catch (error) {
 		log("failed to load jobs", { error: String(error) });
-		return [];
+		return emptyStore();
 	}
 }
 
-function saveJobs(jobs) {
+function historyTimestamp(job) {
+	return job.completedAt || job.lastRunAt || job.updatedAt;
+}
+
+function saveStore(store) {
 	ensureDirs();
 	const tmpPath = `${jobsPath}.tmp`;
-	const sorted = [...jobs].sort((a, b) => a.id.localeCompare(b.id));
-	writeFileSync(tmpPath, `${JSON.stringify({ version: STORE_VERSION, jobs: sorted }, null, 2)}\n`, "utf-8");
+	const jobs = [...store.jobs].sort((a, b) => a.id.localeCompare(b.id));
+	const history = [...store.history].sort(
+		(a, b) => historyTimestamp(b).localeCompare(historyTimestamp(a)) || a.id.localeCompare(b.id),
+	);
+	writeFileSync(tmpPath, `${JSON.stringify({ version: STORE_VERSION, jobs, history }, null, 2)}\n`, "utf-8");
 	renameSync(tmpPath, jobsPath);
 }
 
+function loadJobs() {
+	return loadStore().jobs;
+}
+
+function saveJobs(jobs) {
+	const store = loadStore();
+	saveStore({ ...store, jobs });
+}
+
 function updateJob(id, updater) {
-	const jobs = loadJobs();
-	const index = jobs.findIndex((job) => job.id === id);
+	const store = loadStore();
+	const index = store.jobs.findIndex((job) => job.id === id);
 	if (index === -1) return;
-	jobs[index] = { ...updater(jobs[index]), updatedAt: nowIso() };
-	saveJobs(jobs);
+	store.jobs[index] = { ...updater(store.jobs[index]), updatedAt: nowIso() };
+	saveStore(store);
+}
+
+function completeJob(id, updater) {
+	const store = loadStore();
+	const index = store.jobs.findIndex((job) => job.id === id);
+	if (index === -1) return;
+	const current = store.jobs[index];
+	const completed = { ...updater(current), updatedAt: nowIso() };
+	if (current.kind !== "cron" || current.once) {
+		store.jobs.splice(index, 1);
+		store.history.push(completed);
+	} else {
+		store.jobs[index] = completed;
+	}
+	saveStore(store);
 }
 
 function parseField(field, min, max) {
@@ -235,24 +283,25 @@ function runJobProcess(job, runLogPath) {
 		let stdout = "";
 		let stderr = "";
 		let timedOut = false;
-		const timer = setTimeout(() => {
+		let settled = false;
+		let killTimer;
+		const timeoutTimer = setTimeout(() => {
 			timedOut = true;
 			try {
 				child.kill("SIGTERM");
 			} catch {}
+			killTimer = setTimeout(() => {
+				try {
+					child.kill("SIGKILL");
+				} catch {}
+			}, KILL_GRACE_MS);
 		}, DEFAULT_TIMEOUT_MS);
 
-		child.stdout.on("data", (chunk) => {
-			stdout += chunk.toString();
-		});
-		child.stderr.on("data", (chunk) => {
-			stderr += chunk.toString();
-		});
-		child.on("error", (error) => {
-			stderr += `\n${error.message}`;
-		});
-		child.on("close", (code) => {
-			clearTimeout(timer);
+		function finish(code) {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeoutTimer);
+			if (killTimer) clearTimeout(killTimer);
 			const exitCode = timedOut ? 124 : (code ?? 1);
 			const content = [
 				`# cron run: ${job.id}`,
@@ -269,7 +318,19 @@ function runJobProcess(job, runLogPath) {
 			].join("\n");
 			writeFileSync(runLogPath, content, "utf-8");
 			resolve({ exitCode, stdout, stderr, timedOut });
+		}
+
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk.toString();
 		});
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk.toString();
+		});
+		child.on("error", (error) => {
+			stderr += `\n${error.message}`;
+			finish(1);
+		});
+		child.on("close", finish);
 	});
 }
 
@@ -287,7 +348,7 @@ async function executeJob(job) {
 	try {
 		const result = await runJobProcess(job, runLogPath);
 		const finishedAt = new Date();
-		updateJob(job.id, (current) => {
+		completeJob(job.id, (current) => {
 			const oneShot = current.kind !== "cron" || current.once;
 			const nextRunAt =
 				oneShot || !current.schedule ? undefined : nextCronRun(current.schedule, finishedAt).toISOString();
@@ -306,7 +367,7 @@ async function executeJob(job) {
 		log("job complete", { job: job.id, exitCode: result.exitCode, runLogPath });
 	} catch (error) {
 		const finishedAt = new Date();
-		updateJob(job.id, (current) => {
+		completeJob(job.id, (current) => {
 			const oneShot = current.kind !== "cron" || current.once;
 			return {
 				...current,

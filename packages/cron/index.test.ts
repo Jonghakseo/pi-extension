@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import registerCron from "./index.ts";
-import { findJob, saveJobs } from "./store.ts";
+import { findJob, saveJobs, saveStore } from "./store.ts";
 import type { CronJob } from "./types.ts";
 
 function createPi() {
@@ -89,5 +89,36 @@ describe("cron job removal", () => {
 		expect(ctx.ui.confirm).not.toHaveBeenCalled();
 		expect(ctx.ui.notify).toHaveBeenCalledWith("Removed daily", "info");
 		expect(findJob("daily")).toBeUndefined();
+	});
+
+	it("separates current jobs from completed one-shot history", async () => {
+		const { pi, tools, commands } = createPi();
+		registerCron(pi as never);
+		const current = makeJob(tmpDir, "daily");
+		const historical: CronJob = {
+			...makeJob(tmpDir, "reminder"),
+			enabled: false,
+			once: true,
+			disabledReason: "completed_once",
+			completedAt: "2026-01-02T00:00:00.000Z",
+			lastExitCode: 0,
+		};
+		fs.mkdirSync(path.dirname(historical.promptFile), { recursive: true });
+		fs.writeFileSync(historical.promptFile, "# Preserved reminder prompt\n");
+		saveStore({ version: 2, jobs: [current], history: [historical] });
+		const ctx = makeCtx(true);
+
+		const listed = await tools.get("cron").execute("list", { command: "cron list" }, undefined, undefined, ctx);
+		const history = await tools
+			.get("cron")
+			.execute("history", { command: "cron history --include-prompt" }, undefined, undefined, ctx);
+		await commands.get("cron").handler("history", ctx);
+
+		expect(listed.content[0].text).toContain("daily");
+		expect(listed.content[0].text).not.toContain("reminder");
+		expect(history.content[0].text).toContain("reminder");
+		expect(history.content[0].text).toContain("Preserved reminder prompt");
+		expect(history.content[0].text).not.toContain("daily");
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("reminder"), "info");
 	});
 });

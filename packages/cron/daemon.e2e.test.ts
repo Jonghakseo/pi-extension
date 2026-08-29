@@ -46,6 +46,19 @@ exit 0
 	return scriptPath;
 }
 
+function writeTermIgnoringFakePi(): string {
+	const scriptPath = join(tempAgentDir, "fake-pi-ignore-term.mjs");
+	writeFileSync(
+		scriptPath,
+		`#!/usr/bin/env node
+process.on("SIGTERM", () => {});
+setInterval(() => {}, 1000);
+`,
+		{ mode: 0o755 },
+	);
+	return scriptPath;
+}
+
 function readStore(): CronStoreFile {
 	return JSON.parse(readFileSync(join(tempAgentDir, "cron", "jobs.json"), "utf-8"));
 }
@@ -74,7 +87,7 @@ describe("cron daemon e2e", () => {
 		rmSync(tempAgentDir, { recursive: true, force: true });
 	});
 
-	it("executes a due one-shot job and leaves it disabled for history", async () => {
+	it("executes a due one-shot job and moves it out of current jobs into history", async () => {
 		const fakePi = writeFakePi();
 		const job: CronJob = {
 			id: "one-shot-test",
@@ -106,8 +119,9 @@ describe("cron daemon e2e", () => {
 		});
 		childPid = child.pid;
 
-		const finalStore = await waitFor(readStore, (store) => store.jobs[0]?.disabledReason === "completed_once");
-		const finalJob = finalStore.jobs[0];
+		const finalStore = await waitFor(readStore, (store) => store.jobs.length === 0 && store.history.length === 1);
+		const finalJob = finalStore.history[0];
+		expect(finalStore.version).toBe(2);
 		expect(finalJob.enabled).toBe(false);
 		expect(finalJob.completedAt).toBeTruthy();
 		expect(finalJob.lastRunAt).toBeTruthy();
@@ -120,5 +134,45 @@ describe("cron daemon e2e", () => {
 		expect(argsLog).not.toContain("--no-extensions");
 		expect(argsLog).toContain(`@${job.promptFile}`);
 		expect(readFileSync(join(tempAgentDir, "fake-pi-prompt.log"), "utf-8")).toContain("Say hello from cron");
+	});
+
+	it("kills a term-ignoring job after the timeout grace period and archives it", async () => {
+		const fakePi = writeTermIgnoringFakePi();
+		const job: CronJob = {
+			id: "timeout-test",
+			name: "Timeout test",
+			enabled: true,
+			kind: "at",
+			once: true,
+			runAt: new Date(Date.now() - 1000).toISOString(),
+			timezone: "UTC",
+			cwd: tempAgentDir,
+			promptFile: join(tempAgentDir, "cron", "prompts", "timeout-test.md"),
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+		};
+		writeStore(job);
+
+		const child = spawn(process.execPath, [daemonPath], {
+			cwd: tempAgentDir,
+			detached: false,
+			stdio: "ignore",
+			env: {
+				...process.env,
+				PI_CODING_AGENT_DIR: tempAgentDir,
+				PI_CRON_PI_BIN: fakePi,
+				PI_CRON_TICK_INTERVAL_MS: "100",
+				PI_CRON_RETRY_LOCK_INTERVAL_MS: "100",
+				PI_CRON_JOB_TIMEOUT_MS: "100",
+				PI_CRON_JOB_KILL_GRACE_MS: "100",
+			},
+		});
+		childPid = child.pid;
+
+		const finalStore = await waitFor(readStore, (store) => store.jobs.length === 0 && store.history.length === 1);
+		const finalJob = finalStore.history[0];
+		expect(finalJob.lastExitCode).toBe(124);
+		expect(readFileSync(finalJob.lastRunLog as string, "utf-8")).toContain("timedOut: true");
+		expect(child.exitCode).toBeNull();
 	});
 });

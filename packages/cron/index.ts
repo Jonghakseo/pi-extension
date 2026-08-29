@@ -8,6 +8,7 @@ import { calculateNextRun, validateCron } from "./schedule.ts";
 import {
 	allocateJobId,
 	findJob,
+	loadHistory,
 	loadJobs,
 	readPromptFile,
 	removeJob,
@@ -19,6 +20,7 @@ import type { CronJob, CronJobKind } from "./types.ts";
 
 type CronAction =
 	| "list"
+	| "history"
 	| "status"
 	| "upsert"
 	| "update"
@@ -54,7 +56,7 @@ interface CronToolResult {
 const CronParamsSchema = Type.Object({
 	command: Type.String({
 		description:
-			"CLI-style cron command. Always start with 'cron help' to discover commands. Examples: 'cron status', 'cron list --include-prompt', 'cron upsert --name daily --kind cron --schedule \"0 10 * * *\" -- <self-contained promptMarkdown>', 'cron update daily --schedule \"30 9 * * 1-5\"', 'cron run daily', 'cron enable daily', 'cron disable daily', 'cron remove daily', 'cron install-launchd'. Scheduled prompts are headless, so promptMarkdown after `--` must include all required context.",
+			"CLI-style cron command. Always start with 'cron help' to discover commands. Examples: 'cron status', 'cron list', 'cron history --include-prompt', 'cron upsert --name daily --kind cron --schedule \"0 10 * * *\" -- <self-contained promptMarkdown>', 'cron update daily --schedule \"30 9 * * 1-5\"', 'cron run daily', 'cron enable daily', 'cron disable daily', 'cron remove daily', 'cron install-launchd'. Scheduled prompts are headless, so promptMarkdown after `--` must include all required context.",
 	}),
 });
 
@@ -66,14 +68,16 @@ function localTimezone(): string {
 	return Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
 }
 
-function formatJob(job: CronJob, includePrompt = false): string {
-	const status = job.running
-		? "🔄 running"
-		: job.enabled
-			? job.once
-				? "✅ active · once"
-				: "✅ active"
-			: `⏸ disabled${job.disabledReason ? ` · ${job.disabledReason}` : ""}`;
+function formatJob(job: CronJob, includePrompt = false, historical = false): string {
+	const status = historical
+		? `📚 completed${job.lastExitCode === undefined ? "" : ` · exit ${job.lastExitCode}`}`
+		: job.running
+			? "🔄 running"
+			: job.enabled
+				? job.once
+					? "✅ active · once"
+					: "✅ active"
+				: `⏸ disabled${job.disabledReason ? ` · ${job.disabledReason}` : ""}`;
 	const schedule = job.kind === "cron" ? job.schedule : job.runAt;
 	const lines = [
 		`- **${job.id}** — ${job.name}`,
@@ -104,21 +108,30 @@ function formatJob(job: CronJob, includePrompt = false): string {
 
 function formatJobList(includePrompt = false): string {
 	const jobs = loadJobs();
-	if (jobs.length === 0) return "No cron jobs configured.";
-	return [`Cron jobs (${jobs.length})`, "", ...jobs.map((job) => formatJob(job, includePrompt))].join("\n");
+	if (jobs.length === 0) return "No current cron jobs configured.";
+	return [`Current cron jobs (${jobs.length})`, "", ...jobs.map((job) => formatJob(job, includePrompt))].join("\n");
+}
+
+function formatHistory(includePrompt = false): string {
+	const history = loadHistory();
+	if (history.length === 0) return "No completed one-shot cron jobs.";
+	return [`Cron history (${history.length})`, "", ...history.map((job) => formatJob(job, includePrompt, true))].join(
+		"\n",
+	);
 }
 
 function formatStatus(): string {
 	const daemon = getDaemonStatus();
 	const launchd = getLaunchdStatus();
 	const jobs = loadJobs();
+	const history = loadHistory();
 	const active = jobs.filter((job) => job.enabled).length;
 	return [
 		`Daemon: ${daemon.running ? `✅ running (PID ${daemon.pid})` : "⏸ not running"}`,
 		daemon.stalePid ? `Stale PID: ${daemon.stalePid}` : undefined,
 		`LaunchAgent: ${launchd.installed ? "✅ installed" : "⏸ not installed"} · ${launchd.loaded ? "loaded" : "not loaded"}`,
 		`LaunchAgent plist: ${launchd.plistPath}`,
-		`Jobs: ${jobs.length} total · ${active} active`,
+		`Jobs: ${jobs.length} current · ${active} active · ${history.length} history`,
 	]
 		.filter((line): line is string => Boolean(line))
 		.join("\n");
@@ -204,9 +217,18 @@ const toolHandlers: Record<
 	(params: CronToolParams, ctx: ExtensionContext) => Promise<CronToolResult> | CronToolResult
 > = {
 	list: (params) => ({ text: formatJobList(Boolean(params.includePrompt)), details: { jobs: loadJobs() } }),
+	history: (params) => ({
+		text: formatHistory(Boolean(params.includePrompt)),
+		details: { history: loadHistory() },
+	}),
 	status: () => ({
 		text: formatStatus(),
-		details: { daemon: getDaemonStatus(), launchd: getLaunchdStatus(), jobs: loadJobs() },
+		details: {
+			daemon: getDaemonStatus(),
+			launchd: getLaunchdStatus(),
+			jobs: loadJobs(),
+			history: loadHistory(),
+		},
 	}),
 	upsert: (params, ctx) => {
 		const { job, messages } = upsertFromParams(params, ctx);
@@ -338,6 +360,9 @@ const commandHandlers = {
 	list: async (_id: string | undefined, ctx: ExtensionCommandContext, _pi: ExtensionAPI) => {
 		notify(ctx, formatJobList());
 	},
+	history: async (_id: string | undefined, ctx: ExtensionCommandContext, _pi: ExtensionAPI) => {
+		notify(ctx, formatHistory());
+	},
 	run: async (id: string | undefined, ctx: ExtensionCommandContext) => {
 		if (!id) return notify(ctx, "Usage: /cron run <id>", "warning");
 		const job = updateJobForImmediateRun(id);
@@ -376,7 +401,7 @@ export default function (pi: ExtensionAPI) {
 			"Always start with `cron help` if you need to learn the command grammar; the tool accepts only a single `command` string.",
 			'For upsert/update with a prompt, put the self-contained promptMarkdown after `--`, e.g. `cron upsert --name daily --kind cron --schedule "0 10 * * *" -- <promptMarkdown>`.',
 			"When the user says '방금 한 것', '이 작업', '아까 정리한 것', or otherwise references current session context, include all necessary context in the promptMarkdown because scheduled runs are headless and separate from this session history.",
-			"Translate natural-language schedules into kind plus either a standard 5-field cron schedule or an ISO runAt timestamp. Use kind `at` or `delay` for one-shot jobs; for a cron expression that should run once, pass `--once`.",
+			"Translate natural-language schedules into kind plus either a standard 5-field cron schedule or an ISO runAt timestamp. Use kind `at` or `delay` for one-shot jobs; for a cron expression that should run once, pass `--once`. Completed one-shot jobs move from `cron list` to `cron history` after their first execution attempt.",
 			"`cron remove <id>` deletes the job immediately. `cron uninstall-launchd --yes` explicitly confirms launchd uninstall without an extra UI dialog.",
 		],
 		parameters: CronParamsSchema,
@@ -429,7 +454,8 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("cron", {
-		description: "Persistent cron daemon: /cron status|install|uninstall|start|stop|list|run|remove|enable|disable",
+		description:
+			"Persistent cron daemon: /cron status|install|uninstall|start|stop|list|history|run|remove|enable|disable",
 		getArgumentCompletions: (prefix) => {
 			const tokens = prefix.trimStart().split(/\s+/);
 			if (tokens.length <= 1) {

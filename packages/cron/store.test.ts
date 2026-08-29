@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,10 +9,12 @@ import {
 	getCronDir,
 	getJobsPath,
 	getPromptPath,
+	loadHistory,
 	loadJobs,
 	readPromptFile,
 	removeJob,
 	saveJobs,
+	saveStore,
 	slugifyJobId,
 	updateJob,
 	upsertJob,
@@ -58,8 +60,9 @@ describe("cron store", () => {
 		expect(getJobsPath()).toBe(join(tempAgentDir, "cron", "jobs.json"));
 	});
 
-	it("loads an empty job list when jobs.json does not exist", () => {
+	it("loads empty current and history lists when jobs.json does not exist", () => {
 		expect(loadJobs()).toEqual([]);
+		expect(loadHistory()).toEqual([]);
 	});
 
 	it("saves, loads, finds, updates, and removes jobs", () => {
@@ -86,7 +89,25 @@ describe("cron store", () => {
 	it("sorts jobs by id when saving", () => {
 		saveJobs([makeJob("z-job"), makeJob("a-job")]);
 		const raw = JSON.parse(readFileSync(getJobsPath(), "utf-8"));
+		expect(raw.version).toBe(2);
 		expect(raw.jobs.map((job: CronJob) => job.id)).toEqual(["a-job", "z-job"]);
+		expect(raw.history).toEqual([]);
+	});
+
+	it("migrates completed one-shot jobs from the v1 active list into history", () => {
+		const active = makeJob("active");
+		const completed = {
+			...makeJob("completed"),
+			enabled: false,
+			once: true,
+			disabledReason: "completed_once" as const,
+			completedAt: "2026-01-02T00:00:00.000Z",
+		};
+		mkdirSync(getCronDir(), { recursive: true });
+		writeFileSync(getJobsPath(), `${JSON.stringify({ version: 1, jobs: [active, completed] }, null, 2)}\n`);
+
+		expect(loadJobs().map((job) => job.id)).toEqual(["active"]);
+		expect(loadHistory().map((job) => job.id)).toEqual(["completed"]);
 	});
 
 	it("slugifies and validates job ids", () => {
@@ -99,6 +120,19 @@ describe("cron store", () => {
 		upsertJob(makeJob("daily-check"));
 		expect(allocateJobId("daily check")).toBe("daily-check-2");
 		expect(allocateJobId("daily check", "daily-check")).toBe("daily-check");
+	});
+
+	it("reserves historical ids so preserved prompts cannot be overwritten", () => {
+		const historical = {
+			...makeJob("daily-check"),
+			enabled: false,
+			disabledReason: "completed_once" as const,
+			completedAt: "2026-01-02T00:00:00.000Z",
+		};
+		saveStore({ version: 2, jobs: [], history: [historical] });
+
+		expect(allocateJobId("daily check")).toBe("daily-check-2");
+		expect(() => allocateJobId("daily check", "daily-check")).toThrow("reserved by history");
 	});
 
 	it("writes prompt files under the prompts directory", () => {

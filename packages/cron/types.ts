@@ -25,8 +25,9 @@ export interface CronJob {
 }
 
 export interface CronStoreFile {
-	version: 1;
+	version: 2;
 	jobs: CronJob[];
+	history: CronJob[];
 }
 
 export interface DaemonStatus {

@@ -44,6 +44,7 @@ export const CRON_CLI_HELP_TEXT = [
 	"    cron help",
 	"    cron status",
 	"    cron list [--include-prompt]",
+	"    cron history [--include-prompt]",
 	"",
 	"  Job Management:",
 	"    cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--cwd <path>] [--enabled <true|false>] [--once] -- <promptMarkdown>",
@@ -77,6 +78,7 @@ export const CRON_CLI_HELP_TEXT = [
 	"",
 	"  Manual status & cleanup:",
 	"    cron list",
+	"    cron history",
 	"    cron status",
 	"    cron run daily-release-check",
 	"    cron remove daily-release-check",
@@ -317,13 +319,16 @@ function parseUpsertOrUpdate(action: "upsert" | "update", args: string[]): CronC
 	return { type: "params", params };
 }
 
-function parseList(args: string[]): CronCliParseResult {
+function parseListing(action: "list" | "history", args: string[]): CronCliParseResult {
 	const parsed = parseOptions(args, { allowPrompt: false });
 	if ("error" in parsed) return { type: "error", message: parsed.error };
 	if (parsed.positional.length > 0) {
-		return { type: "error", message: `❌ list does not accept positional arguments: ${parsed.positional.join(" ")}` };
+		return {
+			type: "error",
+			message: `❌ ${action} does not accept positional arguments: ${parsed.positional.join(" ")}`,
+		};
 	}
-	return { type: "params", params: { action: "list", ...parsed.params } };
+	return { type: "params", params: { action, ...parsed.params } };
 }
 
 export function parseCronToolCommand(command: unknown): CronCliParseResult {
@@ -360,7 +365,8 @@ export function parseCronToolCommand(command: unknown): CronCliParseResult {
 				return { type: "error", message: "❌ status does not accept arguments\n\n✓ Example: cron status" };
 			return { type: "params", params: { action: "status" } };
 		case "list":
-			return parseList(args);
+		case "history":
+			return parseListing(verb, args);
 		case "upsert":
 		case "schedule":
 			return parseUpsertOrUpdate("upsert", args);
@@ -398,7 +404,7 @@ export function parseCronToolCommand(command: unknown): CronCliParseResult {
 		default:
 			return {
 				type: "error",
-				message: `❌ Unknown subcommand: "${verb}"\n\nValid commands: help, status, list, upsert, update, run, enable, disable, remove, start-daemon, stop-daemon, install-launchd, uninstall-launchd\n\n✓ Try: cron help`,
+				message: `❌ Unknown subcommand: "${verb}"\n\nValid commands: help, status, list, history, upsert, update, run, enable, disable, remove, start-daemon, stop-daemon, install-launchd, uninstall-launchd\n\n✓ Try: cron help`,
 			};
 	}
 }

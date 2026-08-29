@@ -6,11 +6,15 @@ describe("cron CLI parser", () => {
 		expect(parseCronToolCommand("cron")).toEqual({ type: "help" });
 	});
 
-	it("parses simple status/list commands", () => {
+	it("parses simple status/list/history commands", () => {
 		expect(parseCronToolCommand("cron status")).toEqual({ type: "params", params: { action: "status" } });
 		expect(parseCronToolCommand("cron list --include-prompt")).toEqual({
 			type: "params",
 			params: { action: "list", includePrompt: true },
+		});
+		expect(parseCronToolCommand("cron history --include-prompt")).toEqual({
+			type: "params",
+			params: { action: "history", includePrompt: true },
 		});
 	});
 
