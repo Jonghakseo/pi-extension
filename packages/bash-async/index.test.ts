@@ -31,6 +31,7 @@ async function makeRpcContext(ui: { setWidget: ReturnType<typeof vi.fn> }) {
 const widgetTheme = { fg: (_color: string, text: string) => text };
 
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
@@ -60,6 +61,7 @@ describe("bash_async extension registration", () => {
 	it("returns details for status, output, list, incremental output, and kill", async () => {
 		let tool: any;
 		let shutdown: (() => Promise<void>) | undefined;
+		vi.stubEnv("PI_BASH_ASYNC_POLL_COOLDOWN_MS", "0");
 		bashAsync({
 			registerTool: (definition: any) => (tool = definition),
 			on: (event: string, handler: () => Promise<void>) => {
@@ -104,6 +106,76 @@ describe("bash_async extension registration", () => {
 		const killed = await tool.execute("kill", { action: "kill", jobId }, undefined, undefined, context);
 		expect(killed.details).toMatchObject({ jobId, status: "killed" });
 		await shutdown?.();
+	});
+
+	it("rate limits repeated status, output, and list queries that carry no new information", async () => {
+		let tool: any;
+		vi.stubEnv("PI_BASH_ASYNC_POLL_COOLDOWN_MS", "60000");
+		bashAsync({ registerTool: (definition: any) => (tool = definition), on: vi.fn(), sendMessage: vi.fn() } as any);
+		const context = await makeContext();
+		const started = await tool.execute(
+			"poll-start",
+			{ action: "start", command: "printf 'one\\ntwo\\nthree\\n'; sleep 30", timeout: 0 },
+			undefined,
+			undefined,
+			context,
+		);
+		const jobId = started.details.jobId as string;
+		await vi.waitFor(async () => {
+			const running = await tool.execute("poll-running", { action: "status", jobId }, undefined, undefined, context);
+			expect(running.details.status).toBe("running");
+		});
+
+		const blockedStatus = await tool.execute("poll-status", { action: "status", jobId }, undefined, undefined, context);
+		expect(blockedStatus.details.error).toContain("Do not poll");
+		await vi.waitFor(async () => {
+			const ready = await tool.execute(
+				"poll-output",
+				{ action: "output", jobId, outputOffset: 0 },
+				undefined,
+				undefined,
+				context,
+			);
+			expect(ready.details).toMatchObject({ startOffset: 0, nextOffset: 3 });
+		});
+		const pagedOutput = await tool.execute(
+			"poll-output-paged",
+			{ action: "output", jobId, outputOffset: 0, lines: 1 },
+			undefined,
+			undefined,
+			context,
+		);
+		expect(pagedOutput.details).toMatchObject({ startOffset: 0, nextOffset: 1 });
+		const repeatedRange = await tool.execute(
+			"poll-output-repeat",
+			{ action: "output", jobId, outputOffset: 0 },
+			undefined,
+			undefined,
+			context,
+		);
+		expect(repeatedRange.details.error).toContain("Do not poll");
+		const freshRange = await tool.execute(
+			"poll-output-incremental",
+			{ action: "output", jobId, incremental: true },
+			undefined,
+			undefined,
+			context,
+		);
+		expect(freshRange.details).toMatchObject({ startOffset: 0, nextOffset: 3 });
+		await tool.execute("poll-list", { action: "list" }, undefined, undefined, context);
+		const blockedList = await tool.execute("poll-list-2", { action: "list" }, undefined, undefined, context);
+		expect(blockedList.details.error).toContain("Do not poll");
+
+		const killed = await tool.execute("poll-kill", { action: "kill", jobId }, undefined, undefined, context);
+		expect(killed.details).toMatchObject({ jobId, status: "killed" });
+		const terminalStatus = await tool.execute(
+			"poll-status-terminal",
+			{ action: "status", jobId },
+			undefined,
+			undefined,
+			context,
+		);
+		expect(terminalStatus.details).toMatchObject({ jobId, status: "killed" });
 	});
 
 	it("installs one below-editor widget for all running jobs and clears it after the final job", async () => {
