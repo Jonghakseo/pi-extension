@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-until",
-	"version": "0.2.4",
+	"version": "0.3.0",
 	"description": "Until loop extension for pi.",
 	"license": "MIT",
 	"repository": {
@@ -18,6 +18,8 @@
 	],
 	"files": [
 		"index.ts",
+		"presets.ts",
+		"time.ts",
 		"README.md"
 	],
 	"pi": {
@@ -26,9 +28,9 @@
 		]
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-coding-agent": ">=0.84.3",
 		"@earendil-works/pi-tui": "*",
-		"@sinclair/typebox": "*"
+		"typebox": "*"
 	},
 	"peerDependenciesMeta": {
 		"@earendil-works/pi-coding-agent": {
@@ -37,7 +39,7 @@
 		"@earendil-works/pi-tui": {
 			"optional": true
 		},
-		"@sinclair/typebox": {
+		"typebox": {
 			"optional": true
 		}
 	},
