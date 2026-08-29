@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-cron",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Persistent scheduled Pi jobs backed by a detached daemon and macOS launchd.",
 	"license": "MIT",
 	"repository": {

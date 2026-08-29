@@ -228,12 +228,10 @@ const toolHandlers: Record<
 			details: { job, messages },
 		};
 	},
-	remove: async (params, ctx) => {
+	remove: (params) => {
 		const id = requireId(params, "remove");
 		const job = findJob(id);
 		if (!job) return { text: `Cron job not found: ${id}` };
-		const ok = await confirmDangerous(ctx, "Cron job 삭제", `"${job.id}" (${job.name}) 크론잡을 삭제할까요?`);
-		if (!ok) return { text: `Deletion cancelled for cron job "${job.id}".` };
 		removeJob(job.id);
 		return { text: `✓ Removed cron job "${job.id}".`, details: { removed: job } };
 	},
@@ -350,8 +348,6 @@ const commandHandlers = {
 		if (!id) return notify(ctx, "Usage: /cron remove <id>", "warning");
 		const job = findJob(id);
 		if (!job) return notify(ctx, `Cron job not found: ${id}`, "error");
-		const ok = await confirmDangerous(ctx, "Cron job 삭제", `"${job.id}" (${job.name}) 크론잡을 삭제할까요?`);
-		if (!ok) return notify(ctx, "Deletion cancelled", "warning");
 		removeJob(job.id);
 		notify(ctx, `Removed ${job.id}`);
 	},
@@ -381,7 +377,7 @@ export default function (pi: ExtensionAPI) {
 			'For upsert/update with a prompt, put the self-contained promptMarkdown after `--`, e.g. `cron upsert --name daily --kind cron --schedule "0 10 * * *" -- <promptMarkdown>`.',
 			"When the user says '방금 한 것', '이 작업', '아까 정리한 것', or otherwise references current session context, include all necessary context in the promptMarkdown because scheduled runs are headless and separate from this session history.",
 			"Translate natural-language schedules into kind plus either a standard 5-field cron schedule or an ISO runAt timestamp. Use kind `at` or `delay` for one-shot jobs; for a cron expression that should run once, pass `--once`.",
-			"`cron remove <id>` requires user confirmation. `cron uninstall-launchd --yes` explicitly confirms launchd uninstall without an extra UI dialog.",
+			"`cron remove <id>` deletes the job immediately. `cron uninstall-launchd --yes` explicitly confirms launchd uninstall without an extra UI dialog.",
 		],
 		parameters: CronParamsSchema,
 

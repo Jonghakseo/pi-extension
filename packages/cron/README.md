@@ -30,7 +30,7 @@ The scheduler is macOS-first. On macOS, its LaunchAgent keeps jobs running after
 - Extensions and MCP tools are loaded as in interactive mode so scheduled prompts can call MCP tools (Slack, Jira, etc.).
 - Uses a detached daemon and macOS `launchd` LaunchAgent so jobs continue after Pi exits and after reboot/login.
 - Keeps one-shot jobs as disabled history after they run.
-- Requires user confirmation before deleting jobs. LaunchAgent uninstall can be explicitly confirmed with `cron uninstall-launchd --yes`.
+- Deletes jobs immediately when `cron remove` or `/cron remove` is called. LaunchAgent uninstall still requires confirmation unless `cron uninstall-launchd --yes` is used.
 
 ## Files
 
@@ -65,7 +65,7 @@ cron update <id> [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [-
 cron run <id>
 cron enable <id>
 cron disable <id>
-cron remove <id>       # confirm required
+cron remove <id>       # deletes immediately
 cron start-daemon      # alias: cron start
 cron stop-daemon       # alias: cron stop
 cron install-launchd   # alias: cron install
@@ -82,7 +82,7 @@ Human-facing slash commands are still available for convenience:
 /cron stop          # stop daemon
 /cron list
 /cron run <id>
-/cron remove <id>   # confirm required
+/cron remove <id>   # deletes immediately
 /cron enable <id>
 /cron disable <id>
 ```
@@ -105,9 +105,9 @@ This keeps the job visible for later audit while preventing future execution.
 
 ## Safety
 
-- Removing a job requires `ctx.ui.confirm()`.
+- Removing a job deletes it immediately without a confirmation dialog, including in non-UI contexts.
 - Uninstalling launchd requires `ctx.ui.confirm()` unless explicitly confirmed with `--yes`.
-- In non-UI contexts, destructive actions are denied by default.
+- In non-UI contexts, launchd uninstall is denied unless `--yes` is provided.
 - Job IDs are restricted to `[a-zA-Z0-9._-]`.
 - Prompt files are written only under `~/.pi/agent/cron/prompts/`.
 

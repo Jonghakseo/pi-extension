@@ -33,7 +33,7 @@ export const CRON_CLI_HELP_TEXT = [
 	"   • For a cron expression that should run once, pass `--once`.",
 	"",
 	"5. Destructive actions:",
-	"   • cron remove <id> requires user confirmation",
+	"   • cron remove <id> deletes the job immediately",
 	"   • cron uninstall-launchd --yes explicitly confirms launchd uninstall without an extra UI dialog",
 	"",
 	"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
