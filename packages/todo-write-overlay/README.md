@@ -24,7 +24,6 @@ pi install npm:@ryan_nookpi/pi-extension-todo-write-overlay
 - 진행 중 작업 스피너 표시
 - 완료/진행/대기 상태별 색상과 아이콘 표시
 - `notes`는 상태에는 보존하지만 오버레이에는 표시하지 않음
-- compaction 이후 남은 todo reminder 주입
 
 ## 표시 방식
 

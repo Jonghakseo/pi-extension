@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
 	applyTodoPatch,
 	applyTodoWrite,
-	buildPostCompactionTodoReminder,
 	getTodoOverlayVisibility,
 	normalizeTodoWriteParams,
 	parseTodoOverlayCommand,
@@ -137,7 +136,7 @@ describe("todo-write-overlay helpers", () => {
 		).toMatchObject({ hidden: true, completionGraceActive: false });
 	});
 
-	it("restores legacy persisted tasks and builds post-compaction reminders", () => {
+	it("restores legacy persisted tasks", () => {
 		const ctx = {
 			cwd: "/tmp/project",
 			sessionManager: {
@@ -160,6 +159,5 @@ describe("todo-write-overlay helpers", () => {
 
 		const restored = restoreTodoWriteState(ctx);
 		expect(restored.tasks.map((task) => task.status)).toEqual(["completed", "in_progress"]);
-		expect(buildPostCompactionTodoReminder(restored)).toContain("todo_write에 아직 남은 항목이 있습니다");
 	});
 });

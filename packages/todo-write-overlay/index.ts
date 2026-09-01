@@ -99,7 +99,6 @@ const TODO_SPINNER_INTERVAL_MS = 120;
 const TODO_HIDE_COMPLETED_AFTER_TURNS = 2;
 const TODO_HIDE_COMPLETED_AFTER_MS = 90_000;
 const TODO_STATE_ENTRY_TYPE = "todo-write-overlay-state";
-const TODO_COMPACTION_REMINDER_TYPE = "todo-write-overlay-compaction-reminder";
 
 function createEmptyState(): TodoState {
 	return { tasks: [] };
@@ -390,16 +389,6 @@ export function restoreTodoWriteState(ctx: Pick<ExtensionContext, "cwd" | "sessi
 	const empty = createEmptyState();
 	writeTodoWriteState(ctx, empty);
 	return empty;
-}
-
-export function buildPostCompactionTodoReminder(state: TodoState): string | null {
-	if (!hasRemainingTasks(state)) return null;
-	return [
-		"[todo-reminder] compaction 이후에도 todo_write에 아직 남은 항목이 있습니다.",
-		"다음 응답/도구 호출 전에 이 상태를 이어서 사용하세요.",
-		"",
-		renderTodoWriteSummary(state),
-	].join("\n");
 }
 
 function readTodoWriteState(ctx: Pick<ExtensionContext, "cwd" | "sessionManager">): TodoState {
@@ -796,24 +785,8 @@ export default function todoWriteOverlayExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_compact", async (_event, ctx) => {
-		const state = restoreTodoWriteState(ctx);
+		restoreTodoWriteState(ctx);
 		await syncTodoOverlay(ctx, pi);
-		const reminder = buildPostCompactionTodoReminder(state);
-		if (!reminder) return;
-
-		if (ctx.hasUI) {
-			ctx.ui.notify("todo 알림: compaction 이후에도 남은 항목이 있습니다.", "info");
-		}
-
-		pi.sendMessage(
-			{
-				customType: TODO_COMPACTION_REMINDER_TYPE,
-				content: reminder,
-				display: true,
-				details: { summary: renderTodoWriteSummary(state) },
-			},
-			{ deliverAs: "followUp", triggerTurn: true },
-		);
 	});
 
 	pi.on("message_end", async (event, ctx) => {
