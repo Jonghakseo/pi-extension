@@ -18,3 +18,17 @@ export function renderJobList(jobs: BashAsyncJob[]): string {
 export function renderCallText(action: string, title?: string): Component {
 	return new Text(title ? `bash_async ${action}: ${title}` : `bash_async ${action}`, 0, 0);
 }
+
+export interface ToolResultLike {
+	content: Array<{ type?: string; text?: string }>;
+	details?: unknown;
+}
+
+/** Collapsed rows hide job payloads and agent-facing guidance; only errors stay visible. */
+export function renderResultText(result: ToolResultLike, expanded: boolean): string {
+	const text = result.content.find((part) => part.type === "text")?.text ?? "";
+	if (expanded) return text;
+	const details = result.details;
+	const isError = typeof details === "object" && details !== null && "error" in details;
+	return isError ? (text.split("\n")[0] ?? "") : "";
+}

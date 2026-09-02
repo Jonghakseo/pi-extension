@@ -56,6 +56,13 @@ describe("bash_async extension registration", () => {
 			context,
 		);
 		expect(accepted.details).toMatchObject({ jobId: expect.any(String), status: expect.any(String) });
+
+		const theme = { fg: (_color: string, text: string) => text };
+		expect(tool.renderResult(accepted, { expanded: false }, theme).render(100)).toEqual([]);
+		expect(tool.renderResult(accepted, { expanded: true }, theme).render(100).join("\n")).toContain(
+			"Do not call sleep",
+		);
+		expect(tool.renderResult(invalid, { expanded: false }, theme).render(100).join("\n")).toContain("bash_async:");
 	});
 
 	it("returns details for status, output, list, incremental output, and kill", async () => {

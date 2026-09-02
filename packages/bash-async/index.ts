@@ -1,8 +1,9 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { JobManager } from "./job-manager.js";
 import { NotificationBatcher } from "./notification-batcher.js";
 import { PollGuard } from "./poll-guard.js";
-import { renderCallText, renderJobList, renderStart, renderStatus } from "./render.js";
+import { renderCallText, renderJobList, renderResultText, renderStart, renderStatus } from "./render.js";
 import { createRunningJobsWidget, type RunningJobsWidget } from "./running-jobs-widget.js";
 import {
 	type BashAsyncParams,
@@ -117,6 +118,10 @@ export default function bashAsync(pi: ExtensionAPI): void {
 				typeof input.action === "string" ? input.action : "invalid",
 				typeof input.title === "string" ? input.title : undefined,
 			);
+		},
+		renderResult(result, { expanded }, theme) {
+			const text = renderResultText(result, expanded);
+			return new Text(text ? theme.fg("toolOutput", text) : "", 0, 0);
 		},
 		async execute(_toolCallId, args, signal, _onUpdate, context) {
 			if (context.mode === "tui") uiContext = context;

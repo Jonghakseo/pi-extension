@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-bash-async",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Bounded background shell jobs for finite non-interactive commands in pi.",
 	"license": "MIT",
 	"repository": {
