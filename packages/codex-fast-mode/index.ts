@@ -6,9 +6,16 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const { streamSimple: streamSimpleOpenAICodexResponses } = openAICodexResponsesApi();
 const STATE_FILE = join(homedir(), ".pi", "agent", "state", "codex-fast-mode.json");
-export const SUPPORTED_MODEL_IDS = ["gpt-5.4", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"] as const;
+export const SUPPORTED_MODEL_IDS = [
+	"gpt-5.4",
+	"gpt-5.5",
+	"gpt-5.6-luna",
+	"gpt-5.6-sol",
+	"gpt-5.6-terra",
+	"gpt-6-astra",
+] as const;
 export const SUPPORTED_MODEL_ID = SUPPORTED_MODEL_IDS[0];
-const SUPPORTED_MODEL_LABEL = SUPPORTED_MODEL_IDS.join(" or ");
+const SUPPORTED_MODEL_LABEL = "gpt-5.4 ~ gpt-5.6, gpt-6-astra";
 
 type FastModeState = {
 	enabled: boolean;

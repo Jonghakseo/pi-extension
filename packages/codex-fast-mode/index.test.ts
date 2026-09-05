@@ -26,9 +26,10 @@ import codexFastMode, {
 	shouldUseCodexFastBadge,
 } from "./index.ts";
 
-const SUPPORTED_MODEL_LABEL = SUPPORTED_MODEL_IDS.join(" or ");
+const SUPPORTED_MODEL_LABEL = "gpt-5.4 ~ gpt-5.6, gpt-6-astra";
 const SECOND_SUPPORTED_MODEL_ID = "gpt-5.5";
 const GPT_56_SUPPORTED_MODEL_ID = "gpt-5.6-luna";
+const GPT_6_SUPPORTED_MODEL_ID = "gpt-6-astra";
 
 describe("codex fast mode", () => {
 	beforeEach(() => {
@@ -62,6 +63,9 @@ describe("codex fast mode", () => {
 		codexFastMode(apiMock.api);
 
 		const command = apiMock.getCommand("codex-fast");
+		expect(command.description).toBe(
+			`Toggle Codex Fast Mode service tier injection for openai-codex/${SUPPORTED_MODEL_LABEL}`,
+		);
 		const notify = vi.fn();
 		await command.handler("on", {
 			hasUI: true,
@@ -99,6 +103,30 @@ describe("codex fast mode", () => {
 		});
 	});
 
+	it.each([true, false])("applies Astra payload and badge settings when fast mode is %s", async (enabled) => {
+		vi.mocked(readFileSync).mockReturnValue(JSON.stringify({ enabled }));
+		vi.mocked(streamSimpleOpenAICodexResponses).mockResolvedValue("stream-result" as never);
+		const apiMock = createExtensionApiMock();
+		codexFastMode(apiMock.api);
+
+		// Astra can come from the host catalog or models.json before it ships in the SDK catalog.
+		const model = { provider: "openai-codex", id: GPT_6_SUPPORTED_MODEL_ID };
+		const provider = apiMock.getProvider("openai-codex");
+		await provider.streamSimple(model, { messages: [] }, {});
+		const onPayload = vi.mocked(streamSimpleOpenAICodexResponses).mock.calls[0]?.[2]?.onPayload;
+		if (typeof onPayload !== "function") throw new Error("onPayload handler missing");
+
+		await expect(onPayload({ text: { format: "plain" } }, model as never)).resolves.toEqual({
+			text: { format: "plain", verbosity: "low" },
+			...(enabled ? { service_tier: "priority" } : {}),
+		});
+		expect(shouldUseCodexFastBadge("openai-codex", GPT_6_SUPPORTED_MODEL_ID)).toBe(enabled);
+		expect(shouldUseCodexFastBadge("openai", GPT_6_SUPPORTED_MODEL_ID)).toBe(false);
+		await expect(
+			onPayload({ text: {} }, { provider: "openai", id: GPT_6_SUPPORTED_MODEL_ID } as never),
+		).resolves.toEqual({ text: {} });
+	});
+
 	it("handles help, status, off, and completion filtering", async () => {
 		vi.mocked(readFileSync).mockReturnValue('{"enabled":false}');
 		const apiMock = createExtensionApiMock();
@@ -130,9 +158,10 @@ describe("codex fast mode", () => {
 		);
 	});
 
+	// Pi 0.85.0 does not bundle Astra; this extension does not register models itself.
 	it.each(
-		SUPPORTED_MODEL_IDS,
-	)("keeps %s registered on the openai-codex provider with openai-codex-responses api", (modelId) => {
+		SUPPORTED_MODEL_IDS.filter((modelId) => modelId !== GPT_6_SUPPORTED_MODEL_ID),
+	)("keeps bundled %s on the openai-codex provider with openai-codex-responses api", (modelId) => {
 		const model = getModel("openai-codex", modelId);
 		expect(model.provider).toBe("openai-codex");
 		expect(model.id).toBe(modelId);
