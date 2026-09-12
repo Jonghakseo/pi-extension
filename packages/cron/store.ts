@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { withStoreLock, writeAtomicFile } from "./store-lock.mjs";
 import type { CronJob, CronStoreFile } from "./types.ts";
 
 const STORE_VERSION = 2 as const;
@@ -30,6 +31,10 @@ export function getRunsDir(): string {
 	return join(getCronDir(), "runs");
 }
 
+export function getSessionRegistryDir(): string {
+	return join(getCronDir(), "sessions");
+}
+
 export function getDaemonPidPath(): string {
 	return join(getCronDir(), "daemon.pid");
 }
@@ -46,6 +51,7 @@ export function ensureCronDirs(): void {
 	mkdirSync(getCronDir(), { recursive: true });
 	mkdirSync(getPromptsDir(), { recursive: true });
 	mkdirSync(getRunsDir(), { recursive: true });
+	mkdirSync(getSessionRegistryDir(), { recursive: true });
 }
 
 export function emptyStore(): CronStoreFile {
@@ -56,8 +62,7 @@ function isCompletedOneShot(job: CronJob): boolean {
 	return job.disabledReason === "completed_once";
 }
 
-export function loadStore(): CronStoreFile {
-	ensureCronDirs();
+function loadStoreUnsafe(): CronStoreFile {
 	const jobsPath = getJobsPath();
 	if (!existsSync(jobsPath)) return emptyStore();
 
@@ -84,16 +89,33 @@ function historyTimestamp(job: CronJob): string {
 	return job.completedAt ?? job.lastRunAt ?? job.updatedAt;
 }
 
-export function saveStore(store: CronStoreFile): void {
-	ensureCronDirs();
-	const jobsPath = getJobsPath();
-	const tmpPath = `${jobsPath}.tmp`;
+function saveStoreUnsafe(store: CronStoreFile): void {
 	const jobs = [...store.jobs].sort((a, b) => a.id.localeCompare(b.id));
 	const history = [...store.history].sort(
 		(a, b) => historyTimestamp(b).localeCompare(historyTimestamp(a)) || a.id.localeCompare(b.id),
 	);
-	writeFileSync(tmpPath, `${JSON.stringify({ version: STORE_VERSION, jobs, history }, null, 2)}\n`, "utf-8");
-	renameSync(tmpPath, jobsPath);
+	writeAtomicFile(getJobsPath(), `${JSON.stringify({ version: STORE_VERSION, jobs, history }, null, 2)}\n`);
+}
+
+export function loadStore(): CronStoreFile {
+	ensureCronDirs();
+	return loadStoreUnsafe();
+}
+
+/** Runs a complete store read-modify-write while holding the shared daemon lock. */
+export function withStoreTransaction<T>(update: (store: CronStoreFile) => T): T {
+	ensureCronDirs();
+	return withStoreLock(getCronDir(), () => {
+		const store = loadStoreUnsafe();
+		const result = update(store);
+		saveStoreUnsafe(store);
+		return result;
+	});
+}
+
+export function saveStore(store: CronStoreFile): void {
+	ensureCronDirs();
+	withStoreLock(getCronDir(), () => saveStoreUnsafe(store));
 }
 
 export function loadJobs(): CronJob[] {
@@ -105,8 +127,9 @@ export function loadHistory(): CronJob[] {
 }
 
 export function saveJobs(jobs: CronJob[]): void {
-	const store = loadStore();
-	saveStore({ ...store, jobs });
+	withStoreTransaction((store) => {
+		store.jobs = jobs;
+	});
 }
 
 export function slugifyJobId(input: string): string {
@@ -125,11 +148,10 @@ export function assertValidJobId(id: string): void {
 	}
 }
 
-export function allocateJobId(name: string, requestedId?: string): string {
+export function allocateJobIdFromStore(store: CronStoreFile, name: string, requestedId?: string): string {
 	const base = slugifyJobId(requestedId || name);
 	assertValidJobId(base);
 
-	const store = loadStore();
 	const activeIds = new Set(store.jobs.map((job) => job.id));
 	const historicalIds = new Set(store.history.map((job) => job.id));
 	const reservedIds = new Set([...activeIds, ...historicalIds]);
@@ -149,6 +171,10 @@ export function allocateJobId(name: string, requestedId?: string): string {
 	throw new Error(`Could not allocate unique cron job id for "${name}"`);
 }
 
+export function allocateJobId(name: string, requestedId?: string): string {
+	return withStoreTransaction((store) => allocateJobIdFromStore(store, name, requestedId));
+}
+
 export function getPromptPath(id: string): string {
 	assertValidJobId(id);
 	ensureCronDirs();
@@ -163,7 +189,7 @@ export function getPromptPath(id: string): string {
 export function writePromptFile(id: string, markdown: string): string {
 	const promptPath = getPromptPath(id);
 	mkdirSync(dirname(promptPath), { recursive: true });
-	writeFileSync(promptPath, `${markdown.trimEnd()}\n`, "utf-8");
+	writeAtomicFile(promptPath, `${markdown.trimEnd()}\n`);
 	return promptPath;
 }
 
@@ -181,31 +207,29 @@ export function findJob(id: string): CronJob | undefined {
 
 export function upsertJob(job: CronJob): CronJob {
 	assertValidJobId(job.id);
-	const jobs = loadJobs();
-	const index = jobs.findIndex((item) => item.id === job.id);
-	if (index === -1) {
-		jobs.push(job);
-	} else {
-		jobs[index] = job;
-	}
-	saveJobs(jobs);
-	return job;
+	return withStoreTransaction((store) => {
+		const index = store.jobs.findIndex((item) => item.id === job.id);
+		if (index === -1) store.jobs.push(job);
+		else store.jobs[index] = job;
+		return job;
+	});
 }
 
 export function updateJob(id: string, update: (job: CronJob) => CronJob): CronJob | undefined {
-	const jobs = loadJobs();
-	const index = jobs.findIndex((job) => job.id === id);
-	if (index === -1) return undefined;
-	const next = update(jobs[index]);
-	jobs[index] = { ...next, updatedAt: new Date().toISOString() };
-	saveJobs(jobs);
-	return jobs[index];
+	return withStoreTransaction((store) => {
+		const index = store.jobs.findIndex((job) => job.id === id);
+		if (index === -1) return undefined;
+		const next = update(store.jobs[index]);
+		store.jobs[index] = { ...next, updatedAt: new Date().toISOString() };
+		return store.jobs[index];
+	});
 }
 
 export function removeJob(id: string): boolean {
-	const jobs = loadJobs();
-	const next = jobs.filter((job) => job.id !== id);
-	if (next.length === jobs.length) return false;
-	saveJobs(next);
-	return true;
+	return withStoreTransaction((store) => {
+		const index = store.jobs.findIndex((job) => job.id === id);
+		if (index === -1) return false;
+		store.jobs.splice(index, 1);
+		return true;
+	});
 }

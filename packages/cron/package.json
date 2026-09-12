@@ -26,7 +26,11 @@
 		"daemon.mjs",
 		"launchd.ts",
 		"schedule.ts",
+		"process-identity.mjs",
+		"process-identity.d.mts",
 		"store.ts",
+		"store-lock.mjs",
+		"store-lock.d.mts",
 		"types.ts",
 		"README.md"
 	],
