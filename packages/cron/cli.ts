@@ -20,9 +20,10 @@ export const CRON_CLI_HELP_TEXT = [
 	"",
 	"1. Start with `cron help` when you need to learn the interface.",
 	"",
-	"2. Scheduled prompts must be self-contained:",
-	"   • Headless cron runs do NOT have access to the original chat/session history.",
-	"   • If the user says '방금 한 것', '이 작업', or '아까 정리한 것', include all required context after `--`.",
+	"2. Scopes and prompts:",
+	"   • New jobs default to `--scope user`. Use `--scope project` for this Git project.",
+	"   • `--scope session` keeps the original persisted Pi session and delivers there, even after it is reopened by RPC.",
+	"   • User/project jobs run headlessly, so their prompts must be self-contained. Session jobs retain their session history.",
 	"",
 	"3. Use `--` to separate options from prompt markdown for upsert/update:",
 	'   ✓ cron upsert --name daily --kind cron --schedule "0 10 * * *" -- <self-contained prompt>',
@@ -42,17 +43,14 @@ export const CRON_CLI_HELP_TEXT = [
 	"",
 	"  Info & Listing:",
 	"    cron help",
-	"    cron status",
-	"    cron list [--include-prompt]",
-	"    cron history [--include-prompt]",
+	"    cron status [--scope <user|project|session>]",
+	"    cron list [--scope <user|project|session>] [--include-prompt]",
+	"    cron history [--scope <user|project|session>] [--include-prompt]",
 	"",
 	"  Job Management:",
-	"    cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--cwd <path>] [--enabled <true|false>] [--once] -- <promptMarkdown>",
-	"    cron update <id> [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [-- <promptMarkdown>]",
-	"    cron run <id>",
-	"    cron enable <id>",
-	"    cron disable <id>",
-	"    cron remove <id>",
+	"    cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--scope <user|project|session>] [--cwd <path>] [--enabled <true|false>] [--once] -- <promptMarkdown>",
+	"    cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [-- <promptMarkdown>]",
+	"    cron run|enable|disable|remove <id> [--scope <user|project|session>]",
 	"",
 	"  Daemon / launchd:",
 	"    cron start-daemon        (alias: cron start)",
@@ -238,6 +236,15 @@ function parseOptions(args: string[], options: { allowPrompt: boolean }): Parsed
 				params.cwd = value;
 				break;
 			}
+			case "scope": {
+				const value = takeValue();
+				if (!value) return { error: "❌ --scope requires user, project, or session" };
+				if (!["user", "project", "session"].includes(value)) {
+					return { error: `❌ Invalid --scope: "${value}"\n\nValid values: user, project, session` };
+				}
+				params.scope = value;
+				break;
+			}
 			case "enabled": {
 				const value = takeValue();
 				if (!value) return { error: "❌ --enabled requires true or false" };
@@ -277,20 +284,22 @@ function parseOptions(args: string[], options: { allowPrompt: boolean }): Parsed
 }
 
 function parseIdCommand(action: string, args: string[]): CronCliParseResult {
-	const id = args[0];
+	const parsed = parseOptions(args, { allowPrompt: false });
+	if ("error" in parsed) return { type: "error", message: parsed.error };
+	const id = parsed.positional[0];
 	if (!id) {
 		return {
 			type: "error",
 			message: `❌ ${action} requires <id>\n\n✓ Example: cron ${action} daily-release-check`,
 		};
 	}
-	if (args.length > 1) {
+	if (parsed.positional.length > 1) {
 		return {
 			type: "error",
-			message: `❌ Unexpected argument: ${args[1]}\n\n✓ Example: cron ${action} ${id}`,
+			message: `❌ Unexpected argument: ${parsed.positional[1]}\n\n✓ Example: cron ${action} ${id}`,
 		};
 	}
-	return { type: "params", params: { action, id } };
+	return { type: "params", params: { action, id, ...parsed.params } };
 }
 
 function parseUpsertOrUpdate(action: "upsert" | "update", args: string[]): CronCliParseResult {
@@ -360,10 +369,14 @@ export function parseCronToolCommand(command: unknown): CronCliParseResult {
 	switch (verb) {
 		case "help":
 			return { type: "help" };
-		case "status":
-			if (args.length > 0)
-				return { type: "error", message: "❌ status does not accept arguments\n\n✓ Example: cron status" };
-			return { type: "params", params: { action: "status" } };
+		case "status": {
+			const parsed = parseOptions(args, { allowPrompt: false });
+			if ("error" in parsed) return { type: "error", message: parsed.error };
+			if (parsed.positional.length > 0) {
+				return { type: "error", message: "❌ status does not accept positional arguments\n\n✓ Example: cron status" };
+			}
+			return { type: "params", params: { action: "status", ...parsed.params } };
+		}
 		case "list":
 		case "history":
 			return parseListing(verb, args);

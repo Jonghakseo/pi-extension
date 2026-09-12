@@ -26,7 +26,9 @@ The scheduler is macOS-first. On macOS, its LaunchAgent keeps jobs running after
 
 - Lets the agent register scheduled work from natural language.
 - Stores each job as metadata plus a self-contained Markdown prompt.
-- Runs jobs through a headless Pi process: `pi -p --no-session @prompt.md`.
+- New jobs default to `user` scope. `project` jobs are visible only from the same Git remote/root commit/path identity. `session` jobs are visible only from their original persisted Pi session.
+- User and project jobs run through a headless Pi process: `pi -p --no-session @prompt.md`.
+- Session jobs deliver to a live original session through a user-only local socket. If that session is fully closed, the daemon opens its original session file with `pi --mode rpc --session <file>`, verifies its identity, and waits for `agent_settled` or a confirmed idle state after an immediate command. It never creates a separate `--no-session` conversation for a session job.
 - Extensions and MCP tools are loaded as in interactive mode so scheduled prompts can call MCP tools (Slack, Jira, etc.).
 - Uses a detached daemon and macOS `launchd` LaunchAgent so jobs continue after Pi exits and after reboot/login.
 - Moves one-shot jobs out of the current job list and into history after their first execution attempt.
@@ -38,6 +40,7 @@ The scheduler is macOS-first. On macOS, its LaunchAgent keeps jobs running after
 ~/.pi/agent/cron/jobs.json
 ~/.pi/agent/cron/prompts/<jobId>.md
 ~/.pi/agent/cron/runs/<jobId>/<timestamp>.log
+~/.pi/agent/cron/sessions/<session-hash>.json  # live session IPC owner lease
 ~/.pi/agent/cron/daemon.pid
 ~/.pi/agent/cron/daemon.log
 ~/Library/LaunchAgents/dev.pi.cron.plist
@@ -52,21 +55,21 @@ The scheduler is macOS-first. On macOS, its LaunchAgent keeps jobs running after
 매주 월요일 오전 9시에 PR 리뷰 상태 요약해줘
 ```
 
-The LLM-facing `cron` tool intentionally exposes only one parameter: `command`. Agents should call `cron help` when they need the grammar, then pass a CLI-style command string. Scheduled prompts must be self-contained because headless runs do not have access to the original session history.
+The LLM-facing `cron` tool intentionally exposes only one parameter: `command`. Agents should call `cron help` when they need the grammar, then pass a CLI-style command string. User and project prompts must be self-contained because headless runs do not have access to the original session history. Session jobs retain that original session history.
 
 ## Tool commands
 
 ```text
 cron help
-cron status
-cron list [--include-prompt]       # current jobs only
-cron history [--include-prompt]    # completed one-shot jobs
-cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--cwd <path>] [--enabled <true|false>] [--once] -- <promptMarkdown>
-cron update <id> [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [-- <promptMarkdown>]
-cron run <id>
-cron enable <id>
-cron disable <id>
-cron remove <id>       # deletes immediately
+cron status [--scope <user|project|session>]
+cron list [--scope <user|project|session>] [--include-prompt]       # current jobs only
+cron history [--scope <user|project|session>] [--include-prompt]    # completed one-shot jobs
+cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--scope <user|project|session>] [--cwd <path>] [--enabled <true|false>] [--once] -- <promptMarkdown>
+cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [-- <promptMarkdown>]
+cron run <id> [--scope <user|project|session>]
+cron enable <id> [--scope <user|project|session>]
+cron disable <id> [--scope <user|project|session>]
+cron remove <id> [--scope <user|project|session>]       # deletes immediately
 cron start-daemon      # alias: cron start
 cron stop-daemon       # alias: cron stop
 cron install-launchd   # alias: cron install
@@ -89,11 +92,19 @@ Human-facing slash commands are still available for convenience:
 /cron disable <id>
 ```
 
+## Scopes
+
+`user` is the explicit default and remains compatible with legacy jobs that have no scope field. Accessible results always combine user jobs with the current project and current session, then an optional `--scope` narrows that result.
+
+A job cannot be moved between scopes with `update`; create a new job in the destination scope. This prevents a guessed job ID from retargeting another project or session. Session scope requires a persisted current session ID and file.
+
+For a one-shot session job, history records delivery acceptance or queueing, not the eventual task result. The task output remains in its original conversation.
+
 ## One-shot jobs
 
 `kind: "at"` and `kind: "delay"` are always one-shot. A `kind: "cron"` job can also be one-shot with `once: true`.
 
-After the first execution attempt, a one-shot job is atomically removed from the current `jobs` array and appended to the `history` array in `jobs.json`. The archived entry keeps its full metadata, prompt file, exit code, completion timestamp, and run log path.
+After the first execution attempt, a one-shot job is atomically removed from the current `jobs` array and appended to the `history` array in `jobs.json`. The archived entry keeps its full metadata, prompt file, exit code, completion timestamp, and run log path. Waiting for a session owner to become ready or finish a handoff does not consume that attempt.
 
 `cron list` and `/cron list` show current jobs only. Use `cron history [--include-prompt]` or `/cron history` to inspect completed one-shot jobs. Existing version 1 stores are migrated in memory, so previously completed one-shot jobs appear in history after upgrading.
 
@@ -105,6 +116,13 @@ After the first execution attempt, a one-shot job is atomically removed from the
 - Job IDs are restricted to `[a-zA-Z0-9._-]`.
 - Prompt files are written only under `~/.pi/agent/cron/prompts/`.
 - Archived job IDs remain reserved so a future job cannot overwrite a preserved history prompt.
+- Session ownership protects cooperating runtimes that load this extension and use the same Pi agent directory. It is not a global lock on the transcript file. Do not concurrently open the same session in an older runtime or one without this extension.
+- A live session must load the updated extension before it can accept scheduled messages through the local bridge. Its lease moves through `starting`, `active`, and `draining`; the daemon defers, rather than fails, jobs while it is not ready or is handing off.
+- On `session_shutdown`, the lease remains `draining` until Pi emits the documented successor `session_start` event or the owner process is provably gone. A host that disposes a session without either signal fails closed, so its due session jobs remain deferred rather than being resumed concurrently. The host must complete a documented session replacement or exit its process before cron can resume that session.
+- Lease and transaction-lock cleanup check the process start identity as well as PID (`/proc` boot ID plus start time on Linux, `/bin/ps -o lstart` on macOS). If the PID is live but its recorded start identity cannot be checked, ownership is not stolen.
+- A connection lost after sending a prompt may hide an accepted delivery. Cron records a failed delivery instead of automatically resending it. Check the original session before retrying manually.
+
+The handoff uses Pi's [documented session lifecycle](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#session_shutdown). Closed-session delivery follows the [RPC contract](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md).
 
 ## Updating the package
 

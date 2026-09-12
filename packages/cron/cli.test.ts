@@ -7,10 +7,13 @@ describe("cron CLI parser", () => {
 	});
 
 	it("parses simple status/list/history commands", () => {
-		expect(parseCronToolCommand("cron status")).toEqual({ type: "params", params: { action: "status" } });
-		expect(parseCronToolCommand("cron list --include-prompt")).toEqual({
+		expect(parseCronToolCommand("cron status --scope project")).toEqual({
 			type: "params",
-			params: { action: "list", includePrompt: true },
+			params: { action: "status", scope: "project" },
+		});
+		expect(parseCronToolCommand("cron list --scope session --include-prompt")).toEqual({
+			type: "params",
+			params: { action: "list", scope: "session", includePrompt: true },
 		});
 		expect(parseCronToolCommand("cron history --include-prompt")).toEqual({
 			type: "params",
@@ -57,6 +60,15 @@ describe("cron CLI parser", () => {
 			type: "params",
 			params: { action: "uninstall_launchd", yes: true },
 		});
+	});
+
+	it("parses scope on id commands and rejects invalid scope values", () => {
+		expect(parseCronToolCommand("cron remove daily --scope project")).toEqual({
+			type: "params",
+			params: { action: "remove", id: "daily", scope: "project" },
+		});
+		const invalid = parseCronToolCommand("cron list --scope everyone");
+		expect(invalid.type).toBe("error");
 	});
 
 	it("rejects update without id", () => {
