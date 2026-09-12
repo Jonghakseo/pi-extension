@@ -43,6 +43,8 @@ interface DeliveryRequest {
 export interface SessionBridgeOptions {
 	/** Only a documented session_start replacement may claim a same-process draining lease. */
 	allowDrainingHandoff?: boolean;
+	/** Host-owned PTT barrier. A paused host must defer before it queues Pi input. */
+	isDeliveryPaused?: () => boolean;
 }
 
 function sessionKey(sessionId: string): string {
@@ -368,6 +370,12 @@ export class SessionBridge {
 				socket.end(
 					`${JSON.stringify({ id: request.id, ok: false, deferred: true, error: "session is transitioning" })}\n`,
 				);
+				return;
+			}
+			// The host can interrupt a voice turn while this bridge is still active.
+			// Do not accept delivery into that hidden transition window.
+			if (this.options.isDeliveryPaused?.()) {
+				socket.end(`${JSON.stringify({ id: request.id, ok: false, deferred: true, error: "host delivery paused" })}\n`);
 				return;
 			}
 			try {

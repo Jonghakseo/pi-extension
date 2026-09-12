@@ -72,6 +72,36 @@ describe("cron session bridge", () => {
 		expect(existsSync(sessionOwnerPath("session-a"))).toBe(false);
 	});
 
+	it("defers host-paused delivery before sending any Pi follow-up", async () => {
+		const pi = { sendUserMessage: vi.fn() };
+		const sessionFile = join(agentDir, "source.jsonl");
+		writeSession(sessionFile);
+		let paused = true;
+		const bridge = new SessionBridge("session-a", sessionFile, pi as never, { isDeliveryPaused: () => paused });
+		await bridge.start();
+		try {
+			const owner = JSON.parse(readFileSync(sessionOwnerPath("session-a"), "utf8"));
+			const payload = { ...owner, id: "paused-job", prompt: "scheduled work" };
+
+			expect(await request(owner.endpoint, payload)).toMatchObject({
+				id: "paused-job",
+				ok: false,
+				deferred: true,
+				error: "host delivery paused",
+			});
+			expect(pi.sendUserMessage).not.toHaveBeenCalled();
+
+			paused = false;
+			expect(await request(owner.endpoint, payload)).toMatchObject({ id: "paused-job", ok: true, outcome: "queued" });
+			expect(pi.sendUserMessage).toHaveBeenCalledWith("scheduled work", {
+				deliverAs: "followUp",
+				expandPromptTemplates: true,
+			});
+		} finally {
+			await bridge.stop();
+		}
+	});
+
 	it("consumes the RPC reservation so the same session can reload and reattach", async () => {
 		const previousReservation = process.env.PI_CRON_SESSION_RESERVATION;
 		const sessionFile = join(agentDir, "source.jsonl");

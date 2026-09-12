@@ -31,6 +31,7 @@ function createPi() {
 	const tools = new Map<string, any>();
 	const commands = new Map<string, any>();
 	const events = new Map<string, any>();
+	const eventBus = new Map<string, (value: unknown) => void>();
 	return {
 		tools,
 		commands,
@@ -39,6 +40,13 @@ function createPi() {
 			on: vi.fn((event: string, handler: any) => events.set(event, handler)),
 			registerTool: vi.fn((tool: any) => tools.set(tool.name, tool)),
 			registerCommand: vi.fn((name: string, command: any) => commands.set(name, command)),
+			events: {
+				on: vi.fn((channel: string, handler: (value: unknown) => void) => {
+					eventBus.set(channel, handler);
+					return () => eventBus.delete(channel);
+				}),
+				emit: vi.fn((channel: string, value: unknown) => eventBus.get(channel)?.(value)),
+			},
 		},
 	};
 }

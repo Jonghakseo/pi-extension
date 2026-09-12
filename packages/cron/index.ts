@@ -429,10 +429,22 @@ const toolHandlers: Record<
 	},
 };
 
+const PICKY_EXTERNAL_DELIVERY_PAUSE_STATE_CHANNEL = "picky.external-delivery.pause-state";
+const PICKY_EXTERNAL_DELIVERY_PAUSE_QUERY_CHANNEL = "picky.external-delivery.pause-query";
+
 export default function (pi: ExtensionAPI) {
 	let sessionBridge: SessionBridge | undefined;
 	let bridgeStart: Promise<void> | undefined;
 	let shuttingDown = false;
+	let externalDeliveryPaused = false;
+	pi.events.on(PICKY_EXTERNAL_DELIVERY_PAUSE_STATE_CHANNEL, (value) => {
+		externalDeliveryPaused = Boolean(
+			value && typeof value === "object" && (value as { paused?: unknown }).paused === true,
+		);
+	});
+	// Extension instances are recreated by Pi reload/rebind. Ask the per-runtime
+	// host bus for its current state so a reload during PTT stays paused.
+	pi.events.emit(PICKY_EXTERNAL_DELIVERY_PAUSE_QUERY_CHANNEL, undefined);
 
 	async function ensureSessionBridge(ctx: ExtensionContext, allowDrainingHandoff = false): Promise<void> {
 		if (shuttingDown || sessionBridge) return;
@@ -441,7 +453,10 @@ export default function (pi: ExtensionAPI) {
 		const sessionFile = ctx.sessionManager.getSessionFile();
 		// Pi creates the session file only after the first assistant message.
 		if (!sessionId || !sessionFile || !existsSync(sessionFile)) return;
-		const bridge = new SessionBridge(sessionId, sessionFile, pi, { allowDrainingHandoff });
+		const bridge = new SessionBridge(sessionId, sessionFile, pi, {
+			allowDrainingHandoff,
+			isDeliveryPaused: () => externalDeliveryPaused,
+		});
 		bridgeStart = (async () => {
 			await bridge.start();
 			if (shuttingDown) await bridge.beginDraining();
