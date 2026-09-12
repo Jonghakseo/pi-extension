@@ -22,16 +22,18 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { SearchResult } from "./storage.ts";
-import type { MemoryScope } from "./types.ts";
+import type { MemoryScope, MemoryTier } from "./types.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type MemoryMenuAction = "view" | "viewTopic" | "delete" | "copyContent";
-export type ScopeFilter = "all" | "user" | "project";
+export type ScopeFilter = "all" | "agent" | "user" | "project";
+export type TierFilter = "all" | MemoryTier;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function scopeBadge(theme: Theme, scope: MemoryScope): string {
+	if (scope === "agent") return theme.fg("warning", "[agent]");
 	return scope === "user" ? theme.fg("accent", "[user]") : theme.fg("success", "[project]");
 }
 
@@ -39,10 +41,18 @@ function buildSearchText(entry: SearchResult): string {
 	return [entry.scope, entry.topic, entry.title, entry.content, entry.projectId ?? ""].join(" ").toLowerCase();
 }
 
-function filterEntries(entries: SearchResult[], query: string, scopeFilter: ScopeFilter): SearchResult[] {
+function filterEntries(
+	entries: SearchResult[],
+	query: string,
+	scopeFilter: ScopeFilter,
+	tierFilter: TierFilter,
+): SearchResult[] {
 	let filtered = entries;
 	if (scopeFilter !== "all") {
 		filtered = filtered.filter((e) => e.scope === scopeFilter);
+	}
+	if (tierFilter !== "all") {
+		filtered = filtered.filter((e) => e.tier === tierFilter);
 	}
 	const trimmed = query.trim();
 	if (!trimmed) return filtered;
@@ -79,7 +89,8 @@ export class MemorySelectorComponent extends Container implements Focusable {
 	private allEntries: SearchResult[];
 	private filteredEntries: SearchResult[];
 	private selectedIndex = 0;
-	private scopeFilter: ScopeFilter = "all";
+	private scopeFilter: ScopeFilter;
+	private tierFilter: TierFilter;
 	private onSelectCallback: (entry: SearchResult) => void;
 	private onCancelCallback: () => void;
 	private tui: TUI;
@@ -104,12 +115,16 @@ export class MemorySelectorComponent extends Container implements Focusable {
 		onSelect: (entry: SearchResult) => void,
 		onCancel: () => void,
 		initialSearch?: string,
+		initialScope?: MemoryScope,
+		initialTier?: MemoryTier,
 	) {
 		super();
 		this.tui = tui;
 		this.theme = theme;
 		this.allEntries = entries;
 		this.filteredEntries = entries;
+		this.scopeFilter = initialScope ?? "all";
+		this.tierFilter = initialTier ?? "all";
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
 
@@ -164,20 +179,31 @@ export class MemorySelectorComponent extends Container implements Focusable {
 	private updateScopeDisplay(): void {
 		const labels: Record<ScopeFilter, string> = {
 			all: "📋 All",
+			agent: "🤖 Session only",
 			user: "🌐 User only",
 			project: "📁 Project only",
 		};
+		const tierLabel = this.tierFilter === "all" ? "All tiers" : `${this.tierFilter} tier`;
+		const active = this.scopeFilter !== "all" || this.tierFilter !== "all";
 		this.scopeText.setText(
-			this.theme.fg("muted", `Filter: ${labels[this.scopeFilter]}`) + this.theme.fg("dim", "  (Tab to cycle)"),
+			this.theme.fg("muted", `Filters: ${labels[this.scopeFilter]} · ${tierLabel}`) +
+				this.theme.fg("dim", active ? "  (Ctrl+L clears filters)" : "  (no filters active)"),
 		);
 	}
 
 	private updateHints(): void {
-		this.hintText.setText(this.theme.fg("dim", "Type to search • ↑↓ select • Enter actions • Tab scope • Esc close"));
+		this.hintText.setText(
+			this.theme.fg("dim", "Type to search • ↑↓ select • Enter actions • Tab scope • Shift+Tab tier • Esc close"),
+		);
 	}
 
 	private applyFilter(): void {
-		this.filteredEntries = filterEntries(this.allEntries, this.searchInput.getValue(), this.scopeFilter);
+		this.filteredEntries = filterEntries(
+			this.allEntries,
+			this.searchInput.getValue(),
+			this.scopeFilter,
+			this.tierFilter,
+		);
 		this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.filteredEntries.length - 1));
 		this.updateList();
 	}
@@ -207,8 +233,9 @@ export class MemorySelectorComponent extends Container implements Focusable {
 			const topicLabel = this.theme.fg("muted", `${entry.topic}/`);
 			const titleColor = isSelected ? "accent" : "text";
 			const titleText = this.theme.fg(titleColor, entry.title || "(untitled)");
+			const tier = this.theme.fg("dim", `[${entry.tier}]`);
 
-			this.listContainer.addChild(new Text(`${prefix}${badge} ${topicLabel}${titleText}`, 0, 0));
+			this.listContainer.addChild(new Text(`${prefix}${badge} ${tier} ${topicLabel}${titleText}`, 0, 0));
 		}
 
 		if (startIndex > 0 || endIndex < this.filteredEntries.length) {
@@ -218,9 +245,24 @@ export class MemorySelectorComponent extends Container implements Focusable {
 	}
 
 	private cycleScope(): void {
-		const order: ScopeFilter[] = ["all", "user", "project"];
+		const order: ScopeFilter[] = ["all", "agent", "user", "project"];
 		const idx = order.indexOf(this.scopeFilter);
 		this.scopeFilter = order[(idx + 1) % order.length];
+		this.updateScopeDisplay();
+		this.applyFilter();
+	}
+
+	private cycleTier(): void {
+		const order: TierFilter[] = ["all", "profile", "log", "note"];
+		const idx = order.indexOf(this.tierFilter);
+		this.tierFilter = order[(idx + 1) % order.length];
+		this.updateScopeDisplay();
+		this.applyFilter();
+	}
+
+	private clearFilters(): void {
+		this.scopeFilter = "all";
+		this.tierFilter = "all";
 		this.updateScopeDisplay();
 		this.applyFilter();
 	}
@@ -252,6 +294,14 @@ export class MemorySelectorComponent extends Container implements Focusable {
 			this.cycleScope();
 			return;
 		}
+		if (matchesKey(keyData, Key.shift("tab"))) {
+			this.cycleTier();
+			return;
+		}
+		if (matchesKey(keyData, Key.ctrl("l"))) {
+			this.clearFilters();
+			return;
+		}
 		this.searchInput.handleInput(keyData);
 		this.applyFilter();
 	}
@@ -275,7 +325,9 @@ export class MemoryActionMenuComponent extends Container {
 
 		const options: SelectItem[] = [
 			{ value: "view", label: "View entry", description: "View this memory entry" },
-			{ value: "viewTopic", label: "View full topic", description: `View entire ${entry.topic}.md file` },
+			...(entry.scope === "agent"
+				? []
+				: [{ value: "viewTopic", label: "View full topic", description: `View entire ${entry.topic}.md file` }]),
 			{ value: "copyContent", label: "Copy content", description: "Copy to clipboard" },
 			{ value: "delete", label: "🗑️ Delete", description: "Permanently delete this entry" },
 		];
@@ -398,7 +450,7 @@ export class MemoryDetailOverlayComponent {
 				this.theme.fg("borderMuted", "─".repeat(rightW)),
 		);
 		lines.push(
-			`${scopeBadge(this.theme, e.scope)} ${this.theme.fg("muted", `${e.topic}.md`)}${e.projectId ? this.theme.fg("dim", ` • ${e.projectId}`) : ""}`,
+			`${scopeBadge(this.theme, e.scope)} ${this.theme.fg("dim", `[${e.tier}]`)} ${this.theme.fg("muted", `${e.topic}.md`)}${e.projectId ? this.theme.fg("dim", ` • ${e.projectId}`) : ""}`,
 		);
 		lines.push("");
 

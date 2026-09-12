@@ -71,7 +71,10 @@ describe("parseIndex", () => {
 		const sections = parseIndex(content);
 		expect(sections).toHaveLength(1);
 		expect(sections[0].topic).toBe("coding-rules");
-		expect(sections[0].entries).toEqual(["Use strict mode", "No any types"]);
+		expect(sections[0].entries).toEqual([
+			{ title: "Use strict mode", tier: "profile" },
+			{ title: "No any types", tier: "profile" },
+		]);
 	});
 
 	it("should parse multiple sections", () => {
@@ -90,9 +93,12 @@ describe("parseIndex", () => {
 		const sections = parseIndex(content);
 		expect(sections).toHaveLength(2);
 		expect(sections[0].topic).toBe("coding-rules");
-		expect(sections[0].entries).toEqual(["Rule 1"]);
+		expect(sections[0].entries).toEqual([{ title: "Rule 1", tier: "profile" }]);
 		expect(sections[1].topic).toBe("preferences");
-		expect(sections[1].entries).toEqual(["Pref 1", "Pref 2"]);
+		expect(sections[1].entries).toEqual([
+			{ title: "Pref 1", tier: "profile" },
+			{ title: "Pref 2", tier: "profile" },
+		]);
 	});
 
 	it("should return empty array for empty content", () => {
@@ -107,7 +113,7 @@ describe("parseIndex", () => {
 		const content = ["- orphan bullet", "## topic.md", "- real entry"].join("\n");
 		const sections = parseIndex(content);
 		expect(sections).toHaveLength(1);
-		expect(sections[0].entries).toEqual(["real entry"]);
+		expect(sections[0].entries).toEqual([{ title: "real entry", tier: "profile" }]);
 	});
 
 	it("should handle sections with no entries", () => {
@@ -117,7 +123,7 @@ describe("parseIndex", () => {
 		expect(sections[0].topic).toBe("empty-topic");
 		expect(sections[0].entries).toEqual([]);
 		expect(sections[1].topic).toBe("another");
-		expect(sections[1].entries).toEqual(["entry"]);
+		expect(sections[1].entries).toEqual([{ title: "entry", tier: "profile" }]);
 	});
 });
 

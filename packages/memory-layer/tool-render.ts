@@ -1,6 +1,6 @@
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
-import type { MemoryScope } from "./types.ts";
+import type { MemoryScope, MemoryTier } from "./types.ts";
 
 type RenderTheme = {
 	fg: (color: ThemeColor, text: string) => string;
@@ -16,22 +16,23 @@ type ToolResultOptions = { expanded: boolean };
 type ToolRenderContext = { args: ToolRenderArgs };
 
 type MemoryCountDetails = {
+	agent?: number;
 	user: number;
 	project: number;
 	topics: number;
 };
 
 export type MemoryToolDetails =
-	| { kind: "remember"; scope: MemoryScope; topic: string; title: string }
+	| { kind: "remember"; scope: MemoryScope; tier?: MemoryTier; topic: string; title: string }
 	| {
 			kind: "recall-query";
 			total: number;
-			matches: ReadonlyArray<{ scope: MemoryScope; topic: string; title: string }>;
+			matches: ReadonlyArray<{ scope: MemoryScope; tier?: MemoryTier; topic: string; title: string }>;
 	  }
-	| { kind: "recall-id"; scope: MemoryScope; topic: string; title: string }
-	| ({ kind: "recall-index"; scope?: MemoryScope } & MemoryCountDetails)
-	| { kind: "forget"; scope: MemoryScope; topic: string; title: string }
-	| ({ kind: "memory-list"; scope?: MemoryScope } & MemoryCountDetails);
+	| { kind: "recall-id"; scope: MemoryScope; tier?: MemoryTier; topic: string; title: string }
+	| ({ kind: "recall-index"; scope?: MemoryScope; tier?: MemoryTier } & MemoryCountDetails)
+	| { kind: "forget"; scope: MemoryScope; tier?: MemoryTier; topic: string; title: string }
+	| ({ kind: "memory-list"; scope?: MemoryScope; tier?: MemoryTier } & MemoryCountDetails);
 
 const CALL_PREVIEW_WIDTH = 60;
 const RESULT_TITLE_WIDTH = 32;
@@ -77,22 +78,27 @@ function formatCount(count: number, singular: string, plural = `${singular}s`): 
 }
 
 function renderCountSummary(details: MemoryCountDetails & { scope?: MemoryScope }): string {
-	const total = details.user + details.project;
+	const agent = details.agent ?? 0;
+	const total = agent + details.user + details.project;
 	if (total === 0) return "○ no memories";
 	if (details.scope === "user")
 		return `✓ ${formatCount(details.user, "memory", "memories")} · ${formatCount(details.topics, "topic")}`;
 	if (details.scope === "project") {
 		return `✓ ${formatCount(details.project, "memory", "memories")} · ${formatCount(details.topics, "topic")}`;
 	}
-	return `✓ ${formatCount(total, "memory", "memories")} · user ${details.user} / project ${details.project}`;
+	if (details.scope === "agent") {
+		return `✓ ${formatCount(agent, "memory", "memories")} · ${formatCount(details.topics, "topic")}`;
+	}
+	return `✓ ${formatCount(total, "memory", "memories")} · agent ${agent} / user ${details.user} / project ${details.project}`;
 }
 
 export function renderRememberCall(args: ToolRenderArgs, theme: RenderTheme, context: { expanded: boolean }): Text {
 	if (context.expanded) return renderExpandedFallback("remember", theme);
 	const scope = stringArg(args, "scope") ?? "project";
 	const topic = stringArg(args, "topic") ?? "general";
+	const tier = stringArg(args, "tier") ?? "profile";
 	const title = stringArg(args, "title") ?? stringArg(args, "content") ?? "(empty)";
-	const text = `${renderTitle("remember", theme)} · ${memoryLocation(scope, topic)} · "${preview(title, CALL_PREVIEW_WIDTH)}"`;
+	const text = `${renderTitle("remember", theme)} · ${memoryLocation(scope, topic)} · ${tier} · "${preview(title, CALL_PREVIEW_WIDTH)}"`;
 	return new Text(text, 0, 0);
 }
 
@@ -107,19 +113,26 @@ export function renderRecallCall(args: ToolRenderArgs, theme: RenderTheme, conte
 	const query = stringArg(args, "query");
 	const id = stringArg(args, "id");
 	const scope = stringArg(args, "scope");
+	const tier = stringArg(args, "tier");
 	let text = renderTitle("recall", theme);
 
 	if (context.expanded) {
 		if (id) text += ` ${theme.fg("accent", `id:${id}`)}`;
 		if (query) text += ` ${theme.fg("accent", `"${query}"`)}`;
 		if (scope) text += ` ${theme.fg("accent", `scope:${scope}`)}`;
+		if (tier) text += ` ${theme.fg("accent", `tier:${tier}`)}`;
 		if (!query && !id) text += ` ${theme.fg("muted", "(index)")}`;
 		return new Text(text, 0, 0);
 	}
 
 	if (id) return new Text(`${text} · id:${preview(id, 8)}`, 0, 0);
-	if (query) return new Text(`${text} · "${preview(query, CALL_PREVIEW_WIDTH)}" · ${scope ?? "all"}`, 0, 0);
-	return new Text(`${text} · index · ${scope ?? "all"}`, 0, 0);
+	if (query)
+		return new Text(
+			`${text} · "${preview(query, CALL_PREVIEW_WIDTH)}" · ${scope ?? "all"}${tier ? `/${tier}` : ""}`,
+			0,
+			0,
+		);
+	return new Text(`${text} · index · ${scope ?? "all"}${tier ? `/${tier}` : ""}`, 0, 0);
 }
 
 export function renderRecallResult(result: ToolRenderResult, options: ToolResultOptions, theme: RenderTheme): Text {
@@ -169,7 +182,11 @@ export function renderForgetResult(
 
 export function renderMemoryListCall(args: ToolRenderArgs, theme: RenderTheme, context: { expanded: boolean }): Text {
 	if (context.expanded) return renderExpandedFallback("memory_list", theme);
-	return new Text(`${renderTitle("memory_list", theme)} · ${stringArg(args, "scope") ?? "all"}`, 0, 0);
+	return new Text(
+		`${renderTitle("memory_list", theme)} · ${stringArg(args, "scope") ?? "all"}${stringArg(args, "tier") ? `/${stringArg(args, "tier")}` : ""}`,
+		0,
+		0,
+	);
 }
 
 export function renderMemoryListResult(result: ToolRenderResult, options: ToolResultOptions, theme: RenderTheme): Text {

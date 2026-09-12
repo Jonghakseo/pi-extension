@@ -23,7 +23,7 @@ export default function memoryLayerExtension(pi: ExtensionAPI) {
 	// Commands must be registered synchronously so Pi includes them in the
 	// initial slash-command autocomplete list. Their heavy handlers stay lazy.
 	pi.registerCommand("remember", {
-		description: "Store a memory. Usage: /remember [user|project] <content>",
+		description: "Store a memory. Usage: /remember [agent|user|project] [profile|log|note] <content>",
 		handler: async (args, ctx) => {
 			const handlers = await load();
 			return handlers.onRememberCommand(args, ctx as unknown as ExtensionContext);
@@ -31,7 +31,7 @@ export default function memoryLayerExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("memory", {
-		description: "Browse and manage stored memories",
+		description: "Browse memories. Optional: [search] [--scope agent|user|project] [--tier profile|log|note]",
 		handler: async (args, ctx) => {
 			const handlers = await load();
 			return handlers.onMemoryCommand(args, ctx as unknown as ExtensionContext);

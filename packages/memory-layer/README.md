@@ -1,45 +1,45 @@
 # memory-layer
 
-Long-term memory layer for pi — remember, recall, forget, and browse memories across sessions.
+Long-term and session memory for Pi. Remember, recall, forget, and browse memories across sessions.
 
 ## What it does
 
-Provides persistent memory that survives across pi sessions:
+- **Scopes**
+  - `agent`: private to the current Pi session. It is restored when that session is reopened, but is not inherited by a fork.
+  - `user`: persistent personal preferences and cross-project rules.
+  - `project`: persistent repository-specific decisions, tooling, and configuration.
+- **Tiers**: `profile`, `log`, and `note`. Recall and prompt injection prioritize them in that order, with query relevance deciding order within a tier. New and legacy memories default to `profile`. Tiers do not expire or delete memories automatically.
+- **remember**: save a fact, rule, or lesson with scope, tier, and optional topic.
+- **recall**: search by query, retrieve by ID, or list entries. `scope` and `tier` filters apply to every mode, including ID lookup.
+- **forget**: remove a memory from active recall. User/project entries are deleted from their topic files; agent entries are logically deleted and remain in session history.
+- **memory_list**: list memories with optional scope and tier filters.
+- **`/remember`**: interactive save. Usage: `/remember [agent|user|project] [profile|log|note] <content>`.
+- **`/memory`**: browse, search, filter, copy, and delete memories. Use `--scope agent` and `--tier note` with ordinary search text, or cycle scope with Tab and tier with Shift+Tab in the overlay.
 
-- **remember** tool — save facts, rules, or lessons with `user` (global) or `project` (repo-specific) scope
-- **recall** tool — search memories by keyword, retrieve by ID, or list the full index
-- **forget** tool — permanently delete memories that are no longer valid
-- **memory_list** tool — list all active memories, optionally filtered by scope
-- `/remember` command — interactive memory save with topic selection UI
-- `/memory` command — full-featured overlay browser with search, scope filter, view, copy, and delete
+## Storage
 
-### Storage
-
-Memories are stored as Markdown files under `~/.pi/memory/`:
+Persistent `user` and `project` memories are Markdown files under `~/.pi/memory/`:
 
 ```text
 ~/.pi/memory/
   user/
-    MEMORY.md          # index
-    general.md         # topic file
-    coding-rules.md    # topic file
+    MEMORY.md
+    general.md
   projects/
     <project-id>/
       MEMORY.md
       general.md
 ```
 
-### Project ID resolution
+Tier metadata is stored with a versioned entry marker. Existing Markdown files, including old `@entry` markers and indexes, remain readable as `profile` entries without reinterpreting their titles or body text. Session-scoped `agent` memories use Pi session custom entries, rather than the persistent directory. Forgetting an agent memory appends a tombstone to session history, so it stays logically deleted after reopening the session.
 
-Project identity is resolved automatically:
+## Project ID resolution
 
-1. `git remote origin` URL → normalized slug
-2. Root commit hash → `commit-{hash8}`
-3. Fallback: cwd path hash → `local-{hash8}`
+Project identity resolves automatically:
 
-### System prompt injection
-
-On each turn, the memory index is injected into the system prompt so the LLM knows what's stored without needing an explicit recall call.
+1. `git remote origin` URL, normalized to a slug
+2. Root commit hash
+3. CWD path hash
 
 ## Install
 

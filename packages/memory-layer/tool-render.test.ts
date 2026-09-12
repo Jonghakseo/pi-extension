@@ -35,7 +35,7 @@ describe("memory-layer compact tool rendering", () => {
 		const details = { kind: "remember", scope: "project", topic: "general", title: "배포 규칙" } as const;
 
 		expect(render(renderRememberCall(args, theme as never, { expanded: false }))).toBe(
-			'remember · project/general · "배포 규칙"',
+			'remember · project/general · profile · "배포 규칙"',
 		);
 		expect(render(renderRememberResult(result(fullResult, details), { expanded: false }, theme as never))).toBe(
 			"✓ saved",
@@ -85,7 +85,7 @@ describe("memory-layer compact tool rendering", () => {
 		);
 		expect(render(renderRecallCall({}, theme as never, { expanded: false }))).toBe("recall · index · all");
 		expect(render(renderRecallResult(result("full index", indexDetails), { expanded: false }, theme as never))).toBe(
-			"✓ 27 memories · user 23 / project 4",
+			"✓ 27 memories · agent 0 / user 23 / project 4",
 		);
 	});
 

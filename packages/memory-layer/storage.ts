@@ -2,7 +2,13 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { MemoryScope } from "./types.ts";
+import type { MemoryScope, MemoryTier } from "./types.ts";
+
+export const MEMORY_TIERS: readonly MemoryTier[] = ["profile", "log", "note"];
+
+export function memoryTierRank(tier: MemoryTier): number {
+	return MEMORY_TIERS.indexOf(tier);
+}
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -10,7 +16,7 @@ const MEMORY_BASE = path.join(os.homedir(), ".pi", "memory");
 const USER_DIR = path.join(MEMORY_BASE, "user");
 const PROJECTS_DIR = path.join(MEMORY_BASE, "projects");
 
-function scopeDir(scope: MemoryScope, projectId?: string): string {
+function scopeDir(scope: Exclude<MemoryScope, "agent">, projectId?: string): string {
 	if (scope === "project") {
 		if (!projectId) {
 			throw new Error("project scope requires projectId");
@@ -44,11 +50,11 @@ export function sanitizeTopic(topic: string): string {
 	return slug;
 }
 
-function indexPath(scope: MemoryScope, projectId?: string): string {
+function indexPath(scope: Exclude<MemoryScope, "agent">, projectId?: string): string {
 	return path.join(scopeDir(scope, projectId), "MEMORY.md");
 }
 
-function topicPath(scope: MemoryScope, projectId: string | undefined, topic: string): string {
+function topicPath(scope: Exclude<MemoryScope, "agent">, projectId: string | undefined, topic: string): string {
 	const safe = sanitizeTopic(topic);
 	const dir = scopeDir(scope, projectId);
 	const resolved = path.resolve(dir, `${safe}.md`);
@@ -73,7 +79,7 @@ export async function ensureDir(): Promise<void> {
  * P1-1: Ensure the specific scope directory exists.
  * Must be called before acquiring locks on scope-specific files.
  */
-async function ensureScopeDir(scope: MemoryScope, projectId?: string): Promise<void> {
+async function ensureScopeDir(scope: Exclude<MemoryScope, "agent">, projectId?: string): Promise<void> {
 	const dir = scopeDir(scope, projectId);
 	await fs.mkdir(dir, { recursive: true });
 }
@@ -115,7 +121,11 @@ async function acquireLock(fp: string): Promise<() => Promise<void>> {
 	throw new Error("Memory lock timeout after retries");
 }
 
-async function withScopeLock<T>(scope: MemoryScope, projectId: string | undefined, fn: () => Promise<T>): Promise<T> {
+async function withScopeLock<T>(
+	scope: Exclude<MemoryScope, "agent">,
+	projectId: string | undefined,
+	fn: () => Promise<T>,
+): Promise<T> {
 	// P1-1: Ensure scope directory exists before creating the lock file
 	await ensureScopeDir(scope, projectId);
 
@@ -155,15 +165,21 @@ async function readOrEmpty(fp: string): Promise<string> {
 
 // ── MEMORY.md Index Parsing / Building ───────────────────────────────────────
 
+export interface IndexEntry {
+	title: string;
+	tier: MemoryTier;
+}
+
 export interface IndexSection {
 	topic: string; // filename without .md
-	entries: string[]; // memory titles (bullets)
+	entries: IndexEntry[];
 }
 
 export function parseIndex(content: string): IndexSection[] {
 	const sections: IndexSection[] = [];
+	const isV2 = content.includes(INDEX_V2_MARKER);
 	let currentTopic: string | null = null;
-	let currentEntries: string[] = [];
+	let currentEntries: IndexEntry[] = [];
 
 	for (const line of content.split("\n")) {
 		const topicMatch = line.match(/^## (.+)\.md\s*$/);
@@ -173,9 +189,9 @@ export function parseIndex(content: string): IndexSection[] {
 			currentEntries = [];
 			continue;
 		}
-		const bullet = line.match(/^- (.+)$/);
+		const bullet = isV2 ? line.match(/^- \[(profile|log|note)\] (.+)$/) : line.match(/^- (.+)$/);
 		if (bullet && currentTopic) {
-			currentEntries.push(bullet[1]);
+			currentEntries.push({ title: bullet[isV2 ? 2 : 1], tier: isV2 ? (bullet[1] as MemoryTier) : "profile" });
 		}
 	}
 
@@ -183,12 +199,14 @@ export function parseIndex(content: string): IndexSection[] {
 	return sections;
 }
 
+const INDEX_V2_MARKER = "<!-- memory-layer-index:v2 -->";
+
 function buildIndex(sections: IndexSection[]): string {
-	const lines = ["# Memory Index", ""];
+	const lines = ["# Memory Index", INDEX_V2_MARKER, ""];
 	for (const section of sections) {
 		lines.push(`## ${section.topic}.md`);
 		for (const entry of section.entries) {
-			lines.push(`- ${entry}`);
+			lines.push(`- [${entry.tier}] ${entry.title}`);
 		}
 		lines.push("");
 	}
@@ -196,14 +214,29 @@ function buildIndex(sections: IndexSection[]): string {
 }
 
 // ── P1-3: Entry Marker Format ────────────────────────────────────────────────
-// New format uses base64-encoded title markers to avoid ## heading collisions.
-// Legacy ## format is auto-detected and supported for reading.
+// V2 stores title and tier in one self-contained JSON marker. Legacy @entry
+// markers and ## headings remain profile entries and preserve their body verbatim.
 
+const ENTRY_V2_MARKER_PREFIX = "<!-- memory-layer-entry:v2: ";
 const ENTRY_MARKER_PREFIX = "<!-- @entry: ";
 const ENTRY_MARKER_SUFFIX = " -->";
 
-function encodeEntryTitle(title: string): string {
-	return Buffer.from(title, "utf8").toString("base64");
+function isMemoryTier(value: unknown): value is MemoryTier {
+	return value === "profile" || value === "log" || value === "note";
+}
+
+function encodeEntryMetadata(title: string, tier: MemoryTier): string {
+	return Buffer.from(JSON.stringify({ title, tier }), "utf8").toString("base64");
+}
+
+function decodeEntryMetadata(encoded: string): { title: string; tier: MemoryTier } | null {
+	try {
+		const parsed = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as Record<string, unknown>;
+		if (typeof parsed.title !== "string" || !isMemoryTier(parsed.tier)) return null;
+		return { title: parsed.title, tier: parsed.tier };
+	} catch {
+		return null;
+	}
 }
 
 function decodeEntryTitle(encoded: string): string {
@@ -211,7 +244,7 @@ function decodeEntryTitle(encoded: string): string {
 }
 
 function isNewEntryFormat(raw: string): boolean {
-	return raw.includes(ENTRY_MARKER_PREFIX);
+	return raw.includes(ENTRY_V2_MARKER_PREFIX) || raw.includes(ENTRY_MARKER_PREFIX);
 }
 
 // ── Topic File Parsing / Building ────────────────────────────────────────────
@@ -219,6 +252,7 @@ function isNewEntryFormat(raw: string): boolean {
 export interface TopicEntry {
 	title: string;
 	content: string;
+	tier: MemoryTier;
 }
 
 /** Parse topic file using new marker format. */
@@ -227,6 +261,7 @@ function parseTopicFileMarker(raw: string): { heading: string; entries: TopicEnt
 	let heading = "";
 	const entries: TopicEntry[] = [];
 	let curTitle: string | null = null;
+	let curTier: MemoryTier = "profile";
 	let curBody: string[] = [];
 
 	for (const line of lines) {
@@ -239,16 +274,25 @@ function parseTopicFileMarker(raw: string): { heading: string; entries: TopicEnt
 			}
 		}
 
-		// Parse entry marker
-		if (line.startsWith(ENTRY_MARKER_PREFIX) && line.endsWith(ENTRY_MARKER_SUFFIX)) {
+		const isV2Marker = line.startsWith(ENTRY_V2_MARKER_PREFIX) && line.endsWith(ENTRY_MARKER_SUFFIX);
+		const isLegacyMarker = line.startsWith(ENTRY_MARKER_PREFIX) && line.endsWith(ENTRY_MARKER_SUFFIX);
+		if (isV2Marker || isLegacyMarker) {
 			if (curTitle !== null) {
-				entries.push({ title: curTitle, content: curBody.join("\n").trim() });
+				entries.push({ title: curTitle, content: curBody.join("\n").trim(), tier: curTier });
 			}
-			const b64 = line.slice(ENTRY_MARKER_PREFIX.length, -ENTRY_MARKER_SUFFIX.length).trim();
-			try {
-				curTitle = decodeEntryTitle(b64);
-			} catch {
-				curTitle = b64; // fallback: use raw if decode fails
+			const prefix = isV2Marker ? ENTRY_V2_MARKER_PREFIX : ENTRY_MARKER_PREFIX;
+			const encoded = line.slice(prefix.length, -ENTRY_MARKER_SUFFIX.length).trim();
+			const metadata = isV2Marker ? decodeEntryMetadata(encoded) : null;
+			if (metadata) {
+				curTitle = metadata.title;
+				curTier = metadata.tier;
+			} else {
+				try {
+					curTitle = decodeEntryTitle(encoded);
+				} catch {
+					curTitle = encoded;
+				}
+				curTier = "profile";
 			}
 			curBody = [];
 			continue;
@@ -257,7 +301,7 @@ function parseTopicFileMarker(raw: string): { heading: string; entries: TopicEnt
 		if (curTitle !== null) curBody.push(line);
 	}
 
-	if (curTitle !== null) entries.push({ title: curTitle, content: curBody.join("\n").trim() });
+	if (curTitle !== null) entries.push({ title: curTitle, content: curBody.join("\n").trim(), tier: curTier });
 	return { heading, entries };
 }
 
@@ -285,14 +329,14 @@ function parseTopicFileLegacy(raw: string): { heading: string; entries: TopicEnt
 
 		const h2 = line.match(/^## (.+)$/);
 		if (h2) {
-			if (curTitle) entries.push({ title: curTitle, content: curBody.join("\n").trim() });
+			if (curTitle) entries.push({ title: curTitle, content: curBody.join("\n").trim(), tier: "profile" });
 			curTitle = h2[1];
 			curBody = [];
 			continue;
 		}
 		if (curTitle !== null) curBody.push(line);
 	}
-	if (curTitle) entries.push({ title: curTitle, content: curBody.join("\n").trim() });
+	if (curTitle) entries.push({ title: curTitle, content: curBody.join("\n").trim(), tier: "profile" });
 
 	return { heading, entries };
 }
@@ -310,7 +354,7 @@ export function parseTopicFile(raw: string): { heading: string; entries: TopicEn
 function buildTopicFile(heading: string, entries: TopicEntry[]): string {
 	const lines = [`# ${heading}`, ""];
 	for (const entry of entries) {
-		lines.push(`${ENTRY_MARKER_PREFIX}${encodeEntryTitle(entry.title)}${ENTRY_MARKER_SUFFIX}`);
+		lines.push(`${ENTRY_V2_MARKER_PREFIX}${encodeEntryMetadata(entry.title, entry.tier)}${ENTRY_MARKER_SUFFIX}`);
 		lines.push(entry.content);
 		lines.push("");
 	}
@@ -320,12 +364,13 @@ function buildTopicFile(heading: string, entries: TopicEntry[]): string {
 // ── Public API: Save ─────────────────────────────────────────────────────────
 
 export async function saveMemory(
-	scope: MemoryScope,
+	scope: Exclude<MemoryScope, "agent">,
 	projectId: string | undefined,
 	topic: string,
 	topicHeading: string,
 	title: string,
 	content: string,
+	tier: MemoryTier = "profile",
 ): Promise<void> {
 	const safeTopic = sanitizeTopic(topic);
 	const iFp = indexPath(scope, projectId);
@@ -335,7 +380,7 @@ export async function saveMemory(
 		// 1) append to topic file
 		const raw = await readOrEmpty(tFp);
 		const parsed = raw ? parseTopicFile(raw) : { heading: topicHeading, entries: [] };
-		parsed.entries.push({ title, content });
+		parsed.entries.push({ title, content, tier });
 		await atomicWrite(tFp, buildTopicFile(parsed.heading, parsed.entries));
 
 		// 2) update index
@@ -346,7 +391,7 @@ export async function saveMemory(
 			sec = { topic: safeTopic, entries: [] };
 			sections.push(sec);
 		}
-		sec.entries.push(title);
+		sec.entries.push({ title, tier });
 		await atomicWrite(iFp, buildIndex(sections));
 	});
 }
@@ -354,7 +399,7 @@ export async function saveMemory(
 // ── Public API: Remove ───────────────────────────────────────────────────────
 
 export async function removeMemory(
-	scope: MemoryScope,
+	scope: Exclude<MemoryScope, "agent">,
 	projectId: string | undefined,
 	topic: string,
 	title: string,
@@ -385,7 +430,7 @@ export async function removeMemory(
 		const secIdx = sections.findIndex((s) => s.topic === safeTopic);
 		if (secIdx !== -1) {
 			const sec = sections[secIdx];
-			const entryIdx = sec.entries.indexOf(title);
+			const entryIdx = sec.entries.findIndex((entry) => entry.title === title);
 			if (entryIdx !== -1) sec.entries.splice(entryIdx, 1);
 			if (sec.entries.length === 0) sections.splice(secIdx, 1);
 		}
@@ -397,11 +442,11 @@ export async function removeMemory(
 // ── Public API: Check Existence (P2-2) ───────────────────────────────────────
 
 /**
- * Check if a memory entry exists in a specific scope (without lock).
+ * Check if a memory entry exists in a specific persistent scope (without lock).
  * Used for forget ambiguity detection.
  */
 export async function memoryExistsInScope(
-	scope: MemoryScope,
+	scope: Exclude<MemoryScope, "agent">,
 	projectId: string | undefined,
 	topic: string,
 	title: string,
@@ -416,21 +461,25 @@ export async function memoryExistsInScope(
 
 // ── Public API: Read ─────────────────────────────────────────────────────────
 
-export async function loadIndex(scope: MemoryScope, projectId?: string): Promise<IndexSection[]> {
+export async function loadIndex(scope: Exclude<MemoryScope, "agent">, projectId?: string): Promise<IndexSection[]> {
 	const raw = await readOrEmpty(indexPath(scope, projectId));
 	return parseIndex(raw);
 }
 
-export async function readMemoryMd(scope: MemoryScope, projectId?: string): Promise<string> {
+export async function readMemoryMd(scope: Exclude<MemoryScope, "agent">, projectId?: string): Promise<string> {
 	return readOrEmpty(indexPath(scope, projectId));
 }
 
-export async function readTopicFile(scope: MemoryScope, projectId: string | undefined, topic: string): Promise<string> {
+export async function readTopicFile(
+	scope: Exclude<MemoryScope, "agent">,
+	projectId: string | undefined,
+	topic: string,
+): Promise<string> {
 	return readOrEmpty(topicPath(scope, projectId, topic));
 }
 
 export async function loadTopicEntries(
-	scope: MemoryScope,
+	scope: Exclude<MemoryScope, "agent">,
 	projectId: string | undefined,
 	topic: string,
 ): Promise<TopicEntry[]> {
@@ -439,7 +488,7 @@ export async function loadTopicEntries(
 	return parseTopicFile(raw).entries;
 }
 
-export async function listTopics(scope: MemoryScope, projectId?: string): Promise<string[]> {
+export async function listTopics(scope: Exclude<MemoryScope, "agent">, projectId?: string): Promise<string[]> {
 	const dir = scopeDir(scope, projectId);
 	try {
 		const files = await fs.readdir(dir);
@@ -457,6 +506,7 @@ export interface SearchResult {
 	topic: string;
 	title: string;
 	content: string;
+	tier: MemoryTier;
 }
 
 export function memoryEntryId(
@@ -470,23 +520,45 @@ export function memoryEntryId(
 	return crypto.createHash("sha256").update(key).digest("hex").slice(0, 12);
 }
 
-export async function findMemoryById(id: string, projectId?: string): Promise<SearchResult | null> {
-	const scopes: Array<{ scope: MemoryScope; pid?: string }> = [
+export async function listPersistentMemories(projectId?: string): Promise<SearchResult[]> {
+	const results: SearchResult[] = [];
+	const scopes: Array<{ scope: Exclude<MemoryScope, "agent">; pid?: string }> = [
 		{ scope: "user" },
-		...(projectId ? [{ scope: "project" as MemoryScope, pid: projectId }] : []),
+		...(projectId ? [{ scope: "project" as const, pid: projectId }] : []),
 	];
 	for (const { scope, pid } of scopes) {
 		const topics = await listTopics(scope, pid);
 		for (const topic of topics) {
 			const entries = await loadTopicEntries(scope, pid, topic);
 			for (const entry of entries) {
-				if (memoryEntryId(scope, pid, topic, entry.title, entry.content) === id) {
-					return { scope, projectId: pid, topic, title: entry.title, content: entry.content };
-				}
+				results.push({ scope, projectId: pid, topic, title: entry.title, content: entry.content, tier: entry.tier });
 			}
 		}
 	}
-	return null;
+	return results;
+}
+
+export function findMemoryInEntries(
+	entries: SearchResult[],
+	id: string,
+	filters: { scope?: MemoryScope; tier?: MemoryTier } = {},
+): SearchResult | null {
+	return (
+		entries.find(
+			(entry) =>
+				(!filters.scope || entry.scope === filters.scope) &&
+				(!filters.tier || entry.tier === filters.tier) &&
+				memoryEntryId(entry.scope, entry.projectId, entry.topic, entry.title, entry.content) === id,
+		) ?? null
+	);
+}
+
+export async function findMemoryById(
+	id: string,
+	projectId?: string,
+	filters: { scope?: Exclude<MemoryScope, "agent">; tier?: MemoryTier } = {},
+): Promise<SearchResult | null> {
+	return findMemoryInEntries(await listPersistentMemories(projectId), id, filters);
 }
 
 function tokenizeSearchQuery(query: string): string[] {
@@ -527,29 +599,34 @@ export function scoreMemorySearchMatch(
 	return score;
 }
 
-export async function searchMemories(query: string, projectId?: string): Promise<SearchResult[]> {
+export function searchMemoryEntries(
+	entries: SearchResult[],
+	query: string,
+	filters: { scope?: MemoryScope; tier?: MemoryTier } = {},
+): SearchResult[] {
 	const results: Array<SearchResult & { score: number }> = [];
-
-	const scopes: Array<{ scope: MemoryScope; pid?: string }> = [
-		{ scope: "user" },
-		...(projectId ? [{ scope: "project" as MemoryScope, pid: projectId }] : []),
-	];
-
-	for (const { scope, pid } of scopes) {
-		const topics = await listTopics(scope, pid);
-		for (const topic of topics) {
-			const entries = await loadTopicEntries(scope, pid, topic);
-			for (const entry of entries) {
-				const score = scoreMemorySearchMatch(query, { topic, title: entry.title, content: entry.content });
-				if (score > 0) {
-					results.push({ scope, projectId: pid, topic, title: entry.title, content: entry.content, score });
-				}
-			}
-		}
+	for (const entry of entries) {
+		if (filters.scope && entry.scope !== filters.scope) continue;
+		if (filters.tier && entry.tier !== filters.tier) continue;
+		const score = scoreMemorySearchMatch(query, entry);
+		if (score > 0) results.push({ ...entry, score });
 	}
-
-	results.sort((a, b) => b.score - a.score || a.topic.localeCompare(b.topic) || a.title.localeCompare(b.title));
+	results.sort(
+		(a, b) =>
+			memoryTierRank(a.tier) - memoryTierRank(b.tier) ||
+			b.score - a.score ||
+			a.topic.localeCompare(b.topic) ||
+			a.title.localeCompare(b.title),
+	);
 	return results.map(({ score: _score, ...result }) => result);
+}
+
+export async function searchMemories(
+	query: string,
+	projectId?: string,
+	filters: { scope?: Exclude<MemoryScope, "agent">; tier?: MemoryTier } = {},
+): Promise<SearchResult[]> {
+	return searchMemoryEntries(await listPersistentMemories(projectId), query, filters);
 }
 
 // ── Count Helper for Migration Dedup ─────────────────────────────────────────
@@ -585,13 +662,13 @@ function countByKey(keys: string[]): Map<string, number> {
 interface LegacyRecord {
 	title: string;
 	content: string;
-	scope: MemoryScope;
+	scope: Exclude<MemoryScope, "agent">;
 	projectId?: string;
 	status: string;
 }
 
 type MigrationTarget = {
-	scope: MemoryScope;
+	scope: Exclude<MemoryScope, "agent">;
 	projectId?: string;
 	filePath: string;
 	errorPrefix: string;
