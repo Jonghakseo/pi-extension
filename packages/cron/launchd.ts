@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { getDaemonPath } from "./daemon-client.ts";
+import { getDaemonPath } from "./daemon-runtime.mjs";
 import { ensureCronDirs, getAgentDir, getDaemonErrorLogPath, getDaemonLogPath } from "./store.ts";
 import type { LaunchdStatus } from "./types.ts";
 

@@ -53,6 +53,10 @@ export interface DaemonStatus {
 	running: boolean;
 	pid?: number;
 	stalePid?: number;
+	/** SHA-256 identity of the daemon artifact, when the running daemon supports upgrade coordination. */
+	runtimeId?: string;
+	/** A pre-upgrade daemon that has only daemon.pid and must use the conservative legacy fence. */
+	legacy?: boolean;
 }
 
 export interface LaunchdStatus {

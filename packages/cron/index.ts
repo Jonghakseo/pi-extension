@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { CRON_CLI_HELP_TEXT, parseCronToolCommand } from "./cli.ts";
-import { getDaemonStatus, startDaemon, stopDaemon } from "./daemon-client.ts";
+import { getDaemonStatus, scheduleDaemonUpgrade, startDaemon, stopDaemon } from "./daemon-client.ts";
 import { getLaunchdStatus, installLaunchAgent, uninstallLaunchAgent } from "./launchd.ts";
 import { resolveProjectId } from "./project-id.ts";
 import { calculateNextRun, validateCron } from "./schedule.ts";
@@ -449,6 +449,13 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (event, ctx) => {
+		// Package updates replace files in place but cannot reload an external process. Schedule this
+		// after the session hook returns so a draining daemon never delays Pi startup.
+		setTimeout(() => {
+			try {
+				scheduleDaemonUpgrade();
+			} catch {}
+		}, 0);
 		const sessionEvent = event as { reason?: string; previousSessionFile?: string };
 		let allowDrainingHandoff = sessionEvent.reason === "reload";
 		if (sessionEvent.previousSessionFile && ["new", "resume", "fork"].includes(sessionEvent.reason ?? "")) {

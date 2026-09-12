@@ -126,7 +126,9 @@ The handoff uses Pi's [documented session lifecycle](https://github.com/earendil
 
 ## Updating the package
 
-After updating or changing the package installation source, inspect `~/Library/LaunchAgents/dev.pi.cron.plist`. Its `ProgramArguments` entry must resolve to the installed package's current `daemon.mjs`. If the path is stale, uninstall and reinstall the LaunchAgent from the currently loaded package.
+For a normal in-place npm update, the first Pi session that loads the updated extension automatically replaces an already-running outdated cron daemon. The old daemon stops claiming new work, waits for any running job to finish, then exits. A loaded LaunchAgent restarts it through `KeepAlive`; a manually started daemon is restarted by the upgrade coordinator. A daemon that you explicitly stopped stays stopped, and the update never installs launchd for you.
+
+[`pi update --extensions`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md#install-and-manage) updates unpinned package specs but does not reload already-open Pi sessions. Restart Pi or run `/reload` in an open session to load the updated extension and begin the one-time replacement. Pinned package specs are not changed by that command. If you changed from a local installation source to a different package path, inspect `~/Library/LaunchAgents/dev.pi.cron.plist`: its `ProgramArguments` entry must resolve to the installed package's current `daemon.mjs`. For that source migration, uninstall and reinstall the LaunchAgent from the currently loaded package.
 
 ## Moving from a local extension
 

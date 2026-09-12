@@ -88,7 +88,8 @@ function removeLockPath(lockPath) {
 
 function reclaimDeadLock(lockPath) {
 	const observed = readLockOwner(lockPath);
-	if (!observed || !isProvablyDead(observed)) return;
+	if (!observed) return;
+	if (!isProvablyDead(observed)) return;
 
 	const reclaimPath = `${lockPath}.reclaim`;
 	let reclaim = acquireMarker(reclaimPath);
@@ -104,21 +105,34 @@ function reclaimDeadLock(lockPath) {
 	}
 }
 
+/** Attempts to acquire a file lock without waiting. The caller must release a returned marker. */
+export function tryAcquireFileLock(lockPath) {
+	let marker = acquireMarker(lockPath);
+	if (marker) return marker;
+	reclaimDeadLock(lockPath);
+	marker = acquireMarker(lockPath);
+	return marker;
+}
+
+/** Releases a marker returned by tryAcquireFileLock. */
+export function releaseFileLock(lockPath, marker) {
+	if (marker) releaseMarker(lockPath, marker);
+}
+
 /** Serializes a synchronous action across extension and daemon processes for one lock path. */
 export function withFileLock(lockPath, action) {
 	const deadline = Date.now() + LOCK_TIMEOUT_MS;
 	let marker;
 	while (!marker) {
-		marker = acquireMarker(lockPath);
+		marker = tryAcquireFileLock(lockPath);
 		if (marker) break;
-		reclaimDeadLock(lockPath);
 		if (Date.now() >= deadline) throw new Error(`Timed out waiting for cron store lock: ${lockPath}`);
 		sleep(LOCK_RETRY_MS);
 	}
 	try {
 		return action();
 	} finally {
-		releaseMarker(lockPath, marker);
+		releaseFileLock(lockPath, marker);
 	}
 }
 

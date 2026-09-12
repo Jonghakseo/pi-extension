@@ -4,8 +4,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const daemonClientMocks = vi.hoisted(() => ({
+	scheduleDaemonUpgrade: vi.fn(() => ({ scheduled: false, message: "mock upgrade" })),
+}));
+
 vi.mock("./daemon-client.ts", () => ({
 	getDaemonStatus: () => ({ running: false }),
+	scheduleDaemonUpgrade: daemonClientMocks.scheduleDaemonUpgrade,
 	startDaemon: () => ({ message: "mock daemon" }),
 	stopDaemon: () => ({ message: "mock daemon" }),
 }));
@@ -68,6 +73,7 @@ describe("cron job removal", () => {
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 		vi.restoreAllMocks();
+		daemonClientMocks.scheduleDaemonUpgrade.mockClear();
 	});
 
 	function makeCtx(hasUI: boolean, sessionId = "session-a") {
@@ -86,6 +92,19 @@ describe("cron job removal", () => {
 			},
 		};
 	}
+
+	it("schedules a nonblocking daemon runtime check when a session starts", async () => {
+		vi.useFakeTimers();
+		const { pi, events } = createPi();
+		registerCron(pi as never);
+
+		const starting = events.get("session_start")({ reason: "startup" }, makeCtx(false));
+		await vi.advanceTimersByTimeAsync(0);
+		await starting;
+
+		expect(daemonClientMocks.scheduleDaemonUpgrade).toHaveBeenCalledTimes(1);
+		vi.useRealTimers();
+	});
 
 	it("removes a job from a headless tool call without confirmation", async () => {
 		const { pi, tools } = createPi();

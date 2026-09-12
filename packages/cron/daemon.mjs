@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFil
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { removeDaemonOwner, writeDaemonOwner } from "./daemon-runtime.mjs";
 import { ownProcessStartIdentity, processLiveness } from "./process-identity.mjs";
 import { withFileLock, withStoreLock, writeAtomicFile } from "./store-lock.mjs";
 
@@ -31,6 +32,7 @@ let lockHeld = false;
 let tickTimer;
 let retryTimer;
 let ticking = false;
+let upgradeRequested = false;
 
 function nowIso() {
 	return new Date().toISOString();
@@ -80,7 +82,13 @@ function tryAcquireLock() {
 	try {
 		writeFileSync(pidPath, String(process.pid), { flag: "wx" });
 		lockHeld = true;
-		return true;
+		try {
+			writeDaemonOwner(cronDir, undefined, { drainTimeoutMs: DEFAULT_TIMEOUT_MS + KILL_GRACE_MS + 60_000 });
+			return true;
+		} catch (error) {
+			releaseLock();
+			throw error;
+		}
 	} catch (error) {
 		if (error?.code === "EEXIST") return false;
 		throw error;
@@ -89,6 +97,7 @@ function tryAcquireLock() {
 
 function releaseLock() {
 	if (!lockHeld) return;
+	removeDaemonOwner(cronDir);
 	try {
 		const pid = readPid();
 		if (pid === process.pid) unlinkSync(pidPath);
@@ -267,7 +276,7 @@ function normalizeNextRuns(now) {
 }
 
 function isDue(job, now) {
-	if (!job.enabled || !job.nextRunAt || running.has(job.id)) return false;
+	if (upgradeRequested || !job.enabled || !job.nextRunAt || running.has(job.id)) return false;
 	if (jobScope(job) === "session" && job.sessionId && runningSessions.has(job.sessionId)) return false;
 	const nextRunAt = new Date(job.nextRunAt);
 	return !Number.isNaN(nextRunAt.getTime()) && nextRunAt.getTime() <= now.getTime();
@@ -870,11 +879,12 @@ async function executeJob(candidate) {
 	} finally {
 		running.delete(job.id);
 		if (jobScope(job) === "session" && job.sessionId) runningSessions.delete(job.sessionId);
+		maybeExitForUpgrade();
 	}
 }
 
 async function tick() {
-	if (!lockHeld || ticking) return;
+	if (!lockHeld || ticking || upgradeRequested) return;
 	ticking = true;
 	try {
 		const now = new Date();
@@ -884,6 +894,7 @@ async function tick() {
 		}
 	} finally {
 		ticking = false;
+		maybeExitForUpgrade();
 	}
 }
 
@@ -895,7 +906,7 @@ function startScheduler() {
 }
 
 function tryStart() {
-	if (lockHeld) return;
+	if (upgradeRequested || lockHeld) return;
 	if (tryAcquireLock()) {
 		startScheduler();
 		return;
@@ -917,8 +928,26 @@ function shutdown() {
 	process.exit(0);
 }
 
+function maybeExitForUpgrade() {
+	if (!upgradeRequested || ticking || running.size > 0 || rpcChildren.size > 0) return;
+	log("daemon upgrade drain complete", { pid: process.pid });
+	if (tickTimer) clearInterval(tickTimer);
+	if (retryTimer) clearInterval(retryTimer);
+	releaseLock();
+	process.exit(0);
+}
+
+function requestUpgrade() {
+	if (upgradeRequested) return;
+	upgradeRequested = true;
+	log("daemon upgrade drain requested", { pid: process.pid, running: running.size, rpcChildren: rpcChildren.size });
+	if (tickTimer) clearInterval(tickTimer);
+	maybeExitForUpgrade();
+}
+
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+process.on("SIGUSR2", requestUpgrade);
 process.on("uncaughtException", (error) => {
 	log("uncaught exception", { error: error.stack || String(error) });
 });
