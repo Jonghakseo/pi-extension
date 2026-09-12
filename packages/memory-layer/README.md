@@ -31,7 +31,11 @@ Persistent `user` and `project` memories are Markdown files under `~/.pi/memory/
       general.md
 ```
 
-Tier metadata is stored with a versioned entry marker. Existing Markdown files, including old `@entry` markers and indexes, remain readable as `profile` entries without reinterpreting their titles or body text. Session-scoped `agent` memories use Pi session custom entries, rather than the persistent directory. Forgetting an agent memory appends a tombstone to session history, so it stays logically deleted after reopening the session.
+Topic Markdown and indexes are written in the `0.3.3`-compatible `@entry` format. Tier metadata is stored in a versioned adjacent `<topic>.memory-layer-tiers.json` sidecar, so a `0.3.3` writer can read and rewrite topic files without erasing memories. Existing `0.4.0` v2 markers, old `@entry` markers, and indexes remain readable. The current reader restores sidecar tiers after an old `0.4.0` writer rewrites a topic as v2. Legacy entries without sidecar metadata default to `profile`, and metadata-looking text in a memory body stays ordinary text.
+
+Do not mix an already-running `0.4.0` writer with a `0.3.3` writer: the former can write v2 markers that the latter does not recognize, so a following `0.3.3` save can overwrite those entries. Stop or reload all old `0.4.0` runtimes before allowing a `0.3.3` writer to access the same storage. Session-scoped `agent` memories use Pi session custom entries, rather than the persistent directory. Forgetting an agent memory appends a tombstone to session history, so it stays logically deleted after reopening the session.
+
+When `PI_CODING_AGENT_DIR` is set to a custom path, persistent memories are isolated under `$PI_CODING_AGENT_DIR/memory/`. An explicit normalized default path such as `~/.pi/agent` still uses the existing `~/.pi/memory/` storage. Changing a custom path does not migrate data; copy or migrate the directory explicitly if that is intended.
 
 ## Project ID resolution
 

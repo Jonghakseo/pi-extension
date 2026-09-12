@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { upgradeDaemon } from "./daemon-client.ts";
 import { daemonRuntimeId, readDaemonOwner } from "./daemon-runtime.mjs";
 import type { CronJob, CronStoreFile } from "./types.ts";
 
@@ -127,6 +128,105 @@ describe("cron daemon automatic upgrade", () => {
 		}
 		await sleep(50);
 		rmSync(agentDir, { recursive: true, force: true });
+	});
+
+	it("awaits a drained replacement before reporting a runtime update successful", async () => {
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		const previousLaunchctl = process.env.PI_CRON_LAUNCHCTL_BIN;
+		const launchctl = join(agentDir, "fake-launchctl.sh");
+		writeFileSync(launchctl, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		process.env.PI_CRON_LAUNCHCTL_BIN = launchctl;
+		try {
+			const old = start(daemonPath);
+			await waitFor(owner, Boolean);
+			const { pid: oldPid } = markOutdated();
+
+			await expect(upgradeDaemon()).resolves.toMatchObject({ ok: true });
+			expect(owner()?.runtimeId).toBe(daemonRuntimeId());
+			expect(owner()?.pid).not.toBe(oldPid);
+			expect(isAlive(oldPid)).toBe(false);
+			await stop(old);
+		} finally {
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+			if (previousLaunchctl === undefined) delete process.env.PI_CRON_LAUNCHCTL_BIN;
+			else process.env.PI_CRON_LAUNCHCTL_BIN = previousLaunchctl;
+		}
+	});
+
+	it("reports a stopped daemon updated without starting a replacement", async () => {
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		const previousLaunchctl = process.env.PI_CRON_LAUNCHCTL_BIN;
+		const launchctl = join(agentDir, "fake-launchctl.sh");
+		writeFileSync(launchctl, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		process.env.PI_CRON_LAUNCHCTL_BIN = launchctl;
+		try {
+			await expect(upgradeDaemon()).resolves.toMatchObject({
+				ok: true,
+				message: "cron daemon is stopped; leaving it stopped",
+			});
+			expect(owner()).toBeUndefined();
+			expect(existsSync(join(agentDir, "cron", "daemon.pid"))).toBe(false);
+		} finally {
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+			if (previousLaunchctl === undefined) delete process.env.PI_CRON_LAUNCHCTL_BIN;
+			else process.env.PI_CRON_LAUNCHCTL_BIN = previousLaunchctl;
+		}
+	});
+
+	it("terminates a hung update coordinator without changing the outdated daemon", async () => {
+		const previous = {
+			agentDir: process.env.PI_CODING_AGENT_DIR,
+			launchctl: process.env.PI_CRON_LAUNCHCTL_BIN,
+			coordinator: process.env.PI_CRON_UPDATE_COORDINATOR_PATH,
+			timeout: process.env.PI_CRON_UPDATE_COMMAND_TIMEOUT_MS,
+			grace: process.env.PI_CRON_UPDATE_FORCE_KILL_GRACE_MS,
+		};
+		const launchctl = join(agentDir, "fake-launchctl.sh");
+		const coordinator = join(agentDir, "hung-coordinator.mjs");
+		const coordinatorPid = join(agentDir, "hung-coordinator.pid");
+		writeFileSync(launchctl, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+		writeFileSync(
+			coordinator,
+			`import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(coordinatorPid)}, String(process.pid)); setInterval(() => {}, 1_000);`,
+		);
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+		process.env.PI_CRON_LAUNCHCTL_BIN = launchctl;
+		process.env.PI_CRON_UPDATE_COORDINATOR_PATH = coordinator;
+		process.env.PI_CRON_UPDATE_COMMAND_TIMEOUT_MS = "500";
+		process.env.PI_CRON_UPDATE_FORCE_KILL_GRACE_MS = "20";
+		try {
+			const old = start(daemonPath);
+			await waitFor(owner, Boolean);
+			const { pid: oldPid } = markOutdated();
+
+			await expect(upgradeDaemon()).resolves.toMatchObject({
+				ok: false,
+				message: "cron daemon update timed out after 500ms",
+			});
+			const hungPid = Number(readFileSync(coordinatorPid, "utf8"));
+			expect(isAlive(hungPid)).toBe(false);
+			expect(isAlive(oldPid)).toBe(true);
+			await stop(old);
+		} finally {
+			for (const [key, value] of Object.entries(previous)) {
+				const environmentKey =
+					key === "agentDir"
+						? "PI_CODING_AGENT_DIR"
+						: key === "launchctl"
+							? "PI_CRON_LAUNCHCTL_BIN"
+							: key === "coordinator"
+								? "PI_CRON_UPDATE_COORDINATOR_PATH"
+								: key === "timeout"
+									? "PI_CRON_UPDATE_COMMAND_TIMEOUT_MS"
+									: "PI_CRON_UPDATE_FORCE_KILL_GRACE_MS";
+				if (value === undefined) delete process.env[environmentKey];
+				else process.env[environmentKey] = value;
+			}
+		}
 	});
 
 	it("does nothing for a matching runtime, and concurrent coordinators replace an outdated manual daemon once", async () => {

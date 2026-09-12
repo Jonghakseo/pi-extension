@@ -57,12 +57,14 @@ function resultText(result: unknown): string {
 }
 
 beforeEach(async () => {
+	vi.stubEnv("PI_CODING_AGENT_DIR", "");
 	await fs.rm(testHome, { recursive: true, force: true });
 	await fs.mkdir(cwd, { recursive: true });
 	await fs.mkdir(sessionDir, { recursive: true });
 });
 
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	await fs.rm(testHome, { recursive: true, force: true });
 });
 

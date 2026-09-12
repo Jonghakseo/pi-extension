@@ -55,6 +55,7 @@ export const CRON_CLI_HELP_TEXT = [
 	"  Daemon / launchd:",
 	"    cron start-daemon        (alias: cron start)",
 	"    cron stop-daemon         (alias: cron stop)",
+	"    cron update-runtime      (safely drain and replace an outdated running daemon)",
 	"    cron install-launchd     (alias: cron install)",
 	"    cron uninstall-launchd [--yes]  (alias: cron uninstall)",
 	"",
@@ -399,6 +400,8 @@ export function parseCronToolCommand(command: unknown): CronCliParseResult {
 		case "stop":
 		case "stop-daemon":
 			return { type: "params", params: { action: "stop_daemon" } };
+		case "update-runtime":
+			return { type: "params", params: { action: "update_daemon" } };
 		case "install":
 		case "install-launchd":
 			return { type: "params", params: { action: "install_launchd" } };
@@ -417,7 +420,7 @@ export function parseCronToolCommand(command: unknown): CronCliParseResult {
 		default:
 			return {
 				type: "error",
-				message: `❌ Unknown subcommand: "${verb}"\n\nValid commands: help, status, list, history, upsert, update, run, enable, disable, remove, start-daemon, stop-daemon, install-launchd, uninstall-launchd\n\n✓ Try: cron help`,
+				message: `❌ Unknown subcommand: "${verb}"\n\nValid commands: help, status, list, history, upsert, update, run, enable, disable, remove, start-daemon, stop-daemon, update-runtime, install-launchd, uninstall-launchd\n\n✓ Try: cron help`,
 			};
 	}
 }

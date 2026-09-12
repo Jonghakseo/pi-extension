@@ -12,19 +12,27 @@ export function memoryTierRank(tier: MemoryTier): number {
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
-const MEMORY_BASE = path.join(os.homedir(), ".pi", "memory");
-const USER_DIR = path.join(MEMORY_BASE, "user");
-const PROJECTS_DIR = path.join(MEMORY_BASE, "projects");
+function memoryBaseDir(): string {
+	const defaultPiDir = path.join(os.homedir(), ".pi");
+	const agentDir = process.env.PI_CODING_AGENT_DIR?.trim();
+	// Picky always passes its default agent directory explicitly. Treat a
+	// normalized equivalent as the default so existing memories stay visible.
+	if (!agentDir || path.resolve(agentDir) === path.resolve(defaultPiDir, "agent")) {
+		return path.join(defaultPiDir, "memory");
+	}
+	return path.join(agentDir, "memory");
+}
 
 function scopeDir(scope: Exclude<MemoryScope, "agent">, projectId?: string): string {
+	const memoryBase = memoryBaseDir();
 	if (scope === "project") {
 		if (!projectId) {
 			throw new Error("project scope requires projectId");
 		}
 		const safe = projectId.replace(/[^a-zA-Z0-9_-]/g, "-");
-		return path.join(PROJECTS_DIR, safe);
+		return path.join(memoryBase, "projects", safe);
 	}
-	return USER_DIR;
+	return path.join(memoryBase, "user");
 }
 
 // ── P1-2: Topic Sanitization & Path Confinement ─────────────────────────────
@@ -71,8 +79,9 @@ function topicPath(scope: Exclude<MemoryScope, "agent">, projectId: string | und
 // ── Directory Setup ──────────────────────────────────────────────────────────
 
 export async function ensureDir(): Promise<void> {
-	await fs.mkdir(USER_DIR, { recursive: true });
-	await fs.mkdir(PROJECTS_DIR, { recursive: true });
+	const memoryBase = memoryBaseDir();
+	await fs.mkdir(path.join(memoryBase, "user"), { recursive: true });
+	await fs.mkdir(path.join(memoryBase, "projects"), { recursive: true });
 }
 
 /**
@@ -202,11 +211,12 @@ export function parseIndex(content: string): IndexSection[] {
 const INDEX_V2_MARKER = "<!-- memory-layer-index:v2 -->";
 
 function buildIndex(sections: IndexSection[]): string {
-	const lines = ["# Memory Index", INDEX_V2_MARKER, ""];
+	const lines = ["# Memory Index", ""];
 	for (const section of sections) {
 		lines.push(`## ${section.topic}.md`);
 		for (const entry of section.entries) {
-			lines.push(`- [${entry.tier}] ${entry.title}`);
+			// Keep the index readable to 0.3.3. Tier metadata lives in a sidecar.
+			lines.push(`- ${entry.title}`);
 		}
 		lines.push("");
 	}
@@ -214,19 +224,21 @@ function buildIndex(sections: IndexSection[]): string {
 }
 
 // ── P1-3: Entry Marker Format ────────────────────────────────────────────────
-// V2 stores title and tier in one self-contained JSON marker. Legacy @entry
-// markers and ## headings remain profile entries and preserve their body verbatim.
+// Keep writing the 0.3.3 @entry format. Tier metadata is stored separately so
+// an older writer can round-trip topic Markdown without losing its entries.
 
 const ENTRY_V2_MARKER_PREFIX = "<!-- memory-layer-entry:v2: ";
 const ENTRY_MARKER_PREFIX = "<!-- @entry: ";
 const ENTRY_MARKER_SUFFIX = " -->";
+const TIER_METADATA_SUFFIX = ".memory-layer-tiers.json";
+const TIER_METADATA_VERSION = 1;
 
 function isMemoryTier(value: unknown): value is MemoryTier {
 	return value === "profile" || value === "log" || value === "note";
 }
 
-function encodeEntryMetadata(title: string, tier: MemoryTier): string {
-	return Buffer.from(JSON.stringify({ title, tier }), "utf8").toString("base64");
+function encodeEntryTitle(title: string): string {
+	return Buffer.from(title, "utf8").toString("base64");
 }
 
 function decodeEntryMetadata(encoded: string): { title: string; tier: MemoryTier } | null {
@@ -253,6 +265,62 @@ export interface TopicEntry {
 	title: string;
 	content: string;
 	tier: MemoryTier;
+}
+
+type TierMetadata = {
+	version: typeof TIER_METADATA_VERSION;
+	entries: Record<string, MemoryTier[]>;
+};
+
+function tierMetadataPath(scope: Exclude<MemoryScope, "agent">, projectId: string | undefined, topic: string): string {
+	return path.join(scopeDir(scope, projectId), `${sanitizeTopic(topic)}${TIER_METADATA_SUFFIX}`);
+}
+
+function tierMetadataEntryKey(entry: Pick<TopicEntry, "title" | "content">): string {
+	return crypto.createHash("sha256").update(`${entry.title}\0${entry.content}`).digest("hex");
+}
+
+async function readTierMetadata(
+	scope: Exclude<MemoryScope, "agent">,
+	projectId: string | undefined,
+	topic: string,
+): Promise<TierMetadata | null> {
+	try {
+		const parsed = JSON.parse(await fs.readFile(tierMetadataPath(scope, projectId, topic), "utf8")) as Record<
+			string,
+			unknown
+		>;
+		if (parsed.version !== TIER_METADATA_VERSION || !parsed.entries || typeof parsed.entries !== "object") return null;
+		const entries: Record<string, MemoryTier[]> = {};
+		for (const [key, value] of Object.entries(parsed.entries)) {
+			if (Array.isArray(value) && value.every(isMemoryTier)) entries[key] = value;
+		}
+		return { version: TIER_METADATA_VERSION, entries };
+	} catch {
+		return null;
+	}
+}
+
+function applyTierMetadata(entries: TopicEntry[], metadata: TierMetadata | null): TopicEntry[] {
+	if (!metadata) return entries;
+	const offsets = new Map<string, number>();
+	return entries.map((entry) => {
+		const key = tierMetadataEntryKey(entry);
+		const offset = offsets.get(key) ?? 0;
+		offsets.set(key, offset + 1);
+		return { ...entry, tier: metadata.entries[key]?.[offset] ?? entry.tier };
+	});
+}
+
+function buildTierMetadata(entries: TopicEntry[]): TierMetadata {
+	const metadata: TierMetadata = { version: TIER_METADATA_VERSION, entries: {} };
+	for (const entry of entries) {
+		const key = tierMetadataEntryKey(entry);
+		const tiers = metadata.entries[key] ?? [];
+		tiers.push(entry.tier);
+		metadata.entries[key] = tiers;
+	}
+	return metadata;
 }
 
 /** Parse topic file using new marker format. */
@@ -350,15 +418,35 @@ export function parseTopicFile(raw: string): { heading: string; entries: TopicEn
 	return parseTopicFileLegacy(raw);
 }
 
-/** Build topic file always using new marker format (## safe). */
+/** Build topic files in the 0.3.3 marker format for mixed-version safety. */
 function buildTopicFile(heading: string, entries: TopicEntry[]): string {
 	const lines = [`# ${heading}`, ""];
 	for (const entry of entries) {
-		lines.push(`${ENTRY_V2_MARKER_PREFIX}${encodeEntryMetadata(entry.title, entry.tier)}${ENTRY_MARKER_SUFFIX}`);
+		lines.push(`${ENTRY_MARKER_PREFIX}${encodeEntryTitle(entry.title)}${ENTRY_MARKER_SUFFIX}`);
 		lines.push(entry.content);
 		lines.push("");
 	}
 	return lines.join("\n");
+}
+
+async function loadTopicEntriesWithMetadata(
+	scope: Exclude<MemoryScope, "agent">,
+	projectId: string | undefined,
+	topic: string,
+): Promise<{ heading: string; entries: TopicEntry[] }> {
+	const raw = await readTopicFile(scope, projectId, topic);
+	if (!raw) return { heading: "", entries: [] };
+	const parsed = parseTopicFile(raw);
+	return { ...parsed, entries: applyTierMetadata(parsed.entries, await readTierMetadata(scope, projectId, topic)) };
+}
+
+async function rebuildIndex(scope: Exclude<MemoryScope, "agent">, projectId: string | undefined): Promise<void> {
+	const sections: IndexSection[] = [];
+	for (const topic of await listTopics(scope, projectId)) {
+		const { entries } = await loadTopicEntriesWithMetadata(scope, projectId, topic);
+		if (entries.length) sections.push({ topic, entries: entries.map(({ title, tier }) => ({ title, tier })) });
+	}
+	await atomicWrite(indexPath(scope, projectId), buildIndex(sections));
 }
 
 // ── Public API: Save ─────────────────────────────────────────────────────────
@@ -373,26 +461,19 @@ export async function saveMemory(
 	tier: MemoryTier = "profile",
 ): Promise<void> {
 	const safeTopic = sanitizeTopic(topic);
-	const iFp = indexPath(scope, projectId);
 	const tFp = topicPath(scope, projectId, safeTopic);
 
 	await withScopeLock(scope, projectId, async () => {
-		// 1) append to topic file
+		// Topic Markdown intentionally stays compatible with the 0.3.3 writer.
 		const raw = await readOrEmpty(tFp);
 		const parsed = raw ? parseTopicFile(raw) : { heading: topicHeading, entries: [] };
-		parsed.entries.push({ title, content, tier });
-		await atomicWrite(tFp, buildTopicFile(parsed.heading, parsed.entries));
+		const entries = applyTierMetadata(parsed.entries, await readTierMetadata(scope, projectId, safeTopic));
+		entries.push({ title, content, tier });
+		await atomicWrite(tFp, buildTopicFile(parsed.heading, entries));
+		await atomicWrite(tierMetadataPath(scope, projectId, safeTopic), `${JSON.stringify(buildTierMetadata(entries))}\n`);
 
-		// 2) update index
-		const idxRaw = await readOrEmpty(iFp);
-		const sections = parseIndex(idxRaw);
-		let sec = sections.find((s) => s.topic === safeTopic);
-		if (!sec) {
-			sec = { topic: safeTopic, entries: [] };
-			sections.push(sec);
-		}
-		sec.entries.push({ title, tier });
-		await atomicWrite(iFp, buildIndex(sections));
+		// Rebuild instead of trusting an index an older writer may have rewritten.
+		await rebuildIndex(scope, projectId);
 	});
 }
 
@@ -405,7 +486,6 @@ export async function removeMemory(
 	title: string,
 ): Promise<boolean> {
 	const safeTopic = sanitizeTopic(topic);
-	const iFp = indexPath(scope, projectId);
 	const tFp = topicPath(scope, projectId, safeTopic);
 
 	return withScopeLock(scope, projectId, async () => {
@@ -414,27 +494,24 @@ export async function removeMemory(
 		if (!raw) return false;
 
 		const parsed = parseTopicFile(raw);
-		const idx = parsed.entries.findIndex((e) => e.title === title);
+		const entries = applyTierMetadata(parsed.entries, await readTierMetadata(scope, projectId, safeTopic));
+		const idx = entries.findIndex((entry) => entry.title === title);
 		if (idx === -1) return false;
 
-		parsed.entries.splice(idx, 1);
-		if (parsed.entries.length === 0) {
+		entries.splice(idx, 1);
+		if (entries.length === 0) {
 			await fs.unlink(tFp).catch(() => {});
+			await fs.unlink(tierMetadataPath(scope, projectId, safeTopic)).catch(() => {});
 		} else {
-			await atomicWrite(tFp, buildTopicFile(parsed.heading, parsed.entries));
+			await atomicWrite(tFp, buildTopicFile(parsed.heading, entries));
+			await atomicWrite(
+				tierMetadataPath(scope, projectId, safeTopic),
+				`${JSON.stringify(buildTierMetadata(entries))}\n`,
+			);
 		}
 
-		// 2) update index — remove only ONE matching entry (Issue 3 fix)
-		const idxRaw = await readOrEmpty(iFp);
-		const sections = parseIndex(idxRaw);
-		const secIdx = sections.findIndex((s) => s.topic === safeTopic);
-		if (secIdx !== -1) {
-			const sec = sections[secIdx];
-			const entryIdx = sec.entries.findIndex((entry) => entry.title === title);
-			if (entryIdx !== -1) sec.entries.splice(entryIdx, 1);
-			if (sec.entries.length === 0) sections.splice(secIdx, 1);
-		}
-		await atomicWrite(iFp, buildIndex(sections));
+		// Rebuild instead of trusting an index an older writer may have rewritten.
+		await rebuildIndex(scope, projectId);
 		return true;
 	});
 }
@@ -462,8 +539,12 @@ export async function memoryExistsInScope(
 // ── Public API: Read ─────────────────────────────────────────────────────────
 
 export async function loadIndex(scope: Exclude<MemoryScope, "agent">, projectId?: string): Promise<IndexSection[]> {
-	const raw = await readOrEmpty(indexPath(scope, projectId));
-	return parseIndex(raw);
+	const sections: IndexSection[] = [];
+	for (const topic of await listTopics(scope, projectId)) {
+		const entries = await loadTopicEntries(scope, projectId, topic);
+		if (entries.length) sections.push({ topic, entries: entries.map(({ title, tier }) => ({ title, tier })) });
+	}
+	return sections;
 }
 
 export async function readMemoryMd(scope: Exclude<MemoryScope, "agent">, projectId?: string): Promise<string> {
@@ -483,9 +564,7 @@ export async function loadTopicEntries(
 	projectId: string | undefined,
 	topic: string,
 ): Promise<TopicEntry[]> {
-	const raw = await readTopicFile(scope, projectId, topic);
-	if (!raw) return [];
-	return parseTopicFile(raw).entries;
+	return (await loadTopicEntriesWithMetadata(scope, projectId, topic)).entries;
 }
 
 export async function listTopics(scope: Exclude<MemoryScope, "agent">, projectId?: string): Promise<string[]> {
@@ -718,7 +797,7 @@ export async function migrateFromJson(): Promise<{ migrated: number; errors: str
 	let migrated = 0;
 	const errors: string[] = [];
 
-	const userJson = path.join(MEMORY_BASE, "user.json");
+	const userJson = path.join(memoryBaseDir(), "user.json");
 	try {
 		const result = await migrateLegacyFile({ scope: "user", filePath: userJson, errorPrefix: "user" }, errors);
 		migrated += result.migrated;
@@ -729,11 +808,11 @@ export async function migrateFromJson(): Promise<{ migrated: number; errors: str
 	}
 
 	try {
-		const projectFiles = await fs.readdir(PROJECTS_DIR);
+		const projectFiles = await fs.readdir(path.join(memoryBaseDir(), "projects"));
 		for (const file of projectFiles) {
 			if (!file.endsWith(".json")) continue;
 			const projectId = file.replace(/\.json$/, "");
-			const filePath = path.join(PROJECTS_DIR, file);
+			const filePath = path.join(memoryBaseDir(), "projects", file);
 			try {
 				const result = await migrateLegacyFile(
 					{

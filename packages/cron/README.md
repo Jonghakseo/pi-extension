@@ -72,6 +72,7 @@ cron disable <id> [--scope <user|project|session>]
 cron remove <id> [--scope <user|project|session>]       # deletes immediately
 cron start-daemon      # alias: cron start
 cron stop-daemon       # alias: cron stop
+cron update-runtime    # drain and replace an outdated running daemon without reinstalling launchd
 cron install-launchd   # alias: cron install
 cron uninstall-launchd [--yes] # --yes skips extra UI confirm; alias: cron uninstall
 ```
@@ -84,6 +85,7 @@ Human-facing slash commands are still available for convenience:
 /cron uninstall     # confirm, then remove LaunchAgent (`/cron uninstall --yes` skips extra UI confirm)
 /cron start         # start daemon for current boot
 /cron stop          # stop daemon
+/cron update-runtime # safely drain and replace an outdated running daemon
 /cron list          # current jobs only
 /cron history       # completed one-shot jobs
 /cron run <id>
@@ -126,9 +128,13 @@ The handoff uses Pi's [documented session lifecycle](https://github.com/earendil
 
 ## Updating the package
 
-For a normal in-place npm update, the first Pi session that loads the updated extension automatically replaces an already-running outdated cron daemon. The old daemon stops claiming new work, waits for any running job to finish, then exits. A loaded LaunchAgent restarts it through `KeepAlive`; a manually started daemon is restarted by the upgrade coordinator. A daemon that you explicitly stopped stays stopped, and the update never installs launchd for you.
+`cron update-runtime` is the explicit safe cutover command used after a normal in-place package update. It waits for an outdated running daemon to stop claiming work, drains its active job, and verifies that the replacement owns the requested runtime before reporting success. A loaded matching LaunchAgent is kickstarted only after the old daemon exits. A manually started daemon is replaced manually. A daemon that was already stopped remains stopped, including when its matching LaunchAgent plist is present but unloaded.
 
-[`pi update --extensions`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md#install-and-manage) updates unpinned package specs but does not reload already-open Pi sessions. Restart Pi or run `/reload` in an open session to load the updated extension and begin the one-time replacement. Pinned package specs are not changed by that command. If you changed from a local installation source to a different package path, inspect `~/Library/LaunchAgents/dev.pi.cron.plist`: its `ProgramArguments` entry must resolve to the installed package's current `daemon.mjs`. For that source migration, uninstall and reinstall the LaunchAgent from the currently loaded package.
+The update path never calls `cron install-launchd`, `launchctl bootout`, `bootstrap`, or `kickstart -k`. Those are setup operations and can interrupt active work. `cron update-runtime` has a bounded coordinator deadline. If it times out or cannot prove the replacement owner, it reports failure instead of claiming a successful update.
+
+A LaunchAgent that points to another package path, Pi binary, or `PI_CODING_AGENT_DIR` is a migration, not an in-place update. Cron blocks that state without touching the running daemon. Schedule a maintenance window, confirm active work has drained, then explicitly uninstall and reinstall the LaunchAgent from the updated package. Do not run that setup sequence while a job is active.
+
+[`pi update --extensions`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md#install-and-manage) updates unpinned package specs but does not reload already-open Pi sessions. Restart Pi or run `/reload` in an open session to load the updated extension and then run `cron update-runtime`. Pinned package specs are not changed by that command.
 
 ## Moving from a local extension
 

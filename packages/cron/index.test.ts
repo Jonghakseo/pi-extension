@@ -6,11 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const daemonClientMocks = vi.hoisted(() => ({
 	scheduleDaemonUpgrade: vi.fn(() => ({ scheduled: false, message: "mock upgrade" })),
+	upgradeDaemon: vi.fn(async () => ({ ok: true, message: "mock update" })),
 }));
 
 vi.mock("./daemon-client.ts", () => ({
 	getDaemonStatus: () => ({ running: false }),
 	scheduleDaemonUpgrade: daemonClientMocks.scheduleDaemonUpgrade,
+	upgradeDaemon: daemonClientMocks.upgradeDaemon,
 	startDaemon: () => ({ message: "mock daemon" }),
 	stopDaemon: () => ({ message: "mock daemon" }),
 }));
@@ -74,6 +76,7 @@ describe("cron job removal", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 		vi.restoreAllMocks();
 		daemonClientMocks.scheduleDaemonUpgrade.mockClear();
+		daemonClientMocks.upgradeDaemon.mockClear();
 	});
 
 	function makeCtx(hasUI: boolean, sessionId = "session-a") {
@@ -104,6 +107,35 @@ describe("cron job removal", () => {
 
 		expect(daemonClientMocks.scheduleDaemonUpgrade).toHaveBeenCalledTimes(1);
 		vi.useRealTimers();
+	});
+
+	it("does not schedule a detached upgrade inside the awaited runtime update RPC", async () => {
+		vi.useFakeTimers();
+		const previousSuppression = process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE;
+		process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE = "1";
+		try {
+			const { pi, events, commands } = createPi();
+			registerCron(pi as never);
+
+			await events.get("session_start")({ reason: "startup" }, makeCtx(false));
+			await vi.advanceTimersByTimeAsync(0);
+			await commands.get("cron").handler("update-runtime", makeCtx(false));
+
+			expect(daemonClientMocks.scheduleDaemonUpgrade).not.toHaveBeenCalled();
+			expect(daemonClientMocks.upgradeDaemon).toHaveBeenCalledTimes(1);
+		} finally {
+			if (previousSuppression === undefined) delete process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE;
+			else process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE = previousSuppression;
+			vi.useRealTimers();
+		}
+	});
+
+	it("propagates a runtime update failure instead of acknowledging it as successful", async () => {
+		daemonClientMocks.upgradeDaemon.mockResolvedValueOnce({ ok: false, message: "drain timed out" });
+		const { pi, commands } = createPi();
+		registerCron(pi as never);
+
+		await expect(commands.get("cron").handler("update-runtime", makeCtx(false))).rejects.toThrow("drain timed out");
 	});
 
 	it("removes a job from a headless tool call without confirmation", async () => {

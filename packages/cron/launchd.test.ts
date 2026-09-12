@@ -81,6 +81,7 @@ describe("launchd helpers", () => {
 		expect(plist).toContain("<key>RunAtLoad</key>");
 		expect(plist).toContain("<key>KeepAlive</key>");
 		expect(plist).toContain("/tmp/fake pi &amp; bin");
+		expect(plist).toContain(process.env.PI_CODING_AGENT_DIR as string);
 
 		const calls = readFileSync(join(tempDir, "launchctl.log"), "utf-8");
 		expect(calls).toContain("bootstrap");

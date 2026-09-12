@@ -216,32 +216,61 @@ async function coordinate() {
 	mkdirSync(cronDir, { recursive: true });
 	const lockPath = join(cronDir, "daemon-upgrade.lock");
 	const marker = tryAcquireFileLock(lockPath);
-	if (!marker) return log("another coordinator is active");
+	if (!marker) {
+		log("another coordinator is active");
+		return { ok: false, reason: "another coordinator is active" };
+	}
 	try {
-		if (isDesiredDaemon()) return log("already current", { runtimeId: desiredRuntimeId });
+		if (isDesiredDaemon()) {
+			log("already current", { runtimeId: desiredRuntimeId });
+			return { ok: true, running: true };
+		}
 		const active = activeDaemon();
-		if (!active) return log("no daemon is running; leaving it stopped");
+		if (!active) {
+			log("no daemon is running; leaving it stopped");
+			return { ok: true, running: false };
+		}
 		const drainTimeoutMs = active.owner?.drainTimeoutMs ?? UPGRADE_TIMEOUT_MS;
 		const deadline = Date.now() + drainTimeoutMs;
 		log("draining outdated daemon", { pid: active.pid, legacy: !active.owner, drainTimeoutMs });
 		if (!(await requestDrain(active, deadline))) {
-			return log("drain timed out; old daemon left running", { pid: active.pid });
+			log("drain timed out; old daemon left running", { pid: active.pid });
+			return { ok: false, reason: "drain timed out" };
 		}
 		if (process.env.PI_CRON_UPGRADE_LAUNCHD === "1") {
-			if (await waitForDesiredOwner(Date.now() + LAUNCHD_GRACE_MS)) return log("launchd restarted current daemon");
-			const kickstart = kickstartLaunchd();
-			if (!kickstart.ok) return log("launchd kickstart failed", { output: kickstart.output });
-			if (await waitForDesiredOwner(Date.now() + RESTART_TIMEOUT_MS)) {
-				return log("launchd kickstarted current daemon");
+			if (await waitForDesiredOwner(Date.now() + LAUNCHD_GRACE_MS)) {
+				log("launchd restarted current daemon");
+				return { ok: true, running: true };
 			}
-			return log("launchd did not restart daemon before timeout");
+			const kickstart = kickstartLaunchd();
+			if (!kickstart.ok) {
+				log("launchd kickstart failed", { output: kickstart.output });
+				return { ok: false, reason: "launchd kickstart failed" };
+			}
+			if (await waitForDesiredOwner(Date.now() + RESTART_TIMEOUT_MS)) {
+				log("launchd kickstarted current daemon");
+				return { ok: true, running: true };
+			}
+			log("launchd did not restart daemon before timeout");
+			return { ok: false, reason: "launchd did not restart daemon" };
 		}
 		const pid = startManualDaemon();
-		if (await waitForDesiredOwner(Date.now() + RESTART_TIMEOUT_MS)) return log("manual daemon replaced", { pid });
-		return log("manual replacement did not acquire scheduler lock", { pid });
+		if (await waitForDesiredOwner(Date.now() + RESTART_TIMEOUT_MS)) {
+			log("manual daemon replaced", { pid });
+			return { ok: true, running: true };
+		}
+		log("manual replacement did not acquire scheduler lock", { pid });
+		return { ok: false, reason: "manual replacement did not acquire scheduler lock" };
 	} finally {
 		releaseFileLock(lockPath, marker);
 	}
 }
 
-coordinate().catch((error) => log("coordinator failed", { error: String(error) }));
+coordinate()
+	.then((result) => {
+		if (!result.ok) process.exitCode = 1;
+	})
+	.catch((error) => {
+		log("coordinator failed", { error: String(error) });
+		process.exitCode = 1;
+	});

@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { CRON_CLI_HELP_TEXT, parseCronToolCommand } from "./cli.ts";
-import { getDaemonStatus, scheduleDaemonUpgrade, startDaemon, stopDaemon } from "./daemon-client.ts";
+import { getDaemonStatus, scheduleDaemonUpgrade, startDaemon, stopDaemon, upgradeDaemon } from "./daemon-client.ts";
 import { getLaunchdStatus, installLaunchAgent, uninstallLaunchAgent } from "./launchd.ts";
 import { resolveProjectId } from "./project-id.ts";
 import { calculateNextRun, validateCron } from "./schedule.ts";
@@ -36,6 +36,7 @@ type CronAction =
 	| "run"
 	| "start_daemon"
 	| "stop_daemon"
+	| "update_daemon"
 	| "install_launchd"
 	| "uninstall_launchd";
 
@@ -405,6 +406,11 @@ const toolHandlers: Record<
 		const result = stopDaemon();
 		return { text: result.message, details: { result } };
 	},
+	update_daemon: async () => {
+		const result = await upgradeDaemon();
+		if (!result.ok) throw new Error(result.message);
+		return { text: result.message, details: { result } };
+	},
 	install_launchd: () => {
 		const result = installLaunchAgent();
 		return { text: result.message, details: { result, launchd: getLaunchdStatus() } };
@@ -451,11 +457,13 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (event, ctx) => {
 		// Package updates replace files in place but cannot reload an external process. Schedule this
 		// after the session hook returns so a draining daemon never delays Pi startup.
-		setTimeout(() => {
-			try {
-				scheduleDaemonUpgrade();
-			} catch {}
-		}, 0);
+		if (process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE !== "1") {
+			setTimeout(() => {
+				try {
+					scheduleDaemonUpgrade();
+				} catch {}
+			}, 0);
+		}
 		const sessionEvent = event as { reason?: string; previousSessionFile?: string };
 		let allowDrainingHandoff = sessionEvent.reason === "reload";
 		if (sessionEvent.previousSessionFile && ["new", "resume", "fork"].includes(sessionEvent.reason ?? "")) {
@@ -552,6 +560,7 @@ export default function (pi: ExtensionAPI) {
 					"start-daemon",
 					"stop",
 					"stop-daemon",
+					"update-runtime",
 					"install",
 					"install-launchd",
 					"uninstall",
@@ -565,14 +574,15 @@ export default function (pi: ExtensionAPI) {
 			const parsed = parseCronToolCommand(`cron ${args?.trim() || "status"}`);
 			if (parsed.type === "error") return ctx.ui.notify(parsed.message, "warning");
 			if (parsed.type === "help") return ctx.ui.notify(CRON_CLI_HELP_TEXT, "info");
+			const params = parsed.params as unknown as CronToolParams;
 			try {
-				const params = parsed.params as unknown as CronToolParams;
 				if (params.scope === "session" && ["upsert", "update", "run", "enable"].includes(params.action)) {
 					await ensureSessionBridge(ctx);
 				}
 				const result = await toolHandlers[params.action](params, ctx);
 				ctx.ui.notify(result.text, "info");
 			} catch (error) {
+				if (params.action === "update_daemon") throw error;
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
 			}
 		},

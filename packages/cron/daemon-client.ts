@@ -18,6 +18,9 @@ import {
 } from "./store.ts";
 import type { DaemonStatus } from "./types.ts";
 
+const DEFAULT_UPDATE_COMMAND_TIMEOUT_MS = 895_000;
+const DEFAULT_UPDATE_FORCE_KILL_GRACE_MS = 1_000;
+
 export function getDaemonPath(): string {
 	return getRuntimeDaemonPath();
 }
@@ -111,6 +114,82 @@ export function stopDaemon(): { ok: boolean; message: string } {
 	}
 
 	return { ok: true, message: `cron daemon stop requested (PID ${status.pid})` };
+}
+
+export async function upgradeDaemon(): Promise<{ ok: boolean; message: string }> {
+	const desiredRuntimeId = getDaemonRuntimeId();
+	const status = getDaemonStatus();
+	if (!status.running || !status.pid) return { ok: true, message: "cron daemon is stopped; leaving it stopped" };
+	if (!status.legacy && status.runtimeId === desiredRuntimeId) {
+		return { ok: true, message: "cron daemon already uses this runtime" };
+	}
+
+	ensureCronDirs();
+	const launchd = getLaunchdStatus();
+	const coordinatorPath =
+		process.env.PI_CRON_UPDATE_COORDINATOR_PATH ?? join(dirname(getDaemonPath()), "upgrade-coordinator.mjs");
+	const timeoutMs = positiveTimeout(process.env.PI_CRON_UPDATE_COMMAND_TIMEOUT_MS, DEFAULT_UPDATE_COMMAND_TIMEOUT_MS);
+	const forceKillGraceMs = positiveTimeout(
+		process.env.PI_CRON_UPDATE_FORCE_KILL_GRACE_MS,
+		DEFAULT_UPDATE_FORCE_KILL_GRACE_MS,
+	);
+	return await new Promise((resolve) => {
+		const child = spawn(process.execPath, [coordinatorPath], {
+			cwd: getAgentDir(),
+			stdio: "ignore",
+			env: {
+				...process.env,
+				PI_CODING_AGENT_DIR: getAgentDir(),
+				PI_CRON_UPGRADE_LAUNCHD: launchd.loaded ? "1" : "0",
+			},
+		});
+		let settled = false;
+		let timedOut = false;
+		let forceKill: NodeJS.Timeout | undefined;
+		const timeout = setTimeout(() => {
+			timedOut = true;
+			try {
+				child.kill("SIGTERM");
+			} catch {}
+			forceKill = setTimeout(() => {
+				try {
+					child.kill("SIGKILL");
+				} catch {}
+				finish({ ok: false, message: `cron daemon update timed out after ${timeoutMs}ms` });
+			}, forceKillGraceMs);
+		}, timeoutMs);
+		const finish = (result: { ok: boolean; message: string }) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeout);
+			if (forceKill) clearTimeout(forceKill);
+			resolve(result);
+		};
+		child.once("error", (error) =>
+			finish({ ok: false, message: `cron daemon update could not start: ${String(error)}` }),
+		);
+		child.once("exit", (code, signal) => {
+			if (timedOut) {
+				finish({ ok: false, message: `cron daemon update timed out after ${timeoutMs}ms` });
+				return;
+			}
+			const current = getDaemonStatus();
+			const desiredOwner = current.running && !current.legacy && current.runtimeId === desiredRuntimeId;
+			if (code === 0 && !signal && desiredOwner) {
+				finish({ ok: true, message: `cron daemon updated to runtime ${desiredRuntimeId}` });
+				return;
+			}
+			finish({
+				ok: false,
+				message: `cron daemon update did not reach the requested runtime${signal ? ` (${signal})` : code === null ? "" : ` (exit ${code})`}`,
+			});
+		});
+	});
+}
+
+function positiveTimeout(raw: string | undefined, fallback: number): number {
+	const value = Number(raw);
+	return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 export function scheduleDaemonUpgrade(): { scheduled: boolean; message: string; pid?: number } {

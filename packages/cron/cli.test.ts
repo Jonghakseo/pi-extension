@@ -56,6 +56,10 @@ describe("cron CLI parser", () => {
 			type: "params",
 			params: { action: "start_daemon" },
 		});
+		expect(parseCronToolCommand("cron update-runtime")).toEqual({
+			type: "params",
+			params: { action: "update_daemon" },
+		});
 		expect(parseCronToolCommand("cron uninstall-launchd --yes")).toEqual({
 			type: "params",
 			params: { action: "uninstall_launchd", yes: true },
