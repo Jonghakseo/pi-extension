@@ -32,7 +32,7 @@ The scheduler is macOS-first. On macOS, its LaunchAgent keeps jobs running after
 - Extensions and MCP tools are loaded as in interactive mode so scheduled prompts can call MCP tools (Slack, Jira, etc.).
 - Uses a detached daemon and macOS `launchd` LaunchAgent so jobs continue after Pi exits and after reboot/login.
 - Moves one-shot jobs out of the current job list and into history after their first execution attempt.
-- Deletes jobs immediately when `cron remove` or `/cron remove` is called. LaunchAgent uninstall still requires confirmation unless `cron uninstall-launchd --yes` is used.
+- Removes active job records immediately when `cron remove` or `/cron remove` is called. Their prompt files and existing run logs remain available. LaunchAgent uninstall still requires confirmation unless `cron uninstall-launchd --yes` is used.
 
 ## Files
 
@@ -43,6 +43,8 @@ The scheduler is macOS-first. On macOS, its LaunchAgent keeps jobs running after
 ~/.pi/agent/cron/sessions/<session-hash>.json  # live session IPC owner lease
 ~/.pi/agent/cron/daemon.pid
 ~/.pi/agent/cron/daemon.log
+~/.pi/agent/cron/daemon.err.log
+~/.pi/agent/cron/daemon-upgrade-coordinator.log
 ~/Library/LaunchAgents/dev.pi.cron.plist
 ```
 
@@ -69,13 +71,15 @@ cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|
 cron run <id> [--scope <user|project|session>]
 cron enable <id> [--scope <user|project|session>]
 cron disable <id> [--scope <user|project|session>]
-cron remove <id> [--scope <user|project|session>]       # deletes immediately
+cron remove <id> [--scope <user|project|session>]       # removes the active record; keeps prompt and run logs
 cron start-daemon      # alias: cron start
 cron stop-daemon       # alias: cron stop
 cron update-runtime    # drain and replace an outdated running daemon without reinstalling launchd
 cron install-launchd   # alias: cron install
 cron uninstall-launchd [--yes] # --yes skips extra UI confirm; alias: cron uninstall
 ```
+
+Cron schedules use five numeric fields: `minute hour day-of-month month day-of-week`. Each field accepts `*`, a single value, a range such as `1-5`, a list such as `1,3,5`, or a step such as `*/15` and `1-10/2`. Named months, named weekdays, macros, and a sixth seconds field are not supported. Schedules use the daemon's local timezone. Day of month and day of week must both match; Sunday is `0`.
 
 Human-facing slash commands are still available for convenience:
 
@@ -89,7 +93,7 @@ Human-facing slash commands are still available for convenience:
 /cron list          # current jobs only
 /cron history       # completed one-shot jobs
 /cron run <id>
-/cron remove <id>   # deletes immediately
+/cron remove <id>   # removes the active record; keeps prompt and run logs
 /cron enable <id>
 /cron disable <id>
 ```
@@ -112,14 +116,14 @@ After the first execution attempt, a one-shot job is atomically removed from the
 
 ## Safety
 
-- Removing a job deletes it immediately without a confirmation dialog, including in non-UI contexts.
+- Removing a job removes its active `jobs.json` record immediately without a confirmation dialog, including in non-UI contexts. Its prompt file and existing run logs are retained.
 - Uninstalling launchd requires `ctx.ui.confirm()` unless explicitly confirmed with `--yes`.
 - In non-UI contexts, launchd uninstall is denied unless `--yes` is provided.
 - Job IDs are restricted to `[a-zA-Z0-9._-]`.
 - Prompt files are written only under `~/.pi/agent/cron/prompts/`.
 - Archived job IDs remain reserved so a future job cannot overwrite a preserved history prompt.
 - Session ownership protects cooperating runtimes that load this extension and use the same Pi agent directory. It is not a global lock on the transcript file. Do not concurrently open the same session in an older runtime or one without this extension.
-- A live session must load the updated extension before it can accept scheduled messages through the local bridge. Its lease moves through `starting`, `active`, and `draining`; the daemon defers, rather than fails, jobs while it is not ready or is handing off.
+- A live session must load the updated extension before it can accept scheduled messages through the local bridge. Its lease moves through `starting`, `active`, and `draining`; the daemon defers, rather than fails, jobs while it is not ready or is handing off. When a compatible host pauses external delivery, such as during voice input or PTT, due session jobs also remain pending for a later attempt.
 - On `session_shutdown`, the lease remains `draining` until Pi emits the documented successor `session_start` event or the owner process is provably gone. A host that disposes a session without either signal fails closed, so its due session jobs remain deferred rather than being resumed concurrently. The host must complete a documented session replacement or exit its process before cron can resume that session.
 - Lease and transaction-lock cleanup check the process start identity as well as PID (`/proc` boot ID plus start time on Linux, `/bin/ps -o lstart` on macOS). If the PID is live but its recorded start identity cannot be checked, ownership is not stolen.
 - A connection lost after sending a prompt may hide an accepted delivery. Cron records a failed delivery instead of automatically resending it. Check the original session before retrying manually.
@@ -134,7 +138,7 @@ The update path never calls `cron install-launchd`, `launchctl bootout`, `bootst
 
 A LaunchAgent that points to another package path, Pi binary, or `PI_CODING_AGENT_DIR` is a migration, not an in-place update. Cron blocks that state without touching the running daemon. Schedule a maintenance window, confirm active work has drained, then explicitly uninstall and reinstall the LaunchAgent from the updated package. Do not run that setup sequence while a job is active.
 
-[`pi update --extensions`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md#install-and-manage) updates unpinned package specs but does not reload already-open Pi sessions. Restart Pi or run `/reload` in an open session to load the updated extension and then run `cron update-runtime`. Pinned package specs are not changed by that command.
+[`pi update --extensions`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md#install-and-manage) updates unpinned package specs but does not reload already-open Pi sessions. Restart Pi or run `/reload` in an open session to load the updated extension. On `session_start`, cron automatically schedules a nonblocking safe upgrade check for an outdated daemon. Run `cron update-runtime` when you need to wait for the cutover and confirm its result. Pinned package specs are not changed by `pi update --extensions`.
 
 ## Moving from a local extension
 
