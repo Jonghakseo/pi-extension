@@ -11,6 +11,7 @@ import {
 	canonicalSessionFile,
 	releaseDrainingSessionOwner,
 	SessionBridge,
+	SessionOwnerConflictError,
 	validatePersistedSessionFile,
 } from "./session-bridge.ts";
 import {
@@ -436,6 +437,7 @@ export default function (pi: ExtensionAPI) {
 	let sessionBridge: SessionBridge | undefined;
 	let bridgeStart: Promise<void> | undefined;
 	let shuttingDown = false;
+	let sessionOwnerConflictWarned = false;
 	let externalDeliveryPaused = false;
 	pi.events.on(PICKY_EXTERNAL_DELIVERY_PAUSE_STATE_CHANNEL, (value) => {
 		externalDeliveryPaused = Boolean(
@@ -458,7 +460,16 @@ export default function (pi: ExtensionAPI) {
 			isDeliveryPaused: () => externalDeliveryPaused,
 		});
 		bridgeStart = (async () => {
-			await bridge.start();
+			try {
+				await bridge.start();
+			} catch (error) {
+				if (!(error instanceof SessionOwnerConflictError)) throw error;
+				if (!sessionOwnerConflictWarned) {
+					ctx.ui.notify("Cron: 이 세션은 다른 Pi 창에서 이미 열려 있어 기존 연결을 사용합니다.", "warning");
+					sessionOwnerConflictWarned = true;
+				}
+				return;
+			}
 			if (shuttingDown) await bridge.beginDraining();
 			else sessionBridge = bridge;
 		})();

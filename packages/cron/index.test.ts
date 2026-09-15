@@ -117,6 +117,32 @@ describe("cron job removal", () => {
 		vi.useRealTimers();
 	});
 
+	it("shows one warning instead of failing when another window owns the session", async () => {
+		const previousSuppression = process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE;
+		process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE = "1";
+		const first = createPi();
+		const duplicate = createPi();
+		registerCron(first.pi as never);
+		registerCron(duplicate.pi as never);
+		const ctx = makeCtx(true);
+
+		await first.events.get("session_start")({ reason: "startup" }, ctx);
+		try {
+			await expect(duplicate.events.get("session_start")({ reason: "startup" }, ctx)).resolves.toBeUndefined();
+			await duplicate.events.get("agent_end")({}, ctx);
+			expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+			expect(ctx.ui.notify).toHaveBeenCalledWith(
+				"Cron: 이 세션은 다른 Pi 창에서 이미 열려 있어 기존 연결을 사용합니다.",
+				"warning",
+			);
+		} finally {
+			await duplicate.events.get("session_shutdown")();
+			await first.events.get("session_shutdown")();
+			if (previousSuppression === undefined) delete process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE;
+			else process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE = previousSuppression;
+		}
+	});
+
 	it("does not schedule a detached upgrade inside the awaited runtime update RPC", async () => {
 		vi.useFakeTimers();
 		const previousSuppression = process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE;

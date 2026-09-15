@@ -14,6 +14,13 @@ const MAX_REPLAY_ENTRIES = 256;
 
 export type SessionOwnerState = "reserved" | "starting" | "active" | "draining";
 
+export class SessionOwnerConflictError extends Error {
+	constructor() {
+		super("an active cron session owner already holds this session");
+		this.name = "SessionOwnerConflictError";
+	}
+}
+
 export interface SessionOwner {
 	sessionId: string;
 	sessionFile: string;
@@ -259,7 +266,7 @@ export class SessionBridge {
 				) {
 					unlinkIfOwned(registryPath, existing);
 				} else {
-					throw new Error("an active cron session owner already holds this session");
+					throw new SessionOwnerConflictError();
 				}
 			}
 			writeOwner(registryPath, this.owner);
