@@ -39,6 +39,7 @@
 		"verify:strict": "pnpm run biome:strict && pnpm run typecheck && pnpm run test && pnpm run check && pnpm run coverage:check",
 		"precommit:strict": "pnpm run biome:strict:staged && pnpm run typecheck && pnpm run test",
 		"prepush:strict": "pnpm run verify:strict",
+		"deploy": "node scripts/deploy-package.mjs",
 		"publish:dry-run": "pnpm run verify:strict && pnpm -r --filter './packages/*' publish --dry-run --access public --no-git-checks",
 		"publish:all": "pnpm run verify:strict && pnpm -r --filter './packages/*' publish --access public --no-git-checks",
 		"publish:ask-user-question": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-ask-user-question publish --access public --no-git-checks",

@@ -90,6 +90,14 @@ Coverage is enforced with Vitest's per-file 100% thresholds for the deterministi
 
 Interactive/runtime-heavy extension entrypoints remain validated by the normal test suite in `pnpm run test`, but are intentionally outside the strict coverage gate.
 
+## Publish one package
+
+```bash
+pnpm deploy <extension-name>   # packages/<extension-name>, e.g. pnpm deploy memory-layer
+```
+
+The runner (Node.js and Python 3) opens npm's browser login or publish approval when needed, then runs `verify:strict`, a single-package dry-run, publish under a PTY, and Registry verification. If the local version is already published as `latest`, it bumps the patch version automatically. Set minor/major versions in the package manifest before running it. It does not commit or push.
+
 ## Install from npm
 
 ```bash
