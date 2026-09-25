@@ -208,6 +208,11 @@ describe("dual-era MCP integration", () => {
 				);
 				await new Promise((resolve) => setTimeout(resolve, 500));
 				expect(fs.existsSync(`${controlPath}.received`)).toBe(false);
+				fs.rmSync(`${controlPath}.pause`);
+				await expect(connection.callTool("record", { body: "safe" }, { timeoutMs: 5_000 })).resolves.toMatchObject({
+					content: [{ type: "text", text: "received" }],
+				});
+				expect(fs.readFileSync(`${controlPath}.received`, "utf8")).toBe("4");
 			} finally {
 				await connection.dispose();
 			}
