@@ -166,12 +166,14 @@ describe("dual-era MCP integration", () => {
 		const server = normalizeServer("LargeStdio", { command: process.execPath, args: [fixturePath] });
 		if (!server) throw new Error("Failed to normalize modern stdio fixture");
 		const connection = new McpConnection(server);
-		const message = "한글 😀 ".repeat(12_000);
+		const messages = ["x".repeat(60_000), "한글 😀 ".repeat(12_000)];
 
 		try {
 			await connection.connect({ timeoutMs: 10_000 });
-			const result = await connection.callTool("echo", { message }, { timeoutMs: 10_000 });
-			expect(result).toMatchObject({ content: [{ type: "text", text: `modern:${message}` }] });
+			for (const message of messages) {
+				const result = await connection.callTool("echo", { message }, { timeoutMs: 10_000 });
+				expect(result).toMatchObject({ content: [{ type: "text", text: `modern:${message}` }] });
+			}
 		} finally {
 			await connection.dispose();
 		}
