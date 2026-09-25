@@ -169,7 +169,10 @@ export function renderForgetResult(
 	if (options.expanded) return renderOutput(result, theme);
 	const details = result.details as MemoryToolDetails | undefined;
 	if (details?.kind !== "forget") return renderOutput(result, theme);
-	return renderSummary(`✓ deleted · ${details.scope}/${details.topic}`, theme);
+	return renderSummary(
+		`✓ deleted · ${details.scope}/${details.topic} · "${details.title.replace(/\s+/g, " ").trim()}"`,
+		theme,
+	);
 }
 
 export function renderMemoryListCall(args: ToolRenderArgs, theme: RenderTheme, context: { expanded: boolean }): Text {

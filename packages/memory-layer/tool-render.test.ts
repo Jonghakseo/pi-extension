@@ -100,7 +100,15 @@ describe("memory-layer compact tool rendering", () => {
 					args: { id: "abc123" },
 				}),
 			),
-		).toBe("✓ deleted · user/general");
+		).toBe('✓ deleted · user/general · "배포 규칙"');
+		const longTitle = "긴 메모리 제목 ".repeat(8).trim();
+		expect(
+			render(
+				renderForgetResult(result(fullResult, { ...details, title: longTitle }), { expanded: false }, theme as never, {
+					args: { id: "abc123" },
+				}),
+			),
+		).toContain(longTitle);
 		expect(
 			render(
 				renderForgetResult(result(fullResult, details), { expanded: true }, theme as never, { args: { id: "abc123" } }),
