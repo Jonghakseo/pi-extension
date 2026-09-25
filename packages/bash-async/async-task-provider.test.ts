@@ -104,15 +104,14 @@ function detail(bus: Bus) {
 }
 
 describe("provider grant and delivery protocol", () => {
-	it("retains a reserved registration across a rejected session switch", async () => {
+	it("abandons an unaccepted registration after a session switch round trip", async () => {
 		const { provider, bus, approve } = setup();
 		const reservation = provider.reserve({ taskId: "pending", title: "pending", kind: "bash" });
 		expect(() => provider.bind("other")).toThrow("still owns tasks");
 		provider.bind("pi-session");
 		approve(bus.frames.find((frame) => frame.type === "task-register") as Frame);
-		expect(await reservation).toBe("pending");
-		expect(provider.start("pending")).toBe(true);
-		provider.finish("pending", "succeeded", "settled", false);
+		await expect(reservation).rejects.toThrow("registration was not approved");
+		expect(provider.start("pending")).toBe(false);
 		provider.shutdown();
 	});
 

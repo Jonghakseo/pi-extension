@@ -69,6 +69,7 @@ export class AsyncTaskProvider {
 	private stopped = false;
 	private discoveryClosed = false;
 	private requestedPiSessionId?: string;
+	private bindingEpoch = 0;
 	private discoveryPromise?: Promise<void>;
 	private resolveDiscovery?: () => void;
 	private unsubscribe?: () => void;
@@ -93,6 +94,8 @@ export class AsyncTaskProvider {
 
 	bind(piSessionId: string, snapshotReady = true): void {
 		if (this.stopped || !isId(piSessionId)) return;
+		// A round trip also invalidates starts still awaiting discovery or validation.
+		if (this.requestedPiSessionId !== piSessionId) this.bindingEpoch++;
 		// Fence new admission even when the old owner must remain for resource callbacks.
 		this.requestedPiSessionId = piSessionId;
 		if (this.discovery?.piSessionId === piSessionId) {
@@ -141,6 +144,10 @@ export class AsyncTaskProvider {
 			providerRevision: this.revision,
 			controlGeneration: this.generation,
 		});
+	}
+
+	get bindingToken(): number {
+		return this.bindingEpoch;
 	}
 
 	async whenDiscovered(): Promise<void> {
@@ -301,6 +308,7 @@ export class AsyncTaskProvider {
 		signal?: AbortSignal,
 	): Promise<string | undefined> {
 		const owner = this.owner;
+		const binding = this.bindingToken;
 		if (!this.supported || !owner) return undefined;
 		if (!this.accepting || signal?.aborted) throw new Error("Async task admission is closed");
 		const taskId = input.taskId ?? randomUUID();
@@ -337,9 +345,10 @@ export class AsyncTaskProvider {
 		try {
 			// task-register has task, not taskId, in the frozen wire contract.
 			let reply = await this.register(task);
-			if (!reply && !this.abandoned.has(taskId) && this.accepting)
+			if (!reply && !this.abandoned.has(taskId) && this.accepting && this.bindingToken === binding)
 				reply = await this.request("registration-query", taskId);
 			if (
+				this.bindingToken !== binding ||
 				reply?.outcome !== "accepted" ||
 				reply.registration !== "approved" ||
 				!isId(reply.grantId) ||
@@ -601,6 +610,7 @@ export class AsyncTaskProvider {
 	shutdown(): void {
 		this.open = false;
 		this.stopped = true;
+		this.bindingEpoch++;
 		this.resolveDiscovery?.();
 		this.hooks.close();
 		for (const pending of this.pending.values()) pending.resolve();

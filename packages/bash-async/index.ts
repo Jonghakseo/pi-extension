@@ -95,6 +95,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 			notifications.suppress();
 			if (provider.supported) manager.closeAdmission();
 		},
+		deliveryResumed: () => notifications.flush(),
 		reopen: () => {
 			notifications.resume();
 			manager.reopenAdmission();
@@ -102,6 +103,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 	});
 	pi.on("session_start", (_event, context) => provider.bind(context.sessionManager.getSessionId()));
 	const notifications = new NotificationBatcher({
+		deliveryState: (id) => provider.deliveryState(id),
 		send: (message, options) => {
 			provider.deliver(message.details.jobIds, message, (annotated) => pi.sendMessage(annotated, options));
 		},

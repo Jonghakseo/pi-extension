@@ -32,7 +32,7 @@ afterEach(async () => {
 	vi.useRealTimers();
 	await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 });
 });
-function setup(validateCwd = async () => ({ ok: true as const, cwd: directory })) {
+function setup(validateCwd = async () => ({ ok: true as const, cwd: directory }), discover = true) {
 	const frames: any[] = [];
 	const listeners = new Set<(frame: any) => void>();
 	let owner: any;
@@ -46,7 +46,7 @@ function setup(validateCwd = async () => ({ ok: true as const, cwd: directory })
 			validateWire?.(frame);
 			frames.push(structuredClone(frame));
 			for (const listener of listeners) listener(frame);
-			if (frame.type === "host-query") {
+			if (frame.type === "host-query" && discover) {
 				owner = {
 					sessionId: "session",
 					runtimeInstanceId: "runtime",
@@ -101,6 +101,7 @@ function setup(validateCwd = async () => ({ ok: true as const, cwd: directory })
 		});
 	const send = vi.fn();
 	const notifications = new NotificationBatcher({
+		deliveryState: (id) => provider.deliveryState(id),
 		send: (message) => provider.deliver(message.details.jobIds, message, send),
 	});
 	const completions: Array<(result: { exitCode: number }) => void> = [];
@@ -118,6 +119,7 @@ function setup(validateCwd = async () => ({ ok: true as const, cwd: directory })
 				notifications.suppress();
 				manager.closeAdmission();
 			},
+			deliveryResumed: () => notifications.flush(),
 			reopen: () => {
 				notifications.resume();
 				manager.reopenAdmission();
@@ -150,6 +152,9 @@ function setup(validateCwd = async () => ({ ok: true as const, cwd: directory })
 		approve,
 		reply,
 		detail,
+		enableDiscovery: () => {
+			discover = true;
+		},
 		manual: () => {
 			automatic = false;
 		},
@@ -157,6 +162,100 @@ function setup(validateCwd = async () => ({ ok: true as const, cwd: directory })
 }
 
 describe("hosted bash manager lifecycle", () => {
+	it.each([
+		[false, false],
+		[true, false],
+		[false, true],
+		[true, true],
+	])("rejects discovery continuation after session switch (return=%s, supported=%s)", async (returns, supported) => {
+		const { start, frames, execute, enableDiscovery } = setup(undefined, false);
+		const pending = start();
+		await vi.advanceTimersByTimeAsync(0);
+		if (supported) enableDiscovery();
+		provider.bind("foreign");
+		if (returns) provider.bind("pi-session");
+		expect((await pending).ok).toBe(false);
+		expect(frames.filter((frame) => frame.type === "task-register")).toHaveLength(0);
+		expect(execute).not.toHaveBeenCalled();
+	});
+
+	it("automatically replays the original held batch once on origin return", async () => {
+		const { start, completions, send, detail, reply } = setup();
+		await start();
+		await start();
+		completions[0]({ exitCode: 0 });
+		await vi.advanceTimersByTimeAsync(0);
+		completions[1]({ exitCode: 7 });
+		await vi.advanceTimersByTimeAsync(0);
+		const ids = detail().tickets.map((ticket: any) => ticket.completionId);
+		expect(() => provider.bind("foreign")).toThrow();
+		await vi.advanceTimersByTimeAsync(500);
+		expect(send).not.toHaveBeenCalled();
+		provider.bind("pi-session");
+		expect(send).toHaveBeenCalledOnce();
+		const message = send.mock.calls[0][0];
+		expect(message.content).toContain("exit 7");
+		expect(message.details.asyncTasks).toMatchObject({
+			piSessionId: "pi-session",
+			completionIds: ids,
+			controlGeneration: 0,
+		});
+		reply({ type: "completion-observed", deliveryId: message.details.asyncTasks.deliveryId, completionIds: ids });
+		provider.bind("foreign");
+		provider.bind("pi-session");
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(send).toHaveBeenCalledOnce();
+	});
+
+	it("omits a discarded job without losing another held result", async () => {
+		const { start, completions, send } = setup();
+		const first = await start();
+		const second = await start();
+		if (!first.ok || !second.ok) throw new Error("fixture admission failed");
+		completions[0]({ exitCode: 0 });
+		await vi.advanceTimersByTimeAsync(0);
+		completions[1]({ exitCode: 7 });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(() => provider.bind("foreign")).toThrow();
+		await vi.advanceTimersByTimeAsync(500);
+		provider.discardPending(first.details.jobId);
+		provider.bind("pi-session");
+		expect(send).toHaveBeenCalledOnce();
+		expect(send.mock.calls[0][0].details.jobIds).toEqual([second.details.jobId]);
+		expect(send.mock.calls[0][0].content).not.toContain(first.details.jobId);
+	});
+
+	it("does not retry a possibly submitted result after a send exception", async () => {
+		const { start, completions, send } = setup();
+		await start();
+		send.mockImplementation(() => {
+			throw new Error("submission uncertain");
+		});
+		completions[0]({ exitCode: 0 });
+		await vi.advanceTimersByTimeAsync(500);
+		expect(() => provider.bind("foreign")).toThrow();
+		provider.bind("pi-session");
+		await vi.advanceTimersByTimeAsync(500);
+		expect(send).toHaveBeenCalledOnce();
+	});
+
+	it.each(["close", "shutdown", "discard"])("does not replay a held result after %s", async (action) => {
+		const { start, completions, send, reply } = setup();
+		const result = await start();
+		if (!result.ok) throw new Error(result.error);
+		completions[0]({ exitCode: 0 });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(() => provider.bind("foreign")).toThrow();
+		await vi.advanceTimersByTimeAsync(500);
+		if (action === "close")
+			reply({ type: "control-request", action: "closeAdmission", deliveryIds: [], controlGeneration: 1 });
+		else if (action === "shutdown") provider.shutdown();
+		else provider.discardPending(result.details.jobId);
+		provider.bind("pi-session");
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(send).not.toHaveBeenCalled();
+	});
+
 	it("rejects an unaccepted start paused in cwd validation after a failed foreign switch", async () => {
 		let release!: () => void;
 		let validations = 0;
@@ -186,6 +285,18 @@ describe("hosted bash manager lifecycle", () => {
 		expect((await start()).ok).toBe(true);
 		completions[1]({ exitCode: 0 });
 		await vi.advanceTimersByTimeAsync(500);
+	});
+
+	it("rejects an unaccepted grant after a switch away and back", async () => {
+		const { manual, start, frames, approve, execute } = setup();
+		manual();
+		const pending = start();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(() => provider.bind("foreign")).toThrow();
+		provider.bind("pi-session");
+		approve(frames.find((frame) => frame.type === "task-register"));
+		expect((await pending).ok).toBe(false);
+		expect(execute).not.toHaveBeenCalled();
 	});
 
 	it("does not enter the manager queue until the grant arrives", async () => {

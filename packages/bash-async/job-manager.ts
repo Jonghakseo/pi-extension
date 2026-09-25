@@ -243,8 +243,13 @@ export class JobManager {
 		const provider = this.options.provider;
 		const sessionId = input.context.sessionManager.getSessionId();
 		if (provider) provider.bind(sessionId);
+		const binding = provider?.bindingToken;
 		const cwd = await this.cwdValidator(input.cwd, input.context.cwd);
-		if (input.context.sessionManager.getSessionId() !== sessionId || (provider?.supported && !provider.accepting))
+		if (
+			provider?.bindingToken !== binding ||
+			input.context.sessionManager.getSessionId() !== sessionId ||
+			(provider?.supported && !provider.accepting)
+		)
 			return { ok: false, error: "bash_async session changed before job acceptance." };
 		if (!cwd.ok) return cwd;
 		if (input.acceptanceSignal?.aborted)
@@ -257,6 +262,8 @@ export class JobManager {
 		const environment = snapshotEnvironment(input.context);
 		const id = randomUUID();
 		if (provider) await provider.whenDiscovered();
+		if (provider?.bindingToken !== binding || input.context.sessionManager.getSessionId() !== sessionId)
+			return { ok: false, error: "bash_async session changed before job acceptance." };
 		if (provider?.supported) {
 			try {
 				await provider.reserve(

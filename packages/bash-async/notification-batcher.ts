@@ -15,6 +15,7 @@ export interface CompletionNotification {
 export interface CompletionBatcherOptions {
 	send: (message: CompletionNotification, options: { triggerTurn: true; deliverAs: "followUp" }) => void;
 	delayMs?: number;
+	deliveryState?: (jobId: string) => "send" | "hold" | "discard";
 }
 
 export interface CompletedJob extends BashAsyncJob {
@@ -79,6 +80,9 @@ export class NotificationBatcher {
 		const included: CompletedJob[] = [];
 		let content = "";
 		for (const job of this.pending.values()) {
+			const state = this.options.deliveryState?.(job.id) ?? "send";
+			if (state === "discard") this.pending.delete(job.id);
+			if (state !== "send") continue;
 			const entry = formatCompletion(job);
 			const separator = content ? "\n\n" : "";
 			if (Buffer.byteLength(content + separator + entry) > MAX_COMPLETION_MESSAGE_BYTES) break;
@@ -97,7 +101,10 @@ export class NotificationBatcher {
 				{ triggerTurn: true, deliverAs: "followUp" },
 			);
 		}
-		if (this.pending.size > 0 && !this.suppressed) {
+		if (
+			!this.suppressed &&
+			[...this.pending.keys()].some((id) => (this.options.deliveryState?.(id) ?? "send") === "send")
+		) {
 			this.timer = setTimeout(() => this.flush(), this.delayMs);
 			this.timer.unref?.();
 		}

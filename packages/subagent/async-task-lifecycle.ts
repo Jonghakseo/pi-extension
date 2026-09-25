@@ -148,7 +148,9 @@ export class SubagentAsyncTasks {
 		hidden = false,
 		signal?: AbortSignal,
 	): Promise<T> {
+		const binding = this.provider.bindingToken;
 		await this.provider.whenDiscovered();
+		if (this.provider.bindingToken !== binding) throw new Error("Subagent session changed before invocation");
 		if (invocations.getStore() || !this.provider.supported) return run();
 		const id = await this.provider.reserve({ title, kind: "subagent", invocationId }, signal);
 		if (!id) throw new Error("Subagent registration unavailable");

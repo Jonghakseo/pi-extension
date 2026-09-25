@@ -44,6 +44,7 @@ interface Hooks {
 	detail(taskId: string): string | undefined;
 	close(): void;
 	reopen?(): void;
+	deliveryResumed?(): void;
 	observed?(taskIds: string[]): void;
 }
 type Envelope = Record<string, unknown>;
@@ -69,6 +70,7 @@ export class AsyncTaskProvider {
 	private stopped = false;
 	private discoveryClosed = false;
 	private requestedPiSessionId?: string;
+	private bindingEpoch = 0;
 	private discoveryPromise?: Promise<void>;
 	private resolveDiscovery?: () => void;
 	private unsubscribe?: () => void;
@@ -93,6 +95,9 @@ export class AsyncTaskProvider {
 
 	bind(piSessionId: string, snapshotReady = true): void {
 		if (this.stopped || !isId(piSessionId)) return;
+		// A round trip also invalidates starts still awaiting discovery or validation.
+		const changedBinding = this.requestedPiSessionId !== piSessionId;
+		if (changedBinding) this.bindingEpoch++;
 		// Fence new admission even when the old owner must remain for resource callbacks.
 		this.requestedPiSessionId = piSessionId;
 		if (this.discovery?.piSessionId === piSessionId) {
@@ -100,6 +105,7 @@ export class AsyncTaskProvider {
 				this.ready = snapshotReady;
 				this.announce();
 			}
+			if (changedBinding && this.accepting) this.hooks.deliveryResumed?.();
 			return;
 		}
 		// Rebinding a live owner would orphan obligations. Runtime replacement owns that transition.
@@ -141,6 +147,10 @@ export class AsyncTaskProvider {
 			providerRevision: this.revision,
 			controlGeneration: this.generation,
 		});
+	}
+
+	get bindingToken(): number {
+		return this.bindingEpoch;
 	}
 
 	async whenDiscovered(): Promise<void> {
@@ -301,6 +311,7 @@ export class AsyncTaskProvider {
 		signal?: AbortSignal,
 	): Promise<string | undefined> {
 		const owner = this.owner;
+		const binding = this.bindingToken;
 		if (!this.supported || !owner) return undefined;
 		if (!this.accepting || signal?.aborted) throw new Error("Async task admission is closed");
 		const taskId = input.taskId ?? randomUUID();
@@ -337,9 +348,10 @@ export class AsyncTaskProvider {
 		try {
 			// task-register has task, not taskId, in the frozen wire contract.
 			let reply = await this.register(task);
-			if (!reply && !this.abandoned.has(taskId) && this.accepting)
+			if (!reply && !this.abandoned.has(taskId) && this.accepting && this.bindingToken === binding)
 				reply = await this.request("registration-query", taskId);
 			if (
+				this.bindingToken !== binding ||
 				reply?.outcome !== "accepted" ||
 				reply.registration !== "approved" ||
 				!isId(reply.grantId) ||
@@ -489,6 +501,14 @@ export class AsyncTaskProvider {
 		);
 	}
 
+	/** Never-sent payloads stay in the batcher until their owner can receive them. */
+	deliveryState(taskId: string): "send" | "hold" | "discard" {
+		if (!this.tasks.has(taskId)) return "send";
+		const ticket = [...this.tickets.values()].find((ticket) => ticket.rootTaskId === taskId);
+		if (ticket?.state !== "pending" || ticket.controlGeneration !== this.generation) return "discard";
+		return this.accepting ? "send" : "hold";
+	}
+
 	deliver<T extends { details?: unknown }>(taskIds: string[], message: T, send: (message: T) => void): void {
 		const tickets = [...this.tickets.values()].filter(
 			(ticket) => taskIds.includes(ticket.rootTaskId) && ticket.state === "pending",
@@ -601,6 +621,7 @@ export class AsyncTaskProvider {
 	shutdown(): void {
 		this.open = false;
 		this.stopped = true;
+		this.bindingEpoch++;
 		this.resolveDiscovery?.();
 		this.hooks.close();
 		for (const pending of this.pending.values()) pending.resolve();

@@ -23,6 +23,7 @@ class Host {
 	frames: any[] = [];
 	listeners = new Set<(frame: any) => void>();
 	automatic = true;
+	discover = true;
 	owner: any;
 	on(_name: string, callback: (frame: any) => void) {
 		this.listeners.add(callback);
@@ -32,7 +33,7 @@ class Host {
 		validateWire?.(frame);
 		this.frames.push(structuredClone(frame));
 		for (const callback of this.listeners) callback(frame);
-		if (frame.type === "host-query") {
+		if (frame.type === "host-query" && this.discover) {
 			this.owner = {
 				sessionId: "session",
 				runtimeInstanceId: "runtime",
@@ -548,5 +549,40 @@ describe("hosted subagent production execution", () => {
 		expect(host.detail.tickets).toMatchObject([{ state: "suppressed" }]);
 		expect(pi.sendMessage.mock.calls.some(([message]) => message.details?.asyncTasks)).toBe(false);
 		expect(lifecycle.provider.accepting).toBe(true);
+	});
+});
+
+describe("discovery ownership", () => {
+	it("rejects an unaccepted grant after a switch away and back", async () => {
+		const { host } = setup();
+		host.automatic = false;
+		const run = vi.fn(async () => "executed");
+		const pending = lifecycle.invoke("origin invocation", undefined, run);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(() => lifecycle.bind("foreign")).toThrow();
+		lifecycle.bind("pi-session");
+		host.approve(host.frames.find((frame) => frame.type === "task-register"));
+		await expect(pending).rejects.toThrow(/registration was not approved/i);
+		expect(run).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		[false, false],
+		[true, false],
+		[false, true],
+		[true, true],
+	])("rejects a stale invocation after switch (return=%s, supported=%s)", async (returns, supported) => {
+		const host = new Host();
+		host.discover = false;
+		lifecycle = new SubagentAsyncTasks({ events: host } as any);
+		lifecycle.bind("pi-session");
+		const run = vi.fn(async () => "executed");
+		const pending = lifecycle.invoke("origin invocation", undefined, run);
+		host.discover = supported;
+		lifecycle.bind("foreign");
+		if (returns) lifecycle.bind("pi-session");
+		await expect(pending).rejects.toThrow(/session changed/i);
+		expect(host.frames.filter((frame) => frame.type === "task-register")).toHaveLength(0);
+		expect(run).not.toHaveBeenCalled();
 	});
 });
