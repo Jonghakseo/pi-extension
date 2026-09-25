@@ -1,4 +1,4 @@
-name: Claude MCP bridge Windows stdio
+name: Claude MCP bridge stdio matrix
 
 on:
   push:
@@ -10,10 +10,11 @@ on:
 
 jobs:
   large-stdio-request:
-    runs-on: windows-2022
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
       matrix:
+        os: [windows-2022, windows-2025, ubuntu-24.04, macos-15]
         node-version: [20, 22]
         sdk-version: ["2.0.0", "latest"]
     steps:
@@ -29,3 +30,6 @@ jobs:
       - run: pnpm --filter @ryan_nookpi/pi-extension-claude-mcp-bridge add @modelcontextprotocol/client@${{ matrix.sdk-version }} --lockfile=false --ignore-scripts
       - run: node -p "require('./packages/claude-mcp-bridge/node_modules/@modelcontextprotocol/client/package.json').version"
       - run: pnpm exec vitest run packages/claude-mcp-bridge/integration.test.ts -t "delivers large tool arguments"
+      - name: Stalled-reader diagnostic (expected to fail before fix)
+        continue-on-error: true
+        run: pnpm exec vitest run packages/claude-mcp-bridge/integration.test.ts -t "does not execute an expired"

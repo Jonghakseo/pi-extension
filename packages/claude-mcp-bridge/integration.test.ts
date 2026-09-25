@@ -185,6 +185,36 @@ describe("dual-era MCP integration", () => {
 		}
 	}, 20_000);
 
+	it.each([1_024, 60_000, 2_000_000])(
+		"does not execute an expired %i-byte stdio request when a paused server resumes",
+		async (size) => {
+			tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-mcp-paused-"));
+			const controlPath = path.join(tempDir, "control");
+			const fixturePath = fileURLToPath(new URL("./test-fixtures/paused-stdio-server.mjs", import.meta.url));
+			const server = normalizeServer("PausedStdio", {
+				command: process.execPath,
+				args: [fixturePath],
+				env: { MOCK_MCP_CONTROL_PATH: controlPath, MOCK_MCP_RESUME_MS: "400" },
+			});
+			if (!server) throw new Error("Failed to normalize paused stdio fixture");
+			const connection = new McpConnection(server);
+
+			try {
+				await connection.connect({ timeoutMs: 10_000 });
+				fs.writeFileSync(`${controlPath}.pause`, "pause");
+				await vi.waitFor(() => expect(fs.existsSync(`${controlPath}.paused`)).toBe(true), { timeout: 2_000 });
+				await expect(connection.callTool("record", { body: "x".repeat(size) }, { timeoutMs: 100 })).rejects.toThrow(
+					/timed out/i,
+				);
+				await new Promise((resolve) => setTimeout(resolve, 500));
+				expect(fs.existsSync(`${controlPath}.received`)).toBe(false);
+			} finally {
+				await connection.dispose();
+			}
+		},
+		10_000,
+	);
+
 	it("reaps the actual stdio probe process when disposed during negotiation", async () => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-mcp-probe-dispose-"));
 		const pidPath = path.join(tempDir, "probe-pids.txt");
