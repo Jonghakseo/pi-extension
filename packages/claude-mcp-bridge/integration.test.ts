@@ -161,6 +161,22 @@ describe("dual-era MCP integration", () => {
 		}
 	}, 15_000);
 
+	it("delivers a large tool argument to an actual stdio server", async () => {
+		const fixturePath = fileURLToPath(new URL("./test-fixtures/modern-stdio-server.mjs", import.meta.url));
+		const server = normalizeServer("LargeStdio", { command: process.execPath, args: [fixturePath] });
+		if (!server) throw new Error("Failed to normalize modern stdio fixture");
+		const connection = new McpConnection(server);
+		const message = "한글 😀 ".repeat(12_000);
+
+		try {
+			await connection.connect({ timeoutMs: 10_000 });
+			const result = await connection.callTool("echo", { message }, { timeoutMs: 10_000 });
+			expect(result).toMatchObject({ content: [{ type: "text", text: `modern:${message}` }] });
+		} finally {
+			await connection.dispose();
+		}
+	}, 15_000);
+
 	it("reaps the actual stdio probe process when disposed during negotiation", async () => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-mcp-probe-dispose-"));
 		const pidPath = path.join(tempDir, "probe-pids.txt");

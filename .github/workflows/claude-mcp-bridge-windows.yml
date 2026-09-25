@@ -1,0 +1,25 @@
+name: Claude MCP bridge Windows stdio
+
+on:
+  push:
+    branches: [fix/issue-5-windows]
+  pull_request:
+    paths:
+      - "packages/claude-mcp-bridge/**"
+      - ".github/workflows/claude-mcp-bridge-windows.yml"
+
+jobs:
+  large-stdio-request:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --lockfile=false --ignore-scripts
+      - run: pnpm exec vitest run packages/claude-mcp-bridge/integration.test.ts -t "delivers a large tool argument"
