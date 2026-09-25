@@ -240,7 +240,12 @@ export class JobManager {
 		if (this.shuttingDown) return { ok: false, error: "bash_async is shutting down and cannot accept new jobs." };
 		if (input.acceptanceSignal?.aborted)
 			return { ok: false, error: "bash_async start was cancelled before job acceptance." };
+		const provider = this.options.provider;
+		const sessionId = input.context.sessionManager.getSessionId();
+		if (provider) provider.bind(sessionId);
 		const cwd = await this.cwdValidator(input.cwd, input.context.cwd);
+		if (input.context.sessionManager.getSessionId() !== sessionId || (provider?.supported && !provider.accepting))
+			return { ok: false, error: "bash_async session changed before job acceptance." };
 		if (!cwd.ok) return cwd;
 		if (input.acceptanceSignal?.aborted)
 			return { ok: false, error: "bash_async start was cancelled before job acceptance." };
@@ -251,11 +256,7 @@ export class JobManager {
 
 		const environment = snapshotEnvironment(input.context);
 		const id = randomUUID();
-		const provider = this.options.provider;
-		if (provider) {
-			provider.bind(input.context.sessionManager.getSessionId());
-			await provider.whenDiscovered();
-		}
+		if (provider) await provider.whenDiscovered();
 		if (provider?.supported) {
 			try {
 				await provider.reserve(

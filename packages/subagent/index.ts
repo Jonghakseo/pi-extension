@@ -119,18 +119,23 @@ export default function (pi: ExtensionAPI) {
 	}, 0);
 
 	let hangCheckTimer: ReturnType<typeof setInterval> | undefined;
+	let sessionGeneration = 0;
 
 	pi.on("session_start", (_event, ctx) => {
+		const generation = ++sessionGeneration;
+		const sessionId = ctx.sessionManager.getSessionId();
 		// Fence tool admission synchronously, before lazy lifecycle work can yield.
 		try {
-			if (pi.events) asyncTasks.bind(ctx.sessionManager.getSessionId());
+			if (pi.events) asyncTasks.bind(sessionId);
 		} catch (error) {
 			process.stderr.write(`[subagent] session binding failed: ${error instanceof Error ? error.message : error}\n`);
 			return;
 		}
 		enqueue(async (c) => {
-			c.store.disposed = false;
+			if (generation !== sessionGeneration) return;
 			if (pi.events) await asyncTasks.provider.whenDiscovered();
+			if (generation !== sessionGeneration || ctx.sessionManager.getSessionId() !== sessionId) return;
+			c.store.disposed = false;
 			c.commands.handleSessionStart(asyncTasks.wrap(pi), c.store, ctx as unknown as ExtensionContext);
 			c.escalation.maybeRegisterAskMaster(pi, ctx);
 		});
@@ -142,6 +147,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async (event) => {
+		++sessionGeneration;
 		asyncTasks.shutdown();
 		if (hangCheckTimer) {
 			clearInterval(hangCheckTimer);

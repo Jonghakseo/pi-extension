@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { SubagentAsyncTasks } from "./async-task-lifecycle.js";
 import { handleSessionStart, registerAll } from "./commands.js";
 import { STALE_PENDING_COMPLETION_MS } from "./constants.js";
+import { consumePendingGroupCompletionsForSession, upsertPendingGroupCompletion } from "./group-pending.js";
 import extension from "./index.js";
 import { createStore } from "./store.js";
 import { createSubagentToolExecute } from "./tool-execute.js";
@@ -180,6 +181,50 @@ function setup() {
 }
 
 describe("hosted subagent production execution", () => {
+	it("restores only the latest session when the first lifecycle is still queued", async () => {
+		const { host, pi, context } = setup();
+		lifecycle.shutdown();
+		const events = new Map<string, any>();
+		pi.on.mockImplementation((name: string, callback: any) => events.set(name, callback));
+		let session = "origin";
+		const ctx = {
+			...context,
+			sessionManager: {
+				getSessionId: () => session,
+				getSessionFile: () => join(directory, `${session}.jsonl`),
+				getEntries: () => [],
+			},
+		};
+		for (const name of ["origin", "other"])
+			upsertPendingGroupCompletion({
+				scope: "batch",
+				groupId: name,
+				originSessionFile: join(directory, `${name}.jsonl`),
+				runIds: [],
+				pendingCompletion: {
+					createdAt: Date.now(),
+					message: { customType: "subagent", content: name, display: true, details: {} },
+					options: { deliverAs: "followUp", triggerTurn: true },
+				},
+			});
+		extension({ ...pi, registerShortcut: vi.fn() } as any);
+		try {
+			events.get("session_start")({}, ctx);
+			// The registered lifecycle has yielded to lazy loading, but no tool has run.
+			host.reply({ type: "snapshot-request" });
+			expect(host.frames.filter((f) => f.type === "provider-ready").at(-1)).toMatchObject({ snapshotReady: true });
+			expect(host.frames.filter((f) => f.type === "snapshot").at(-1).detail).toMatchObject({ tasks: [], tickets: [] });
+			expect(spawn).not.toHaveBeenCalled();
+			session = "other";
+			events.get("session_start")({}, ctx);
+			await events.get("before_agent_start")({ prompt: "test", systemPrompt: "" }, ctx);
+			expect(pi.sendMessage.mock.calls.map((call) => call[0].content)).toEqual(["other"]);
+			expect(consumePendingGroupCompletionsForSession(join(directory, "origin.jsonl"))).toHaveLength(1);
+		} finally {
+			await events.get("session_shutdown")({ reason: "exit" });
+		}
+	});
+
 	it("rejects tool and slash starts after a failed session switch without losing origin completion", async () => {
 		const { host, pi, context } = setup();
 		lifecycle.shutdown();
@@ -215,9 +260,23 @@ describe("hosted subagent production execution", () => {
 			await vi.advanceTimersByTimeAsync(1001);
 			expect(spawn).toHaveBeenCalledOnce();
 			const count = host.frames.filter((f) => f.type === "task-register").length;
+			// Queue an origin resume, then reject a foreign switch before it drains.
+			events.get("session_start")({}, ctx);
+			upsertPendingGroupCompletion({
+				scope: "batch",
+				groupId: "foreign-pending",
+				originSessionFile: join(directory, "other.jsonl"),
+				runIds: [],
+				pendingCompletion: {
+					createdAt: Date.now(),
+					message: { customType: "subagent", content: "foreign completion", display: true, details: {} },
+					options: { deliverAs: "followUp", triggerTurn: true },
+				},
+			});
 			session = "other";
 			events.get("session_start")({}, ctx);
 			await events.get("before_agent_start")({ prompt: "test", systemPrompt: "" }, ctx);
+			expect(consumePendingGroupCompletionsForSession(join(directory, "other.jsonl"))).toHaveLength(1);
 			await expect(
 				execute("wrong", { command: "subagent run worker -- wrong owner" }, undefined, undefined, ctx),
 			).rejects.toThrow();

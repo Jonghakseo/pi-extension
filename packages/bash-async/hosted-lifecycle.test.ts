@@ -32,7 +32,7 @@ afterEach(async () => {
 	vi.useRealTimers();
 	await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 });
 });
-function setup() {
+function setup(validateCwd = async () => ({ ok: true as const, cwd: directory })) {
 	const frames: any[] = [];
 	const listeners = new Set<(frame: any) => void>();
 	let owner: any;
@@ -132,7 +132,7 @@ function setup() {
 		notifications,
 		logsDirectory: directory,
 		maxConcurrency: 1,
-		validateCwd: async () => ({ ok: true, cwd: directory }),
+		validateCwd,
 	});
 	const context = {
 		cwd: directory,
@@ -157,6 +157,37 @@ function setup() {
 }
 
 describe("hosted bash manager lifecycle", () => {
+	it("rejects an unaccepted start paused in cwd validation after a failed foreign switch", async () => {
+		let release!: () => void;
+		let validations = 0;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const { start, frames, execute, completions, send, detail } = setup(async () => {
+			if (++validations === 2) await gate;
+			return { ok: true, cwd: directory };
+		});
+		expect((await start()).ok).toBe(true);
+		const count = frames.filter((frame) => frame.type === "task-register").length;
+		const stale = start();
+		expect(() => provider.bind("foreign")).toThrow();
+		release();
+		expect((await stale).ok).toBe(false);
+		expect(frames.filter((frame) => frame.type === "task-register")).toHaveLength(count);
+		completions[0]({ exitCode: 0 });
+		await vi.advanceTimersByTimeAsync(500);
+		expect(execute).toHaveBeenCalledOnce();
+		expect(send).not.toHaveBeenCalled();
+		expect(detail()).toMatchObject({
+			tasks: [{ piSessionId: "pi-session", execution: "succeeded", presence: "settled" }],
+			tickets: [{ state: "pending" }],
+		});
+		provider.bind("pi-session");
+		expect((await start()).ok).toBe(true);
+		completions[1]({ exitCode: 0 });
+		await vi.advanceTimersByTimeAsync(500);
+	});
+
 	it("does not enter the manager queue until the grant arrives", async () => {
 		const { manual, start, manager, frames, approve, execute, completions } = setup();
 		manual();

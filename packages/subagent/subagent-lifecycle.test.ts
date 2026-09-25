@@ -78,7 +78,7 @@ describe("subagent extension lifecycle", () => {
 				notify: vi.fn(() => readinessOrder.push("command-ran")),
 				setWidget: vi.fn(),
 			},
-			sessionManager: { getSessionFile: () => "/tmp/main.jsonl", getEntries: () => [] },
+			sessionManager: { getSessionId: () => "main", getSessionFile: () => "/tmp/main.jsonl", getEntries: () => [] },
 		};
 		for (const handler of handlers.get("session_start") ?? []) {
 			await handler({ type: "session_start", reason: "startup" }, ctx);
