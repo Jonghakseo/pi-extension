@@ -1,0 +1,13 @@
+--- a/dist/core/tools/bash.js
++++ b/dist/core/tools/bash.js
+@@ -45,6 +45,10 @@
+             }
+             catch {
+                 throw new Error(`Working directory does not exist: ${cwd}\nCannot execute ${shellName} commands.`);
++            }
++            // Abort may arrive while the cwd access check is pending.
++            if (signal?.aborted) {
++                throw new Error("aborted");
+             }
+             const commandFromStdin = shellConfig.commandTransport === "stdin";
+             const child = spawn(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, command], {
