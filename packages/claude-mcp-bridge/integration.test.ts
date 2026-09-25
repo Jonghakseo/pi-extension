@@ -161,23 +161,29 @@ describe("dual-era MCP integration", () => {
 		}
 	}, 15_000);
 
-	it("delivers a large tool argument to an actual stdio server", async () => {
-		const fixturePath = fileURLToPath(new URL("./test-fixtures/modern-stdio-server.mjs", import.meta.url));
-		const server = normalizeServer("LargeStdio", { command: process.execPath, args: [fixturePath] });
-		if (!server) throw new Error("Failed to normalize modern stdio fixture");
-		const connection = new McpConnection(server);
+	it("delivers large tool arguments to modern and legacy stdio servers", async () => {
 		const messages = ["x".repeat(60_000), "한글 😀 ".repeat(12_000)];
+		for (const era of ["modern", "legacy"]) {
+			const fixturePath = fileURLToPath(new URL(`./test-fixtures/${era}-stdio-server.mjs`, import.meta.url));
+			const server = normalizeServer("LargeStdio", {
+				command: process.execPath,
+				args: [fixturePath],
+				...(era === "legacy" ? { env: { MOCK_MCP_DELAY_MS: "0" } } : {}),
+			});
+			if (!server) throw new Error(`Failed to normalize ${era} stdio fixture`);
+			const connection = new McpConnection(server);
 
-		try {
-			await connection.connect({ timeoutMs: 10_000 });
-			for (const message of messages) {
-				const result = await connection.callTool("echo", { message }, { timeoutMs: 10_000 });
-				expect(result).toMatchObject({ content: [{ type: "text", text: `modern:${message}` }] });
+			try {
+				await connection.connect({ timeoutMs: 10_000 });
+				for (const message of messages) {
+					const result = await connection.callTool("echo", { message }, { timeoutMs: 10_000 });
+					expect(result).toMatchObject({ content: [{ type: "text", text: `${era}:${message}` }] });
+				}
+			} finally {
+				await connection.dispose();
 			}
-		} finally {
-			await connection.dispose();
 		}
-	}, 15_000);
+	}, 20_000);
 
 	it("reaps the actual stdio probe process when disposed during negotiation", async () => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-mcp-probe-dispose-"));

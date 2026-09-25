@@ -27,4 +27,4 @@ jobs:
       - run: pnpm install --lockfile=false --ignore-scripts
       - run: pnpm --filter @ryan_nookpi/pi-extension-claude-mcp-bridge add @modelcontextprotocol/client@2.0.0 --lockfile=false --ignore-scripts
       - run: node -p "require('./packages/claude-mcp-bridge/node_modules/@modelcontextprotocol/client/package.json').version"
-      - run: pnpm exec vitest run packages/claude-mcp-bridge/integration.test.ts -t "delivers a large tool argument"
+      - run: pnpm exec vitest run packages/claude-mcp-bridge/integration.test.ts -t "delivers large tool arguments"
