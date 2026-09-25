@@ -255,30 +255,9 @@ function executeRecallIndex(entries: SearchResult[], filters: { scope?: MemorySc
 	});
 }
 
-function normalizeForgetTitle(title: string) {
-	const normalizedTitle = title?.trim();
-	return normalizedTitle ? normalizedTitle : null;
-}
-
-async function executeForgetTopic(
-	topic: string,
-	title: string,
-	scope: MemoryScope | undefined,
-	entries: SearchResult[],
-	remove: (entry: SearchResult) => Promise<void>,
-) {
-	let normalizedTopic: string;
-	try {
-		normalizedTopic = normalizeTopicInput(topic);
-	} catch {
-		throw new Error(`Invalid topic: ${topic}`);
-	}
-	const matches = entries.filter(
-		(entry) => entry.topic === normalizedTopic && entry.title === title && (!scope || entry.scope === scope),
-	);
-	if (matches.length === 0) throw new Error(`Memory not found: ${normalizedTopic} / "${title}"`);
-	if (matches.length > 1) throw new Error(`Ambiguous memory: specify scope for ${normalizedTopic} / "${title}"`);
-	const target = matches[0];
+async function executeForgetById(id: string, entries: SearchResult[], remove: (entry: SearchResult) => Promise<void>) {
+	const target = findMemoryInEntries(entries, id);
+	if (!target) throw new Error(`Memory not found by ID: ${id}`);
 	await remove(target);
 	return buildTextResult(`Deleted from ${target.scope}: ${target.topic} / "${target.title}"`, {
 		kind: "forget",
@@ -287,36 +266,6 @@ async function executeForgetTopic(
 		topic: target.topic,
 		title: target.title,
 	});
-}
-
-async function executeForgetByTitle(
-	title: string,
-	scope: MemoryScope | undefined,
-	entries: SearchResult[],
-	remove: (entry: SearchResult) => Promise<void>,
-) {
-	let matches = entries.filter((entry) => entry.title === title && (!scope || entry.scope === scope));
-	let caseInsensitive = false;
-	if (matches.length === 0) {
-		const lower = title.toLowerCase();
-		matches = entries.filter((entry) => entry.title.toLowerCase() === lower && (!scope || entry.scope === scope));
-		caseInsensitive = matches.length > 0;
-	}
-	if (matches.length === 0) throw new Error(`Memory not found by title: "${title}"`);
-	if (matches.length > 1)
-		throw new Error(`Ambiguous title: "${title}" matches ${matches.length} memories. Specify topic and scope.`);
-	const target = matches[0];
-	await remove(target);
-	return buildTextResult(
-		`Deleted from ${target.scope}: ${target.topic} / "${target.title}"${caseInsensitive ? ` (matched title: "${target.title}")` : ""}`,
-		{
-			kind: "forget",
-			scope: target.scope,
-			tier: target.tier,
-			topic: target.topic,
-			title: target.title,
-		},
-	);
 }
 
 // ── Extension Entry Point ────────────────────────────────────────────────────
@@ -390,6 +339,9 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 			}
 
 			if (scope === "agent") {
+				for (const existing of loadAgentMemories(ctx)) {
+					if (existing.topic === topicSlug && existing.title === displayTitle) removeAgentMemory(pi, ctx, existing);
+				}
 				saveAgentMemory(pi, ctx, { topic: topicSlug, title: displayTitle, content, tier });
 			} else {
 				await saveMemory(
@@ -660,35 +612,25 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 		},
 	});
 
-	// ── P2-2: forget Tool (scope ambiguity check) ─────────────────────────
+	// ── forget Tool ──────────────────────────────────────────────────────────
 
 	pi.registerTool({
 		name: "forget",
 		label: "Forget",
 		description:
-			"Remove a memory from active recall. User/project entries are deleted from storage; " +
-			"agent entries are logically deleted and remain in session history. " +
-			"Use when the user says '잊어줘', 'forget this', or a stored rule is no longer valid. " +
-			"Provide title and optional topic/scope; if topic is omitted, the title must resolve uniquely.",
+			"Remove a memory from active recall by its ID from recall({ query }). " +
+			"User/project entries are deleted from storage; agent entries are logically deleted and remain in session history. " +
+			"Use when the user says '잊어줘', 'forget this', or a stored rule is no longer valid.",
 		parameters: ForgetParams,
 		renderCall: renderForgetCall,
 		renderResult: renderForgetResult,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			try {
-				const { topic, title, scope } = params as { topic?: string; title: string; scope?: MemoryScope };
+				const { id } = params as { id: string };
+				if (!id?.trim()) throw new Error("forget requires a non-empty ID from recall.");
 				currentProjectId = resolveCurrentProjectId(ctx.cwd);
-
-				throwIfProjectScopeInvalid(currentProjectId, scope, "forget");
 				const entries = await collectDisplayEntries(currentProjectId, ctx);
-				const remove = (entry: SearchResult) => removeStoredMemory(pi, ctx, entry);
-
-				const normalizedTitle = normalizeForgetTitle(title);
-				if (!normalizedTitle) {
-					throw new Error("forget requires non-empty title.");
-				}
-
-				if (topic) return await executeForgetTopic(topic, normalizedTitle, scope, entries, remove);
-				return await executeForgetByTitle(normalizedTitle, scope, entries, remove);
+				return await executeForgetById(id.trim(), entries, (entry) => removeStoredMemory(pi, ctx, entry));
 			} catch (err: unknown) {
 				throw new Error(`Forget failed: ${err instanceof Error ? err.message : "unknown"}`);
 			}
@@ -785,6 +727,6 @@ async function removeStoredMemory(pi: ExtensionAPI, ctx: ExtensionContext, entry
 		removeAgentMemory(pi, ctx, entry);
 		return;
 	}
-	const removed = await removeMemory(entry.scope, entry.projectId, entry.topic, entry.title);
+	const removed = await removeMemory(entry.scope, entry.projectId, entry.topic, entry.title, entry.content);
 	if (!removed) throw new Error(`Memory not found: ${entry.topic} / "${entry.title}"`);
 }

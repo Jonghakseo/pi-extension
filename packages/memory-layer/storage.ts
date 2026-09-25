@@ -459,6 +459,7 @@ export async function saveMemory(
 	title: string,
 	content: string,
 	tier: MemoryTier = "profile",
+	preserveLegacyDuplicates = false,
 ): Promise<void> {
 	const safeTopic = sanitizeTopic(topic);
 	const tFp = topicPath(scope, projectId, safeTopic);
@@ -468,7 +469,16 @@ export async function saveMemory(
 		const raw = await readOrEmpty(tFp);
 		const parsed = raw ? parseTopicFile(raw) : { heading: topicHeading, entries: [] };
 		const entries = applyTierMetadata(parsed.entries, await readTierMetadata(scope, projectId, safeTopic));
-		entries.push({ title, content, tier });
+		if (preserveLegacyDuplicates) {
+			entries.push({ title, content, tier });
+		} else {
+			const matches = entries.flatMap((entry, index) => (entry.title === title ? [index] : []));
+			if (matches.length > 1) {
+				throw new Error(`Duplicate memory title in ${scope}/${safeTopic}: "${title}". Resolve by ID before updating.`);
+			}
+			if (matches.length === 1) entries[matches[0]] = { title, content, tier };
+			else entries.push({ title, content, tier });
+		}
 		await atomicWrite(tFp, buildTopicFile(parsed.heading, entries));
 		await atomicWrite(tierMetadataPath(scope, projectId, safeTopic), `${JSON.stringify(buildTierMetadata(entries))}\n`);
 
@@ -484,6 +494,7 @@ export async function removeMemory(
 	projectId: string | undefined,
 	topic: string,
 	title: string,
+	content?: string,
 ): Promise<boolean> {
 	const safeTopic = sanitizeTopic(topic);
 	const tFp = topicPath(scope, projectId, safeTopic);
@@ -495,7 +506,9 @@ export async function removeMemory(
 
 		const parsed = parseTopicFile(raw);
 		const entries = applyTierMetadata(parsed.entries, await readTierMetadata(scope, projectId, safeTopic));
-		const idx = entries.findIndex((entry) => entry.title === title);
+		const idx = entries.findIndex(
+			(entry) => entry.title === title && (content === undefined || entry.content === content),
+		);
 		if (idx === -1) return false;
 
 		entries.splice(idx, 1);
@@ -771,7 +784,8 @@ async function migrateLegacyRecords(target: MigrationTarget, records: LegacyReco
 
 		for (let i = 0; i < needed; i++) {
 			try {
-				await saveMemory(target.scope, target.projectId, "general", "General", title, content);
+				// Preserve distinct legacy records; migration must not discard historical content.
+				await saveMemory(target.scope, target.projectId, "general", "General", title, content, "profile", true);
 				fileMigrated++;
 			} catch (error) {
 				fileAllSucceeded = false;

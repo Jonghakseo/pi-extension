@@ -10,9 +10,9 @@ Long-term and session memory for Pi. Remember, recall, forget, and browse memori
   - `project`: persistent repository-specific decisions, tooling, and configuration.
 - **Tiers**: `profile`, `log`, and `note`. Recall and prompt injection prioritize them in that order, with query relevance deciding order within a tier. New and legacy memories default to `profile`. Tiers do not expire or delete memories automatically.
 - **Prompt injection**: each turn receives a bounded, tier-ordered index of accessible memory titles rather than full memory bodies. Use `recall` to search the index or retrieve full content when the index is truncated.
-- **remember**: save a fact, rule, or lesson with a required scope, optional tier, and optional topic. The tier defaults to `profile`.
+- **remember**: save a fact, rule, or lesson with a required scope, optional tier, and optional topic. The tier defaults to `profile`. Saving the same title in the same scope and topic updates that memory. Existing ambiguous duplicates must be resolved first.
 - **recall**: search by query, retrieve by ID, or list entries. Query results return at most the top 20 matches. `scope` and `tier` filters apply to every mode, including ID lookup.
-- **forget**: remove a memory from active recall. User/project entries are deleted from their topic files; agent entries are logically deleted and remain in session history.
+- **forget**: remove a memory from active recall using the required `id` returned by `recall({ query })`. Titles, topics, and scopes are not accepted as inputs. User/project entries are deleted from their topic files; agent entries are logically deleted and remain in session history.
 - **memory_list**: list memories with optional scope and tier filters.
 - **`/remember`**: interactive save. Usage: `/remember [agent|user|project] [profile|log|note] <content>`. Omitted options default to `project` and `profile`.
 - **`/memory`**: browse, search, filter, copy, and delete memories. Use `--scope agent` and `--tier note` with ordinary search text, or cycle scope with Tab and tier with Shift+Tab in the overlay. Press Ctrl+L to clear scope and tier filters without clearing the search text.

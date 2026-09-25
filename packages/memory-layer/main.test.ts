@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { Value } from "@sinclair/typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testHome = vi.hoisted(() => `${process.env.TMPDIR ?? "/tmp"}/memory-layer-functional-${process.pid}`);
@@ -12,7 +13,9 @@ vi.mock("node:os", async (importOriginal) => {
 });
 
 import { registerMemoryLayer } from "./main.ts";
-import { memoryEntryId } from "./storage.ts";
+import { resolveProjectId } from "./project-id.ts";
+import { listPersistentMemories, loadTopicEntries, memoryEntryId, readMemoryMd } from "./storage.ts";
+import { ForgetParams } from "./types.ts";
 
 type RegisteredTool = {
 	execute: (
@@ -69,6 +72,53 @@ afterEach(async () => {
 });
 
 describe("registered memory tools", () => {
+	it("accepts only a memory ID for forget", () => {
+		expect(Value.Check(ForgetParams, { id: "abc123" })).toBe(true);
+		expect(Value.Check(ForgetParams, { title: "Shared title" })).toBe(false);
+		expect(Value.Check(ForgetParams, { id: "abc123", title: "Shared title" })).toBe(false);
+	});
+
+	it("updates a persistent memory with the same title instead of duplicating it", async () => {
+		const harness = createHarness(SessionManager.create(cwd, sessionDir));
+		for (const [content, tier] of [
+			["old rule", "profile"],
+			["new rule", "log"],
+		] as const) {
+			await harness.execute("remember", { scope: "project", topic: "general", title: "Shared title", content, tier });
+		}
+
+		const projectId = resolveProjectId(cwd).id;
+		const matches = (await listPersistentMemories(projectId)).filter((entry) => entry.title === "Shared title");
+		expect(matches).toMatchObject([{ scope: "project", topic: "general", content: "new rule", tier: "log" }]);
+		expect(await readMemoryMd("project", projectId)).toContain("- Shared title");
+		await harness.execute("forget", {
+			id: memoryEntryId("project", projectId, "general", "Shared title", "new rule"),
+		});
+		expect((await listPersistentMemories(projectId)).filter((entry) => entry.title === "Shared title")).toEqual([]);
+	});
+
+	it("removes only the selected duplicate by ID", async () => {
+		const harness = createHarness(SessionManager.create(cwd, sessionDir));
+		const topicPath = path.join(testHome, ".pi", "memory", "user", "general.md");
+		await fs.mkdir(path.dirname(topicPath), { recursive: true });
+		const marker = Buffer.from("Shared title").toString("base64");
+		await fs.writeFile(
+			topicPath,
+			`# General\n\n<!-- @entry: ${marker} -->\nold rule\n\n<!-- @entry: ${marker} -->\nnew rule\n`,
+			"utf8",
+		);
+		await expect(
+			harness.execute("remember", { scope: "user", topic: "general", title: "Shared title", content: "replacement" }),
+		).rejects.toThrow("Resolve by ID before updating");
+
+		const id = memoryEntryId("user", undefined, "general", "Shared title", "new rule");
+		await harness.execute("forget", { id });
+		expect(await loadTopicEntries("user", undefined, "general")).toEqual([
+			{ title: "Shared title", content: "old rule", tier: "profile" },
+		]);
+		expect(await readMemoryMd("user")).toContain("- Shared title");
+	});
+
 	it("round-trips tiers, preserves legacy IDs, filters every recall mode, and ranks only matching memories", async () => {
 		const session = SessionManager.create(cwd, sessionDir);
 		const harness = createHarness(session);
@@ -148,6 +198,19 @@ describe("registered memory tools", () => {
 		expect(harness.ctx.ui.notify).not.toHaveBeenCalledWith("[user/profile] rules/Weak profile match", "info");
 	});
 
+	it("replaces agent memories with the same title in the current session", async () => {
+		const session = SessionManager.create(cwd, sessionDir);
+		const harness = createHarness(session);
+		await harness.execute("remember", { scope: "agent", title: "Shared title", content: "old rule" });
+		await harness.execute("remember", { scope: "agent", title: "Shared title", content: "new rule" });
+		const oldId = memoryEntryId("agent", session.getSessionId(), "general", "Shared title", "old rule");
+		const newId = memoryEntryId("agent", session.getSessionId(), "general", "Shared title", "new rule");
+		await expect(harness.execute("recall", { id: oldId })).rejects.toThrow("Memory not found");
+		expect(resultText(await harness.execute("recall", { id: newId }))).toContain("new rule");
+		await harness.execute("forget", { id: newId });
+		expect(resultText(await harness.execute("recall", { scope: "agent" }))).toBe("No memories stored.");
+	});
+
 	it("persists agent memories in a session, excludes other sessions and forks, and replays tombstones", async () => {
 		const session = SessionManager.create(cwd, sessionDir);
 		const harness = createHarness(session);
@@ -187,7 +250,15 @@ describe("registered memory tools", () => {
 		const fork = createHarness(SessionManager.forkFrom(sessionFile as string, cwd, sessionDir));
 		expect(resultText(await fork.execute("recall", { scope: "agent" }))).toBe("No memories stored.");
 
-		await reopened.execute("forget", { scope: "agent", title: "Temporary session rule" });
+		await reopened.execute("forget", {
+			id: memoryEntryId(
+				"agent",
+				reopened.ctx.sessionManager.getSessionId(),
+				"current-task",
+				"Temporary session rule",
+				"Only the original session can recall this.",
+			),
+		});
 		const reopenedAfterForget = createHarness(SessionManager.open(sessionFile as string, sessionDir));
 		expect(resultText(await reopenedAfterForget.execute("recall", { scope: "agent" }))).toBe("No memories stored.");
 	});

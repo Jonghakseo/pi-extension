@@ -89,25 +89,22 @@ describe("memory-layer compact tool rendering", () => {
 		);
 	});
 
-	it("keeps the resolved forget target visible when scope or topic was inferred", () => {
+	it("renders the ID-only forget call and resolved target", () => {
 		const details = { kind: "forget", scope: "user", topic: "general", title: "배포 규칙" } as const;
 		const fullResult = 'Deleted from user: general / "배포 규칙"';
 
-		expect(render(renderForgetCall({ title: "배포 규칙" }, theme as never, { expanded: false }))).toBe(
-			'forget · auto · "배포 규칙"',
-		);
-		expect(
-			render(renderForgetResult(result(fullResult, details), { expanded: false }, theme as never, { args: {} })),
-		).toBe("✓ deleted · user/general");
+		expect(render(renderForgetCall({ id: "abc123" }, theme as never, { expanded: false }))).toBe("forget · ID abc123");
 		expect(
 			render(
 				renderForgetResult(result(fullResult, details), { expanded: false }, theme as never, {
-					args: { scope: "user", topic: "general" },
+					args: { id: "abc123" },
 				}),
 			),
-		).toBe("✓ deleted");
+		).toBe("✓ deleted · user/general");
 		expect(
-			render(renderForgetResult(result(fullResult, details), { expanded: true }, theme as never, { args: {} })),
+			render(
+				renderForgetResult(result(fullResult, details), { expanded: true }, theme as never, { args: { id: "abc123" } }),
+			),
 		).toBe(fullResult);
 	});
 

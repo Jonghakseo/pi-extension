@@ -156,28 +156,20 @@ export function renderRecallResult(result: ToolRenderResult, options: ToolResult
 
 export function renderForgetCall(args: ToolRenderArgs, theme: RenderTheme, context: { expanded: boolean }): Text {
 	if (context.expanded) return renderExpandedFallback("forget", theme);
-	const scope = stringArg(args, "scope");
-	const topic = stringArg(args, "topic");
-	const title = stringArg(args, "title") ?? "(empty)";
-	return new Text(
-		`${renderTitle("forget", theme)} · ${memoryLocation(scope, topic)} · "${preview(title, CALL_PREVIEW_WIDTH)}"`,
-		0,
-		0,
-	);
+	const id = stringArg(args, "id") ?? "(empty)";
+	return new Text(`${renderTitle("forget", theme)} · ID ${id}`, 0, 0);
 }
 
 export function renderForgetResult(
 	result: ToolRenderResult,
 	options: ToolResultOptions,
 	theme: RenderTheme,
-	context: ToolRenderContext,
+	_context: ToolRenderContext,
 ): Text {
 	if (options.expanded) return renderOutput(result, theme);
 	const details = result.details as MemoryToolDetails | undefined;
 	if (details?.kind !== "forget") return renderOutput(result, theme);
-	const hasExactTarget = Boolean(stringArg(context.args, "scope") && stringArg(context.args, "topic"));
-	const target = hasExactTarget ? "" : ` · ${details.scope}/${details.topic}`;
-	return renderSummary(`✓ deleted${target}`, theme);
+	return renderSummary(`✓ deleted · ${details.scope}/${details.topic}`, theme);
 }
 
 export function renderMemoryListCall(args: ToolRenderArgs, theme: RenderTheme, context: { expanded: boolean }): Text {

@@ -51,21 +51,14 @@ export const RecallParams = Type.Object({
 
 export const ForgetParams = Type.Object(
 	{
-		topic: Type.Optional(
-			Type.String({
-				description:
-					"Topic filename (e.g. 'coding-rules' or 'coding-rules.md'). Optional when title uniquely identifies a single memory.",
-			}),
-		),
-		title: Type.String({
-			description:
-				"Title of the memory entry to remove. Exact match is preferred; if topic is omitted, it must resolve to a single memory.",
+		id: Type.String({
+			description: "Memory entry ID from recall({ query }); identifies exactly which memory to remove.",
 		}),
-		scope: Type.Optional(MemoryScopeSchema),
 	},
 	{
+		additionalProperties: false,
 		description:
-			"Remove a memory from active recall. User/project entries are deleted from storage; agent entries are logically deleted and remain in session history.",
+			"Remove a memory from active recall by ID. User/project entries are deleted from storage; agent entries are logically deleted and remain in session history.",
 	},
 );
 
