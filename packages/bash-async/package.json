@@ -20,6 +20,7 @@
 	],
 	"files": [
 		"index.ts",
+		"async-task-provider.ts",
 		"job-log.ts",
 		"job-manager.ts",
 		"notification-batcher.ts",

@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import type { Message } from "@earendil-works/pi-ai";
 import type { AgentConfig } from "./agents.js";
+import { currentResourceObserver, trackSubagentRunner } from "./async-task-lifecycle.js";
 import { buildClaudeArgs } from "./claude-args.js";
 import { createSidecarWriter } from "./claude-sidecar-writer.js";
 import {
@@ -43,6 +44,7 @@ import {
 } from "./utils/agent-utils.js";
 
 export interface RunSingleAgentSessionConfig {
+	asyncRunId?: number;
 	sessionFile?: string;
 	resumeSessionId?: string;
 	sidecarSessionFile?: string;
@@ -198,7 +200,21 @@ export function computeAgentAliasHints(agents: AgentConfig[]): string {
 
 // ─── Single Agent Execution ──────────────────────────────────────────────────
 
-export async function runSingleAgent(
+export async function runSingleAgent(...args: Parameters<typeof runSingleAgentUntracked>): Promise<SingleResult> {
+	const config = typeof args[8] === "object" ? args[8] : undefined;
+	return trackSubagentRunner(
+		args[2],
+		args[5],
+		(signal) => {
+			const invocation: Parameters<typeof runSingleAgentUntracked> = [...args];
+			invocation[5] = signal;
+			return runSingleAgentUntracked(...invocation);
+		},
+		config?.asyncRunId,
+	);
+}
+
+async function runSingleAgentUntracked(
 	defaultCwd: string,
 	agents: AgentConfig[],
 	agentName: string,
@@ -209,6 +225,7 @@ export async function runSingleAgent(
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
 	sessionConfig?: string | RunSingleAgentSessionConfig,
 ): Promise<SingleResult> {
+	currentResourceObserver()("settled");
 	const normalizedSessionConfig = normalizeRunSessionConfig(sessionConfig);
 	const sessionFile = normalizedSessionConfig.sessionFile;
 	const resumeSessionId = normalizedSessionConfig.resumeSessionId;
@@ -246,7 +263,10 @@ export async function runSingleAgent(
 
 	if (agent.runtime === "claude") {
 		if (resolveClaudeRuntimeMode(defaultCwd) === "sdk") {
+			// SDK query.close() has no process-exit acknowledgement.
+			currentResourceObserver()("unknown");
 			const { runClaudeAgentViaSdk } = await import("./claude-sdk-runner.js");
+			if (signal?.aborted) throw new Error("Subagent was aborted");
 			return runClaudeAgentViaSdk(
 				defaultCwd,
 				agent,
@@ -300,6 +320,7 @@ async function runClaudeAgent(
 	sidecarSessionFile?: string,
 	onDiagnostic?: RunnerDiagnosticSink,
 ): Promise<SingleResult> {
+	const observeResource = currentResourceObserver();
 	try {
 		validateClaudeRuntimeModel(agent.model);
 	} catch (err: any) {
@@ -392,7 +413,9 @@ async function runClaudeAgent(
 		});
 
 		const exitCode = await new Promise<number>((resolve) => {
+			if (signal?.aborted) throw new Error("Subagent was aborted");
 			const proc = spawn("claude", args, { cwd: defaultCwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+			observeResource("active");
 			let buffer = "";
 			let procExited = false;
 			let settled = false;
@@ -564,6 +587,7 @@ async function runClaudeAgent(
 			});
 
 			proc.on("exit", (code, terminationSignal) => {
+				observeResource("settled");
 				procExited = true;
 				lastExitCode = normalizeChildExitCode(code, terminationSignal, lastExitCode);
 				lastProcessSignal = terminationSignal;
@@ -583,6 +607,7 @@ async function runClaudeAgent(
 			});
 
 			proc.on("close", (code, terminationSignal) => {
+				observeResource("settled");
 				procExited = true;
 				lastProcessSignal = terminationSignal ?? lastProcessSignal;
 				diagnose({ event: "close", childPid: proc.pid, code, signal: terminationSignal });
@@ -593,6 +618,7 @@ async function runClaudeAgent(
 			});
 
 			proc.on("error", (error) => {
+				observeResource(proc.pid ? "unknown" : "settled");
 				procExited = true;
 				stderrBuf += `[runner] process error: ${error?.message || String(error)}\n`;
 				diagnose({
@@ -658,6 +684,7 @@ async function runPiAgent(
 	persistedSessionBaseOffset = 0,
 	onDiagnostic?: RunnerDiagnosticSink,
 ): Promise<SingleResult> {
+	const observeResource = currentResourceObserver();
 	const args: string[] = ["--mode", "json", "-p"];
 	if (sessionFile) args.push("--session", sessionFile);
 	else args.push("--no-session");
@@ -721,7 +748,9 @@ async function runPiAgent(
 		args.push(normalizeTaskForSubagentPrompt(task));
 
 		const exitCode = await new Promise<number>((resolve) => {
+			if (signal?.aborted) throw new Error("Subagent was aborted");
 			const proc = spawn("pi", args, { cwd: defaultCwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+			observeResource("active");
 			let buffer = "";
 			let procExited = false;
 			let settled = false;
@@ -1089,6 +1118,7 @@ async function runPiAgent(
 			});
 
 			proc.on("exit", (code, terminationSignal) => {
+				observeResource("settled");
 				procExited = true;
 				lastExitCode = normalizeChildExitCode(code, terminationSignal, lastExitCode);
 				lastProcessSignal = terminationSignal;
@@ -1105,6 +1135,7 @@ async function runPiAgent(
 			});
 
 			proc.on("close", (code, terminationSignal) => {
+				observeResource("settled");
 				procExited = true;
 				lastProcessSignal = terminationSignal ?? lastProcessSignal;
 				diagnose({ event: "close", childPid: proc.pid, code, signal: terminationSignal });
@@ -1113,6 +1144,7 @@ async function runPiAgent(
 			});
 
 			proc.on("error", (error) => {
+				observeResource(proc.pid ? "unknown" : "settled");
 				procExited = true;
 				appendStderrDiagnostic(currentResult, `process error: ${error?.message || String(error)}`);
 				diagnose({

@@ -18,6 +18,7 @@ import type { WidgetRenderCtx } from "./widget.js";
 export const COLLAPSED_ITEM_COUNT = 10;
 
 export interface SubagentStore {
+	asyncTasks?: import("./async-task-lifecycle.js").SubagentAsyncTasks;
 	/** True after session_shutdown; async callbacks must not use captured runtime APIs. */
 	disposed: boolean;
 	commandRuns: Map<number, CommandRunState>;

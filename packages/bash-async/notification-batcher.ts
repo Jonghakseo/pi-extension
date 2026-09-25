@@ -103,6 +103,10 @@ export class NotificationBatcher {
 		}
 	}
 
+	resume(): void {
+		this.suppressed = false;
+	}
+
 	suppress(): void {
 		this.suppressed = true;
 		if (this.timer) clearTimeout(this.timer);

@@ -39,6 +39,8 @@
 		"format.ts",
 		"group-pending.ts",
 		"index.ts",
+		"async-task-provider.ts",
+		"async-task-lifecycle.ts",
 		"lifecycle.ts",
 		"invocation-queue.ts",
 		"live-preview.ts",

@@ -1,5 +1,6 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { AsyncTaskProvider } from "./async-task-provider.js";
 import { JobManager } from "./job-manager.js";
 import { NotificationBatcher } from "./notification-batcher.js";
 import { PollGuard } from "./poll-guard.js";
@@ -85,16 +86,28 @@ export default function bashAsync(pi: ExtensionAPI): void {
 		}
 	};
 
+	const provider = new AsyncTaskProvider(pi.events, "bash-async", "0.2.1", {
+		cancel: async (id) => {
+			await manager.kill(id);
+		},
+		detail: (id) => manager.output(id, { lines: 100 })?.text,
+		close: () => {
+			notifications.suppress();
+			if (provider.supported) manager.closeAdmission();
+		},
+		reopen: () => {
+			notifications.resume();
+			manager.reopenAdmission();
+		},
+	});
+	pi.on("session_start", (_event, context) => provider.bind(context.sessionManager.getSessionId()));
 	const notifications = new NotificationBatcher({
 		send: (message, options) => {
-			try {
-				void Promise.resolve(pi.sendMessage(message, options)).catch(() => {});
-			} catch {
-				// Completion delivery is best-effort and must not disrupt finalization.
-			}
+			provider.deliver(message.details.jobIds, message, (annotated) => pi.sendMessage(annotated, options));
 		},
 	});
 	manager = new JobManager({
+		provider,
 		notifications,
 		onStateChange: () => syncRunningJobsWidget(),
 	});
@@ -137,6 +150,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 		pollGuard.clear();
 		clearRunningJobsWidget();
 		uiContext = undefined;
+		provider.shutdown();
 		manager.beginShutdown();
 		await manager.abortAndSettleAll();
 		manager.closeAllLogs();

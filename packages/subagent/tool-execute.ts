@@ -10,6 +10,13 @@ import * as fs from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createRunActivityRecorder } from "./activity.js";
 import { type AgentConfig, discoverAgents } from "./agents.js";
+import {
+	assertAsyncAdmission,
+	asyncInvocationDetails,
+	completeAsyncInvocation,
+	discardRemovedAsyncInvocation,
+	retainAsyncCompletion,
+} from "./async-task-lifecycle.js";
 import { parseSubagentToolCommand, SUBAGENT_CLI_HELP_TEXT } from "./cli.js";
 import {
 	DEFAULT_TURN_COUNT,
@@ -453,6 +460,7 @@ function buildRunStartMessage(runState: CommandRunState, status: "started" | "re
 			`\nContext: ${contextLabel} · turn ${runState.turnCount}`,
 		display: false,
 		details: {
+			...asyncInvocationDetails(),
 			runId: runState.id,
 			agent: runState.agent,
 			task: runState.task,
@@ -515,7 +523,8 @@ function buildRunCompletionMessage(finalized: FinalizedRun, options?: { display?
 	const { runState, result, rawOutput } = finalized;
 	const usage = result ? formatUsageStats(result.usage, result.model) : "";
 	const terminalLabel = getFinalizedRunLabel(finalized);
-	return {
+	completeAsyncInvocation(terminalLabel);
+	return retainAsyncCompletion({
 		customType: "subagent-tool" as const,
 		content:
 			`[subagent:${runState.agent}#${runState.id}] ${terminalLabel}` +
@@ -525,6 +534,7 @@ function buildRunCompletionMessage(finalized: FinalizedRun, options?: { display?
 			`\n\n${rawOutput}`,
 		display: options?.display ?? true,
 		details: {
+			...asyncInvocationDetails(),
 			runId: runState.id,
 			agent: runState.agent,
 			task: runState.task,
@@ -555,12 +565,13 @@ function buildRunCompletionMessage(finalized: FinalizedRun, options?: { display?
 			claudeSessionId: runState.claudeSessionId,
 			claudeProjectDir: runState.claudeProjectDir,
 		},
-	};
+	});
 }
 
 function buildEscalationMessage(runState: CommandRunState, escalationMessage: string, result: SingleResult) {
+	completeAsyncInvocation("completed");
 	const usage = formatUsageStats(result.usage, result.model);
-	return {
+	return retainAsyncCompletion({
 		customType: "subagent-tool" as const,
 		content:
 			`[subagent:${runState.agent}#${runState.id}] escalated` +
@@ -569,6 +580,7 @@ function buildEscalationMessage(runState: CommandRunState, escalationMessage: st
 			`\n\n[ESCALATION] ${escalationMessage}`,
 		display: true,
 		details: {
+			...asyncInvocationDetails(),
 			runId: runState.id,
 			agent: runState.agent,
 			task: runState.task,
@@ -592,7 +604,7 @@ function buildEscalationMessage(runState: CommandRunState, escalationMessage: st
 			claudeSessionId: runState.claudeSessionId,
 			claudeProjectDir: runState.claudeProjectDir,
 		},
-	};
+	});
 }
 
 function buildStrongWaitMessage(runId: number): string {
@@ -660,6 +672,7 @@ function formatBatchSummary(
 	runs: CommandRunState[],
 	terminalStatus: "completed" | "error" | "aborted",
 ): string {
+	completeAsyncInvocation(terminalStatus);
 	const statuses = runs.map((run) => getSubagentRunStatusLabel(run.status, run.errorClass));
 	const headerStatus = runs.map((run, index) => `#${run.id} ${statuses[index]}`).join(", ");
 	const outcomeCounts = formatOutcomeCounts(
@@ -680,6 +693,7 @@ function formatPipelineSummary(
 	stepResults: PipelineStepResult[],
 	terminalStatus: "completed" | "stopped" | "error" | "aborted",
 ): string {
+	completeAsyncInvocation(terminalStatus);
 	const outcomeCounts = formatOutcomeCounts(
 		stepResults.filter((step) => step.status === "error").length,
 		stepResults.filter((step) => step.status === "aborted").length,
@@ -817,6 +831,7 @@ function finalizeRunError(runState: CommandRunState, error: unknown): FinalizedR
 }
 
 export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore) {
+	pi = store.asyncTasks?.wrap(pi) ?? pi;
 	const execute = async (
 		_toolCallId: string,
 		params: Record<string, any>,
@@ -931,7 +946,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 		const hasChain = asyncAction === "chain";
 		const hasSingle = asyncAction === "run" || asyncAction === "continue";
 		const mode: LaunchMode = hasBatch ? "batch" : hasChain ? "chain" : "single";
-		const shouldRunAsync = isInteractiveTuiContext(ctx);
+		const shouldRunAsync = isInteractiveTuiContext(ctx) || store.asyncTasks?.provider.accepting === true;
 		const makeDetails = (
 			modeOverride: LaunchMode = mode,
 			results: SingleResult[] = [],
@@ -1389,6 +1404,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 		}
 
 		function registerRunLaunch(config: RunLaunchConfig): CommandRunState {
+			assertAsyncAdmission();
 			const initialDisplayTask = buildSubagentDisplayTaskFallback(config.taskForDisplay);
 			let runState: CommandRunState;
 			if (config.existingRunState) {
@@ -1523,6 +1539,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 								resumeSessionId: runState.claudeSessionId,
 								sidecarSessionFile: runState.sessionFile,
 								persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
+								...(store.asyncTasks?.provider.supported ? { asyncRunId: runState.id } : {}),
 								onDiagnostic: createRunDiagnosticSink(pi, runState),
 							},
 						);
@@ -1678,7 +1695,10 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 			void (async () => {
 				try {
 					const finalized = await launchRunInBackground(runState, taskForAgent);
-					if (runState.removed || store.disposed) return;
+					if (runState.removed || store.disposed) {
+						discardRemovedAsyncInvocation(finalized.rawOutput);
+						return;
+					}
 					updateCommandRunsWidget(store);
 
 					if (finalized.result?.exitCode === ESCALATION_EXIT_CODE) {
@@ -1709,7 +1729,10 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
 					);
 				} catch (error: unknown) {
-					if (runState.removed || store.disposed) return;
+					if (runState.removed || store.disposed) {
+						discardRemovedAsyncInvocation(String(error));
+						return;
+					}
 					const finalized = finalizeRunError(runState, error);
 					const terminalLabel = getFinalizedRunLabel(finalized);
 					const errorMessage = buildRunCompletionMessage(finalized);
@@ -1872,12 +1895,14 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 								content,
 								display: true,
 								details: {
+									...asyncInvocationDetails(),
 									batchId,
 									runIds: batch.runIds,
 									status: batchTerminalStatus === "completed" ? "done" : batchTerminalStatus,
 									runSummaries: orderedRuns.map((run) => buildRunAnalyticsSummary(run)),
 								},
 							};
+							retainAsyncCompletion(message);
 							retireFinishedGroup(store, snapshotBatchGroup(store, batch, batchTerminalStatus));
 							if (isInOriginSession(ctx, batch.originSessionFile)) {
 								pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
@@ -1923,12 +1948,14 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 								content: formatBatchSummary(batchId, orderedRuns, batchTerminalStatus),
 								display: true,
 								details: {
+									...asyncInvocationDetails(),
 									batchId,
 									runIds: batch.runIds,
 									status: batchTerminalStatus,
 									runSummaries: orderedRuns.map((run) => buildRunAnalyticsSummary(run)),
 								},
 							};
+							retainAsyncCompletion(message);
 							retireFinishedGroup(store, snapshotBatchGroup(store, batch, batchTerminalStatus));
 							if (isInOriginSession(ctx, batch.originSessionFile)) {
 								pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
@@ -2247,12 +2274,14 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 							content: formatPipelineSummary(pipelineId, pipeline.stepResults, terminalStatus),
 							display: true,
 							details: {
+								...asyncInvocationDetails(),
 								pipelineId,
 								stepRunIds: pipeline.stepRunIds,
 								status: terminalStatus === "completed" ? "done" : terminalStatus,
 								runSummaries: orderedRuns.map((run) => buildRunAnalyticsSummary(run)),
 							},
 						};
+						retainAsyncCompletion(message);
 						retireFinishedGroup(store, snapshotPipeline(pipeline, terminalStatus));
 						if (isInOriginSession(ctx, pipeline.originSessionFile)) {
 							pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
@@ -2301,5 +2330,20 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 		};
 	};
 
-	return execute;
+	return (...args: Parameters<typeof execute>) => {
+		const parsed = parseSubagentToolCommand(args[1].command, { knownRunIds: [...store.commandRuns.keys()] });
+		if (
+			parsed.type !== "params" ||
+			!["run", "continue", "batch", "chain"].includes(String(parsed.params.asyncAction ?? "run")) ||
+			!store.asyncTasks
+		)
+			return execute(...args);
+		return store.asyncTasks.invoke(
+			String(args[1].command).slice(0, 500),
+			args[0],
+			() => execute(...args),
+			false,
+			args[2],
+		);
+	};
 }

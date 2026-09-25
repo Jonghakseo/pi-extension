@@ -28,6 +28,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { SubagentAsyncTasks } from "./async-task-lifecycle.js";
 import { HANG_CHECK_INTERVAL_MS } from "./constants.js";
 import { SUBAGENT_COMMANDS, SUBAGENT_SHORTCUTS, type SubagentCommandName } from "./registration-manifest.js";
 
@@ -40,6 +41,7 @@ interface SubagentCore {
 }
 
 export default function (pi: ExtensionAPI) {
+	const asyncTasks = new SubagentAsyncTasks(pi);
 	let core: SubagentCore | null = null;
 	let corePromise: Promise<SubagentCore> | null = null;
 	/** Serializes session lifecycle work so events apply in dispatch order. */
@@ -54,6 +56,7 @@ export default function (pi: ExtensionAPI) {
 				import("./store.js"),
 			]);
 			const store = storeMod.createStore();
+			store.asyncTasks = asyncTasks;
 			const registrations = commands.registerAll(pi, store);
 			core = { store, commands, registrations, escalation, lifecycle };
 			return core;
@@ -118,9 +121,13 @@ export default function (pi: ExtensionAPI) {
 	let hangCheckTimer: ReturnType<typeof setInterval> | undefined;
 
 	pi.on("session_start", (_event, ctx) => {
-		enqueue((c) => {
+		enqueue(async (c) => {
 			c.store.disposed = false;
-			c.commands.handleSessionStart(pi, c.store, ctx as unknown as ExtensionContext);
+			if (pi.events) {
+				asyncTasks.bind(ctx.sessionManager.getSessionId());
+				await asyncTasks.provider.whenDiscovered();
+			}
+			c.commands.handleSessionStart(asyncTasks.wrap(pi), c.store, ctx as unknown as ExtensionContext);
 			c.escalation.maybeRegisterAskMaster(pi, ctx);
 		});
 		if (!hangCheckTimer) {
@@ -131,6 +138,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async (event) => {
+		asyncTasks.shutdown();
 		if (hangCheckTimer) {
 			clearInterval(hangCheckTimer);
 			hangCheckTimer = undefined;

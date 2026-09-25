@@ -8,6 +8,7 @@ import {
 	createLocalBashOperations,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import type { AsyncTaskProvider } from "./async-task-provider.js";
 import { JobLog } from "./job-log.js";
 import type { CompletedJob, NotificationBatcher } from "./notification-batcher.js";
 import { validateCwd } from "./tool-schema.js";
@@ -101,6 +102,7 @@ export interface ExecutionRequest {
 }
 
 export interface JobManagerOptions {
+	provider?: AsyncTaskProvider;
 	maxConcurrency?: number;
 	logsDirectory?: string;
 	notifications?: NotificationBatcher;
@@ -215,6 +217,7 @@ export class JobManager {
 	private logMaintenance = Promise.resolve();
 	private running = 0;
 	private shuttingDown = false;
+	private admissionClosed = false;
 
 	constructor(private readonly options: JobManagerOptions = {}) {
 		const configured = options.maxConcurrency ?? Number(process.env.PI_BASH_ASYNC_MAX_CONCURRENCY);
@@ -248,13 +251,44 @@ export class JobManager {
 
 		const environment = snapshotEnvironment(input.context);
 		const id = randomUUID();
+		const provider = this.options.provider;
+		if (provider) {
+			provider.bind(input.context.sessionManager.getSessionId());
+			await provider.whenDiscovered();
+		}
+		if (provider?.supported) {
+			try {
+				await provider.reserve(
+					{ taskId: id, title: titleFor(input.command, input.title), kind: "bash" },
+					input.acceptanceSignal,
+				);
+			} catch (error) {
+				return { ok: false, error: errorSummary(error) };
+			}
+			if (this.shuttingDown || input.acceptanceSignal?.aborted || !provider.canStart(id)) {
+				await provider.abandon(id);
+				return { ok: false, error: "bash_async admission closed before queue acceptance." };
+			}
+		}
+		// Approval introduces an await; capacity and shutdown must be checked again.
+		this.evictTerminalJobs();
+		if (this.shuttingDown || input.acceptanceSignal?.aborted || this.jobs.size >= MAX_RETAINED_JOBS) {
+			if (provider?.supported) await provider.abandon(id);
+			return { ok: false, error: "bash_async cannot accept this job after registration." };
+		}
 		const queuedAt = this.now();
 		const logPath = join(this.logsDirectory, safeSessionId(environment.PI_SESSION_ID), `${queuedAt}-${id}.log`);
 		let resolveSettlement = () => {};
 		const settled = new Promise<void>((resolve) => {
 			resolveSettlement = resolve;
 		});
-		const logWriter = this.createLog(logPath);
+		let logWriter: JobLog;
+		try {
+			logWriter = this.createLog(logPath);
+		} catch (error) {
+			if (provider?.supported) await provider.abandon(id);
+			return { ok: false, error: errorSummary(error) };
+		}
 		const job: ManagedJob = {
 			id,
 			status: "queued",
@@ -362,6 +396,22 @@ export class JobManager {
 		return this.get(jobId);
 	}
 
+	closeAdmission(): void {
+		this.admissionClosed = true;
+		for (const job of this.jobs.values()) {
+			if (isTerminalJobStatus(job.status)) continue;
+			job.requestedCause = "kill";
+			if (job.status === "queued") this.finalize(job, "kill");
+			else job.abortController.abort();
+		}
+	}
+
+	reopenAdmission(): void {
+		if (this.shuttingDown) return;
+		this.admissionClosed = false;
+		this.drain();
+	}
+
 	beginShutdown(): void {
 		if (this.shuttingDown) return;
 		this.shuttingDown = true;
@@ -392,11 +442,16 @@ export class JobManager {
 	}
 
 	private drain(): void {
-		while (!this.shuttingDown && this.running < this.maxConcurrency && this.queue.length > 0) {
+		while (!this.shuttingDown && !this.admissionClosed && this.running < this.maxConcurrency && this.queue.length > 0) {
 			const id = this.queue.shift();
 			if (!id) continue;
 			const job = this.jobs.get(id);
 			if (job?.status !== "queued") continue;
+			if (this.options.provider?.supported && !this.options.provider.start(id)) {
+				void this.options.provider.abandon(id);
+				this.finalize(job, "shutdown");
+				continue;
+			}
 			job.status = "running";
 			job.startedAt = this.now();
 			job.slotAcquired = true;
@@ -416,6 +471,7 @@ export class JobManager {
 			};
 			job.executionBridge = bridge;
 			job.execution = runExecution(executionJob, this.executeAdapter, bridge);
+			if (!job.finalized) this.options.provider?.resource(id, "active");
 			void job.execution.catch(() => {});
 		}
 	}
@@ -456,6 +512,15 @@ export class JobManager {
 			job.slotAcquired = false;
 			this.running--;
 		}
+		this.options.provider?.finish(
+			job.id,
+			job.status === "succeeded"
+				? "succeeded"
+				: job.status === "killed" || job.status === "shutdown"
+					? "cancelled"
+					: "failed",
+			job.settlementTimedOut ? "unknown" : "settled",
+		);
 		this.emitStateChange(job);
 		job.resolveSettlement();
 		this.detachExecution(job);
@@ -482,11 +547,20 @@ export class JobManager {
 			job.slotAcquired = false;
 			this.running--;
 		}
+		this.options.provider?.finish(
+			job.id,
+			job.status === "succeeded"
+				? "succeeded"
+				: job.status === "killed" || job.status === "shutdown"
+					? "cancelled"
+					: "failed",
+			job.settlementTimedOut ? "unknown" : "settled",
+		);
 		this.emitStateChange(job);
 		job.resolveSettlement();
 		this.clearSettlementTimer(job);
-		this.detachExecution(job);
-		this.jobs.delete(job.id);
+		this.detachExecution(job, () => this.options.provider?.resource(job.id, "settled"));
+		if (!this.options.provider?.supported) this.jobs.delete(job.id);
 	}
 
 	private appendJobData(job: ManagedJob, bridge: ExecutionBridge, data: Buffer): void {
@@ -529,9 +603,11 @@ export class JobManager {
 		if (logClosed) this.scheduleLogMaintenance(log.path);
 		const quarantinedSlot = job.slotAcquired;
 		job.slotAcquired = false;
+		this.options.provider?.finish(job.id, "failed", "unknown");
 		this.emitStateChange(job);
 		job.resolveSettlement();
 		this.detachExecution(job, () => {
+			this.options.provider?.resource(job.id, "settled");
 			if (!quarantinedSlot) return;
 			this.running--;
 			this.drain();
@@ -605,7 +681,7 @@ export class JobManager {
 		this.pruneExpiredJobs();
 		while (this.jobs.size >= MAX_RETAINED_JOBS) {
 			const terminal = [...this.jobs.values()]
-				.filter((job) => isTerminalJobStatus(job.status))
+				.filter((job) => isTerminalJobStatus(job.status) && !this.options.provider?.retained(job.id))
 				.sort((left, right) => (left.endedAt ?? left.queuedAt) - (right.endedAt ?? right.queuedAt))[0];
 			if (!terminal) return;
 			this.jobs.delete(terminal.id);
@@ -615,7 +691,8 @@ export class JobManager {
 	private pruneExpiredJobs(): void {
 		const deadline = this.now() - COMPLETED_JOB_TTL_MS;
 		for (const [id, job] of this.jobs) {
-			if (isTerminalJobStatus(job.status) && (job.endedAt ?? 0) < deadline) this.jobs.delete(id);
+			if (isTerminalJobStatus(job.status) && !this.options.provider?.retained(job.id) && (job.endedAt ?? 0) < deadline)
+				this.jobs.delete(id);
 		}
 	}
 
@@ -724,7 +801,9 @@ export class JobManager {
 
 	private activeLogPaths(): Set<string> {
 		return new Set(
-			[...this.jobs.values()].filter((job) => !isTerminalJobStatus(job.status)).map((job) => job.logWriter.path),
+			[...this.jobs.values()]
+				.filter((job) => !isTerminalJobStatus(job.status) || this.options.provider?.retained(job.id))
+				.map((job) => job.logWriter.path),
 		);
 	}
 

@@ -11,6 +11,12 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Container, Key, matchesKey, Spacer, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { createRunActivityRecorder } from "./activity.js";
 import { discoverAgents } from "./agents.js";
+import {
+	asyncInvocationDetails,
+	completeAsyncInvocation,
+	discardRemovedAsyncInvocation,
+	retainAsyncCompletion,
+} from "./async-task-lifecycle.js";
 import { loadSubagentConfig } from "./config.js";
 import {
 	COMMAND_COMPLETION_LIMIT,
@@ -871,6 +877,7 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 		if (entry.runState.status === "running") continue;
 		const pendingSince = entry.pendingCompletion.createdAt ?? entry.runState.startedAt + entry.runState.elapsedMs;
 		if (Date.now() - pendingSince > STALE_PENDING_COMPLETION_MS) {
+			store.asyncTasks?.expirePending(entry.pendingCompletion.message);
 			store.globalLiveRuns.delete(runId);
 		}
 	}
@@ -879,6 +886,7 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 		if (!batch.pendingCompletion) continue;
 		const pendingSince = batch.pendingCompletion.createdAt ?? batch.createdAt;
 		if (Date.now() - pendingSince > STALE_PENDING_COMPLETION_MS) {
+			store.asyncTasks?.expirePending(batch.pendingCompletion.message);
 			clearPendingGroupCompletion("batch", batchId);
 			store.batchGroups.delete(batchId);
 		}
@@ -888,6 +896,7 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 		if (!pipeline.pendingCompletion) continue;
 		const pendingSince = pipeline.pendingCompletion.createdAt ?? pipeline.createdAt;
 		if (Date.now() - pendingSince > STALE_PENDING_COMPLETION_MS) {
+			store.asyncTasks?.expirePending(pipeline.pendingCompletion.message);
 			clearPendingGroupCompletion("chain", pipelineId);
 			store.pipelines.delete(pipelineId);
 		}
@@ -927,6 +936,9 @@ function deliverOrQueueCompletion(
 	runState: CommandRunState,
 	message: { customType: string; content: string; display: boolean; details: Record<string, unknown> },
 ): void {
+	completeAsyncInvocation(String(message.details.status ?? "completed"));
+	message.details = { ...message.details, ...asyncInvocationDetails() };
+	retainAsyncCompletion(message);
 	const options = { deliverAs: "followUp" as const };
 	const globalEntry = store.globalLiveRuns.get(runId);
 	let currentSessionFile: string | null = null;
@@ -964,6 +976,8 @@ function finalizeHumanOnlyCompletion(
 	notifyMessage: string,
 	notifyLevel: "info" | "error" | "warning",
 ): void {
+	completeAsyncInvocation(notifyLevel === "info" ? "completed" : notifyLevel === "warning" ? "aborted" : "error");
+	retainAsyncCompletion({ content: _content });
 	ctx.ui.notify(notifyMessage, notifyLevel);
 	store.globalLiveRuns.delete(runId);
 }
@@ -975,6 +989,7 @@ export interface SubagentRegistrations {
 }
 
 export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentRegistrations {
+	pi = store.asyncTasks?.wrap(pi) ?? pi;
 	const commandDefinitions = new Map<SubagentCommandName, SubagentCommandDefinition>();
 	const defineCommand = (name: SubagentCommandName, definition: SubagentCommandDefinition): void => {
 		commandDefinitions.set(name, definition);
@@ -1301,441 +1316,453 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 				return;
 			}
 
-			let runId: number;
-			let runState: CommandRunState;
+			const launch = async () => {
+				let runId: number;
+				let runState: CommandRunState;
 
-			if (continuedFromRunId !== undefined) {
-				const existingRun = store.commandRuns.get(continuedFromRunId);
-				if (!existingRun) {
-					ctx.ui.notify(`Unknown subagent run #${continuedFromRunId}.`, "error");
-					return;
-				}
-
-				runId = existingRun.id;
-				runState = existingRun;
-				runState.agent = selectedAgent;
-				runState.task = taskForDisplay;
-				runState.displayTask = buildSubagentDisplayTaskFallback(taskForDisplay);
-				runState.status = "running";
-				runState.startedAt = Date.now();
-				runState.lastActivityAt = Date.now();
-				runState.elapsedMs = 0;
-				runState.toolCalls = 0;
-				runState.lastLine = "";
-				runState.lastOutput = "";
-				runState.continuedFromRunId = continuedFromRunId;
-				runState.usage = undefined;
-				runState.model = undefined;
-				runState.retryCount = 0;
-				runState.lastRetryReason = undefined;
-				runState.errorClass = undefined;
-				runState.autoAbortReason = undefined;
-				runState.abortPending = false;
-				runState.removed = false;
-				runState.deliveryMode = deliveryMode;
-				runState.turnCount = Math.max(DEFAULT_TURN_COUNT, runState.turnCount || DEFAULT_TURN_COUNT) + 1;
-				// NOTE(user-approved): continuations preserve the existing context and session.
-				// Switching between /sub:main and /sub:isolate does not retroactively affect existing runs.
-				runState.contextMode = runState.contextMode ?? (forceMainContext ? "main" : "sub");
-				runState.sessionFile = runState.sessionFile ?? sessionFileForRun ?? makeSubagentSessionFile(runId);
-				runState.persistedSessionBaseOffset = getSessionFileSize(runState.sessionFile);
-				sessionFileForRun = runState.sessionFile;
-			} else {
-				runId = store.nextCommandRunId++;
-				if (forceMainContext) {
-					// Extract main session context as text instead of copying the session file.
-					// This prevents subagents from inheriting the main agent's persona.
-					const subContextResult = buildMainContextText(ctx);
-					const subContextText = typeof subContextResult === "string" ? subContextResult : subContextResult.text;
-					const totalMessageCount = typeof subContextResult === "string" ? 0 : subContextResult.totalMessageCount;
-					const rawMainSessionFile = ctx.sessionManager?.getSessionFile?.() ?? undefined;
-					const mainSessionFile =
-						typeof rawMainSessionFile === "string"
-							? rawMainSessionFile.replace(/[\r\n\t]+/g, "").trim() || undefined
-							: undefined;
-					if (subContextText || mainSessionFile) {
-						taskForAgent = wrapTaskWithMainContext(taskForAgent, subContextText, {
-							mainSessionFile,
-							totalMessageCount,
-						});
-					} else {
-						ctx.ui.notify(
-							"Main session context is unavailable in this mode. Running with dedicated sub-session.",
-							"warning",
-						);
-						forceMainContext = false;
+				if (continuedFromRunId !== undefined) {
+					const existingRun = store.commandRuns.get(continuedFromRunId);
+					if (!existingRun) {
+						ctx.ui.notify(`Unknown subagent run #${continuedFromRunId}.`, "error");
+						return;
 					}
-					sessionFileForRun = makeSubagentSessionFile(runId);
-				} else {
-					sessionFileForRun = makeSubagentSessionFile(runId);
-				}
 
-				runState = {
-					id: runId,
-					agent: selectedAgent,
-					task: taskForDisplay,
-					displayTask: buildSubagentDisplayTaskFallback(taskForDisplay),
-					status: "running",
-					startedAt: Date.now(),
-					lastActivityAt: Date.now(),
-					elapsedMs: 0,
-					toolCalls: 0,
-					lastLine: "",
-					lastOutput: "",
-					continuedFromRunId,
-					turnCount: DEFAULT_TURN_COUNT,
-					sessionFile: sessionFileForRun,
-					persistedSessionBaseOffset: getSessionFileSize(sessionFileForRun),
-					removed: false,
-					contextMode: forceMainContext ? "main" : "sub",
-					retryCount: 0,
-					deliveryMode,
-				};
-				store.commandRuns.set(runId, runState);
-			}
-
-			const abortController = new AbortController();
-			runState.abortController = abortController;
-
-			// Register for abort and completion handling within this session runtime.
-			let originSessionFile = "";
-			try {
-				originSessionFile = normalizePath(ctx.sessionManager.getSessionFile()) ?? "";
-			} catch {
-				/* ignore */
-			}
-			store.globalLiveRuns.set(runId, {
-				runState,
-				abortController,
-				originSessionFile,
-			});
-
-			store.commandWidgetCtx = ctx as unknown as WidgetRenderCtx;
-			updateCommandRunsWidget(store, ctx as unknown as WidgetRenderCtx);
-			refreshDisplayTaskInBackground(store, runState, taskForDisplay, ctx);
-
-			const makeDetails = (results: SingleResult[]): SubagentDetails => ({
-				mode: "single",
-				inheritMainContext: runState.contextMode === "main",
-				projectAgentsDir: discovery.projectAgentsDir,
-				results,
-			});
-
-			const contextLabel = hiddenFromMain
-				? "hidden sub-session"
-				: runState.contextMode === "main"
-					? "main context"
-					: "dedicated sub-session";
-			const startedState = continuedFromRunId !== undefined ? "resumed" : "started";
-
-			if (!hiddenFromMain) {
-				pi.sendMessage(
-					{
-						customType: "subagent-command",
-						content:
-							`[subagent:${selectedAgent}#${runId}] ${startedState}` +
-							`\nContext: ${contextLabel} · turn ${runState.turnCount}` +
-							``,
-						display: false,
-						details: {
-							runId,
-							agent: selectedAgent,
-							task: taskForDisplay,
-							displayTask: runState.displayTask,
-							continuedFromRunId,
-							turnCount: runState.turnCount,
-							contextMode: runState.contextMode,
-							sessionFile: runState.sessionFile,
-							persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
-							status: startedState,
-							startedAt: runState.startedAt,
-							elapsedMs: runState.elapsedMs,
-							lastActivityAt: runState.lastActivityAt,
-							thoughtText: runState.thoughtText,
-							runtime: runState.runtime,
-							claudeSessionId: runState.claudeSessionId,
-							claudeProjectDir: runState.claudeProjectDir,
-						},
-					},
-					{ deliverAs: "followUp", triggerTurn: false },
-				);
-			}
-
-			ctx.ui.notify(
-				`${
-					continuedFromRunId !== undefined
-						? `Resumed subagent #${runId}: ${selectedAgent}`
-						: `Started subagent #${runId}: ${selectedAgent}`
-				} (${contextLabel} · turn ${runState.turnCount})`,
-				"info",
-			);
-
-			const tick = setInterval(() => {
-				const current = store.commandRuns.get(runId);
-				if (current?.status !== "running") {
-					clearInterval(tick);
-					return;
-				}
-				current.elapsedMs = Date.now() - current.startedAt;
-				updateCommandRunsWidget(store);
-			}, RUN_TICK_INTERVAL_MS);
-
-			let claudeCheckpointSent = !!runState.claudeSessionId;
-			const recordActivity = hiddenFromMain
-				? () => {}
-				: createRunActivityRecorder(pi, runState, (model) => resolveContextWindow(ctx, model));
-			void (async () => {
-				try {
-					const { result, retryCount } = await invokeWithAutoRetry({
-						maxRetries: MAX_SUBAGENT_AUTO_RETRIES,
-						signal: abortController.signal,
-						onRetryScheduled: ({ retryIndex, maxRetries, delayMs, reason }) => {
-							runState.retryCount = retryIndex;
-							runState.lastRetryReason = reason;
-							runState.lastActivityAt = Date.now();
-							runState.lastLine = `Auto-retrying ${retryIndex}/${maxRetries} in ${Math.ceil(delayMs / 1000)}s: ${reason}`;
-							runState.lastOutput = runState.lastLine;
-							updateCommandRunsWidget(store);
-							ctx.ui.notify(`subagent #${runId} retry ${retryIndex}/${maxRetries}: ${reason}`, "warning");
-						},
-						invoke: () => {
-							runState.persistedSessionBaseOffset = getSessionFileSize(runState.sessionFile);
-							return enqueueSubagentInvocation(() =>
-								runSingleAgent(
-									ctx.cwd,
-									agents,
-									selectedAgent,
-									taskForAgent,
-									undefined,
-									abortController.signal,
-									(partial) => {
-										if (runState.removed || store.disposed) return;
-										const current = partial.details?.results?.[0];
-										if (!current) return;
-										updateRunFromResult(runState, current);
-										recordActivity();
-										if (!claudeCheckpointSent && runState.claudeSessionId) {
-											claudeCheckpointSent = true;
-											if (!hiddenFromMain) {
-												pi.sendMessage(
-													{
-														customType: "subagent-command" as const,
-														content: `[subagent:${selectedAgent}#${runId}] checkpoint`,
-														display: false,
-														details: {
-															runId,
-															agent: selectedAgent,
-															task: taskForDisplay,
-															displayTask: runState.displayTask,
-															continuedFromRunId,
-															turnCount: runState.turnCount,
-															contextMode: runState.contextMode,
-															sessionFile: runState.sessionFile,
-															persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
-															status: "started",
-															startedAt: runState.startedAt,
-															elapsedMs: runState.elapsedMs,
-															lastActivityAt: runState.lastActivityAt,
-															runtime: runState.runtime,
-															claudeSessionId: runState.claudeSessionId,
-															claudeProjectDir: runState.claudeProjectDir,
-														},
-													},
-													{ deliverAs: "followUp", triggerTurn: false },
-												);
-											}
-										}
-										updateCommandRunsWidget(store);
-									},
-									makeDetails,
-									{
-										sessionFile: runState.sessionFile,
-										resumeSessionId: runState.claudeSessionId,
-										sidecarSessionFile: runState.sessionFile,
-										persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
-										onDiagnostic: createRunDiagnosticSink(pi, runState),
-									},
-								),
-							);
-						},
-					});
-					runState.retryCount = retryCount;
-
-					if (runState.removed || store.disposed) return;
-
-					updateRunFromResult(runState, result);
-					const isError = result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
-					runState.status = isError ? "error" : "done";
-					if (isError) {
-						runState.errorClass =
-							result.errorClass ??
-							classifySubagentFailure({
-								failed: true,
-								stopReason: result.stopReason,
-								exitCode: result.exitCode,
-								errorMessage: result.errorMessage,
-								stderr: result.stderr,
-								output: getFinalOutput(result.messages),
-							});
-					}
-					const terminalLabel = getSubagentTerminalLabel(isError, {
-						stopReason: result.stopReason,
-						errorClass: runState.errorClass,
-					});
-					runState.elapsedMs = Date.now() - runState.startedAt;
-					updateCommandRunsWidget(store);
-
-					const rawOutput = isError
-						? result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)"
-						: getFinalOutput(result.messages) || "(no output)";
-					const output =
-						isError && rawOutput.length > RUN_OUTPUT_MESSAGE_MAX_CHARS
-							? `${rawOutput.slice(0, RUN_OUTPUT_MESSAGE_MAX_CHARS)}\n\n... [truncated]`
-							: rawOutput;
-					const usage = formatUsageStats(result.usage, result.model);
-
-					runState.lastOutput = rawOutput;
-					if (rawOutput) runState.lastLine = getLastNonEmptyLine(rawOutput);
-
-					const completionMessage = {
-						customType: "subagent-command" as const,
-						content:
-							`[subagent:${selectedAgent}#${runId}] ${terminalLabel}` +
-							`\nPrompt: ${truncateLines(taskForDisplay, 2)}` +
-							(usage ? `\nUsage: ${usage}` : "") +
-							(runState.retryCount ? `\nRetries: ${runState.retryCount}/${MAX_SUBAGENT_AUTO_RETRIES}` : "") +
-							(runState.thoughtText ? `\nThought: ${runState.thoughtText}` : "") +
-							`\n\n${output}`,
-						display: true,
-						details: {
-							runId,
-							agent: selectedAgent,
-							task: taskForDisplay,
-							displayTask: runState.displayTask,
-							continuedFromRunId,
-							turnCount: runState.turnCount,
-							contextMode: runState.contextMode,
-							sessionFile: runState.sessionFile,
-							persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
-							startedAt: runState.startedAt,
-							elapsedMs: runState.elapsedMs,
-							lastActivityAt: runState.lastActivityAt,
-							exitCode: result.exitCode,
-							stopReason: result.stopReason,
-							usage: result.usage,
-							model: result.model,
-							source: result.agentSource,
-							errorClass: runState.errorClass,
-							peakContextTokens: runState.peakContextTokens,
-							lastToolName: runState.lastToolName,
-							lastToolOutputChars: runState.lastToolOutputChars,
-							thoughtText: runState.thoughtText,
-							retryCount: runState.retryCount,
-							status: runState.status,
-							runtime: runState.runtime,
-							claudeSessionId: runState.claudeSessionId,
-							claudeProjectDir: runState.claudeProjectDir,
-						},
-					};
-					if (hiddenFromMain) {
-						finalizeHumanOnlyCompletion(
-							store,
-							ctx,
-							runId,
-							`Hidden subagent #${runId} · ${selectedAgent}`,
-							completionMessage.content,
-							`hidden subagent #${runId} (${selectedAgent}) ${terminalLabel}`,
-							terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
-						);
-					} else {
-						deliverOrQueueCompletion(store, pi, ctx, runId, runState, completionMessage);
-						ctx.ui.notify(
-							`subagent #${runId} (${selectedAgent}) ${terminalLabel}`,
-							terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
-						);
-					}
-				} catch (error: any) {
-					if (runState.removed || store.disposed) return;
-					runState.status = "error";
-					runState.errorClass = isSubagentAbort({
-						signal: runState.abortController?.signal,
-						autoAbortReason: runState.autoAbortReason,
-						error,
-					})
-						? "aborted"
-						: "process_error";
-					const terminalLabel = getSubagentTerminalLabel(true, { errorClass: runState.errorClass });
-					runState.elapsedMs = Date.now() - runState.startedAt;
-					runState.lastLine =
-						runState.autoAbortReason ?? (error?.message ? String(error.message) : "Subagent execution failed");
-					runState.lastOutput = runState.lastLine;
-
-					const cmdErrorMessage = {
-						customType: "subagent-command" as const,
-						content:
-							`[subagent:${selectedAgent}#${runId}] ${terminalLabel}` +
-							`\nPrompt: ${truncateLines(taskForDisplay, 2)}` +
-							`\n\n${runState.lastLine}`,
-						display: true,
-						details: {
-							runId,
-							agent: selectedAgent,
-							task: taskForDisplay,
-							displayTask: runState.displayTask,
-							continuedFromRunId,
-							turnCount: runState.turnCount,
-							contextMode: runState.contextMode,
-							sessionFile: runState.sessionFile,
-							persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
-							startedAt: runState.startedAt,
-							elapsedMs: runState.elapsedMs,
-							lastActivityAt: runState.lastActivityAt,
-							error: runState.lastLine,
-							errorClass: runState.errorClass,
-							stopReason: runState.errorClass === "aborted" ? "aborted" : undefined,
-							peakContextTokens: runState.peakContextTokens,
-							lastToolName: runState.lastToolName,
-							lastToolOutputChars: runState.lastToolOutputChars,
-							thoughtText: runState.thoughtText,
-							status: runState.status,
-							runtime: runState.runtime,
-							claudeSessionId: runState.claudeSessionId,
-							claudeProjectDir: runState.claudeProjectDir,
-						},
-					};
-					if (hiddenFromMain) {
-						finalizeHumanOnlyCompletion(
-							store,
-							ctx,
-							runId,
-							`Hidden subagent #${runId} · ${selectedAgent}`,
-							cmdErrorMessage.content,
-							`hidden subagent #${runId} ${terminalLabel}: ${runState.lastLine}`,
-							terminalLabel === "aborted" ? "warning" : "error",
-						);
-					} else {
-						deliverOrQueueCompletion(store, pi, ctx, runId, runState, cmdErrorMessage);
-						ctx.ui.notify(
-							`subagent #${runId} ${terminalLabel}: ${runState.lastLine}`,
-							terminalLabel === "aborted" ? "warning" : "error",
-						);
-					}
-				} finally {
-					clearInterval(tick);
-					runState.abortController = undefined;
+					runId = existingRun.id;
+					runState = existingRun;
+					runState.agent = selectedAgent;
+					runState.task = taskForDisplay;
+					runState.displayTask = buildSubagentDisplayTaskFallback(taskForDisplay);
+					runState.status = "running";
+					runState.startedAt = Date.now();
+					runState.lastActivityAt = Date.now();
+					runState.elapsedMs = 0;
+					runState.toolCalls = 0;
+					runState.lastLine = "";
+					runState.lastOutput = "";
+					runState.continuedFromRunId = continuedFromRunId;
+					runState.usage = undefined;
+					runState.model = undefined;
+					runState.retryCount = 0;
+					runState.lastRetryReason = undefined;
+					runState.errorClass = undefined;
+					runState.autoAbortReason = undefined;
 					runState.abortPending = false;
-					if (!store.disposed) {
-						trimCommandRunHistory(store, {
-							maxRuns: 10,
-							ctx,
-							pi,
-							updateWidget: false,
-							removalReason: "trim",
-						});
-						updateCommandRunsWidget(store);
+					runState.removed = false;
+					runState.deliveryMode = deliveryMode;
+					runState.turnCount = Math.max(DEFAULT_TURN_COUNT, runState.turnCount || DEFAULT_TURN_COUNT) + 1;
+					// NOTE(user-approved): continuations preserve the existing context and session.
+					// Switching between /sub:main and /sub:isolate does not retroactively affect existing runs.
+					runState.contextMode = runState.contextMode ?? (forceMainContext ? "main" : "sub");
+					runState.sessionFile = runState.sessionFile ?? sessionFileForRun ?? makeSubagentSessionFile(runId);
+					runState.persistedSessionBaseOffset = getSessionFileSize(runState.sessionFile);
+					sessionFileForRun = runState.sessionFile;
+				} else {
+					runId = store.nextCommandRunId++;
+					if (forceMainContext) {
+						// Extract main session context as text instead of copying the session file.
+						// This prevents subagents from inheriting the main agent's persona.
+						const subContextResult = buildMainContextText(ctx);
+						const subContextText = typeof subContextResult === "string" ? subContextResult : subContextResult.text;
+						const totalMessageCount = typeof subContextResult === "string" ? 0 : subContextResult.totalMessageCount;
+						const rawMainSessionFile = ctx.sessionManager?.getSessionFile?.() ?? undefined;
+						const mainSessionFile =
+							typeof rawMainSessionFile === "string"
+								? rawMainSessionFile.replace(/[\r\n\t]+/g, "").trim() || undefined
+								: undefined;
+						if (subContextText || mainSessionFile) {
+							taskForAgent = wrapTaskWithMainContext(taskForAgent, subContextText, {
+								mainSessionFile,
+								totalMessageCount,
+							});
+						} else {
+							ctx.ui.notify(
+								"Main session context is unavailable in this mode. Running with dedicated sub-session.",
+								"warning",
+							);
+							forceMainContext = false;
+						}
+						sessionFileForRun = makeSubagentSessionFile(runId);
+					} else {
+						sessionFileForRun = makeSubagentSessionFile(runId);
 					}
+
+					runState = {
+						id: runId,
+						agent: selectedAgent,
+						task: taskForDisplay,
+						displayTask: buildSubagentDisplayTaskFallback(taskForDisplay),
+						status: "running",
+						startedAt: Date.now(),
+						lastActivityAt: Date.now(),
+						elapsedMs: 0,
+						toolCalls: 0,
+						lastLine: "",
+						lastOutput: "",
+						continuedFromRunId,
+						turnCount: DEFAULT_TURN_COUNT,
+						sessionFile: sessionFileForRun,
+						persistedSessionBaseOffset: getSessionFileSize(sessionFileForRun),
+						removed: false,
+						contextMode: forceMainContext ? "main" : "sub",
+						retryCount: 0,
+						deliveryMode,
+					};
+					store.commandRuns.set(runId, runState);
 				}
-			})();
+
+				const abortController = new AbortController();
+				runState.abortController = abortController;
+
+				// Register for abort and completion handling within this session runtime.
+				let originSessionFile = "";
+				try {
+					originSessionFile = normalizePath(ctx.sessionManager.getSessionFile()) ?? "";
+				} catch {
+					/* ignore */
+				}
+				store.globalLiveRuns.set(runId, {
+					runState,
+					abortController,
+					originSessionFile,
+				});
+
+				store.commandWidgetCtx = ctx as unknown as WidgetRenderCtx;
+				updateCommandRunsWidget(store, ctx as unknown as WidgetRenderCtx);
+				refreshDisplayTaskInBackground(store, runState, taskForDisplay, ctx);
+
+				const makeDetails = (results: SingleResult[]): SubagentDetails => ({
+					mode: "single",
+					inheritMainContext: runState.contextMode === "main",
+					projectAgentsDir: discovery.projectAgentsDir,
+					results,
+				});
+
+				const contextLabel = hiddenFromMain
+					? "hidden sub-session"
+					: runState.contextMode === "main"
+						? "main context"
+						: "dedicated sub-session";
+				const startedState = continuedFromRunId !== undefined ? "resumed" : "started";
+
+				if (!hiddenFromMain) {
+					pi.sendMessage(
+						{
+							customType: "subagent-command",
+							content:
+								`[subagent:${selectedAgent}#${runId}] ${startedState}` +
+								`\nContext: ${contextLabel} · turn ${runState.turnCount}` +
+								``,
+							display: false,
+							details: {
+								runId,
+								agent: selectedAgent,
+								task: taskForDisplay,
+								displayTask: runState.displayTask,
+								continuedFromRunId,
+								turnCount: runState.turnCount,
+								contextMode: runState.contextMode,
+								sessionFile: runState.sessionFile,
+								persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
+								status: startedState,
+								startedAt: runState.startedAt,
+								elapsedMs: runState.elapsedMs,
+								lastActivityAt: runState.lastActivityAt,
+								thoughtText: runState.thoughtText,
+								runtime: runState.runtime,
+								claudeSessionId: runState.claudeSessionId,
+								claudeProjectDir: runState.claudeProjectDir,
+							},
+						},
+						{ deliverAs: "followUp", triggerTurn: false },
+					);
+				}
+
+				ctx.ui.notify(
+					`${
+						continuedFromRunId !== undefined
+							? `Resumed subagent #${runId}: ${selectedAgent}`
+							: `Started subagent #${runId}: ${selectedAgent}`
+					} (${contextLabel} · turn ${runState.turnCount})`,
+					"info",
+				);
+
+				const tick = setInterval(() => {
+					const current = store.commandRuns.get(runId);
+					if (current?.status !== "running") {
+						clearInterval(tick);
+						return;
+					}
+					current.elapsedMs = Date.now() - current.startedAt;
+					updateCommandRunsWidget(store);
+				}, RUN_TICK_INTERVAL_MS);
+
+				let claudeCheckpointSent = !!runState.claudeSessionId;
+				const recordActivity = hiddenFromMain
+					? () => {}
+					: createRunActivityRecorder(pi, runState, (model) => resolveContextWindow(ctx, model));
+				void (async () => {
+					try {
+						const { result, retryCount } = await invokeWithAutoRetry({
+							maxRetries: MAX_SUBAGENT_AUTO_RETRIES,
+							signal: abortController.signal,
+							onRetryScheduled: ({ retryIndex, maxRetries, delayMs, reason }) => {
+								runState.retryCount = retryIndex;
+								runState.lastRetryReason = reason;
+								runState.lastActivityAt = Date.now();
+								runState.lastLine = `Auto-retrying ${retryIndex}/${maxRetries} in ${Math.ceil(delayMs / 1000)}s: ${reason}`;
+								runState.lastOutput = runState.lastLine;
+								updateCommandRunsWidget(store);
+								ctx.ui.notify(`subagent #${runId} retry ${retryIndex}/${maxRetries}: ${reason}`, "warning");
+							},
+							invoke: () => {
+								runState.persistedSessionBaseOffset = getSessionFileSize(runState.sessionFile);
+								return enqueueSubagentInvocation(() =>
+									runSingleAgent(
+										ctx.cwd,
+										agents,
+										selectedAgent,
+										taskForAgent,
+										undefined,
+										abortController.signal,
+										(partial) => {
+											if (runState.removed || store.disposed) return;
+											const current = partial.details?.results?.[0];
+											if (!current) return;
+											updateRunFromResult(runState, current);
+											recordActivity();
+											if (!claudeCheckpointSent && runState.claudeSessionId) {
+												claudeCheckpointSent = true;
+												if (!hiddenFromMain) {
+													pi.sendMessage(
+														{
+															customType: "subagent-command" as const,
+															content: `[subagent:${selectedAgent}#${runId}] checkpoint`,
+															display: false,
+															details: {
+																runId,
+																agent: selectedAgent,
+																task: taskForDisplay,
+																displayTask: runState.displayTask,
+																continuedFromRunId,
+																turnCount: runState.turnCount,
+																contextMode: runState.contextMode,
+																sessionFile: runState.sessionFile,
+																persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
+																status: "started",
+																startedAt: runState.startedAt,
+																elapsedMs: runState.elapsedMs,
+																lastActivityAt: runState.lastActivityAt,
+																runtime: runState.runtime,
+																claudeSessionId: runState.claudeSessionId,
+																claudeProjectDir: runState.claudeProjectDir,
+															},
+														},
+														{ deliverAs: "followUp", triggerTurn: false },
+													);
+												}
+											}
+											updateCommandRunsWidget(store);
+										},
+										makeDetails,
+										{
+											sessionFile: runState.sessionFile,
+											resumeSessionId: runState.claudeSessionId,
+											sidecarSessionFile: runState.sessionFile,
+											persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
+											...(store.asyncTasks?.provider.supported ? { asyncRunId: runState.id } : {}),
+											onDiagnostic: createRunDiagnosticSink(pi, runState),
+										},
+									),
+								);
+							},
+						});
+						runState.retryCount = retryCount;
+
+						if (runState.removed || store.disposed) {
+							discardRemovedAsyncInvocation(getFinalOutput(result.messages));
+							return;
+						}
+
+						updateRunFromResult(runState, result);
+						const isError = result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
+						runState.status = isError ? "error" : "done";
+						if (isError) {
+							runState.errorClass =
+								result.errorClass ??
+								classifySubagentFailure({
+									failed: true,
+									stopReason: result.stopReason,
+									exitCode: result.exitCode,
+									errorMessage: result.errorMessage,
+									stderr: result.stderr,
+									output: getFinalOutput(result.messages),
+								});
+						}
+						const terminalLabel = getSubagentTerminalLabel(isError, {
+							stopReason: result.stopReason,
+							errorClass: runState.errorClass,
+						});
+						runState.elapsedMs = Date.now() - runState.startedAt;
+						updateCommandRunsWidget(store);
+
+						const rawOutput = isError
+							? result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)"
+							: getFinalOutput(result.messages) || "(no output)";
+						const output =
+							isError && rawOutput.length > RUN_OUTPUT_MESSAGE_MAX_CHARS
+								? `${rawOutput.slice(0, RUN_OUTPUT_MESSAGE_MAX_CHARS)}\n\n... [truncated]`
+								: rawOutput;
+						const usage = formatUsageStats(result.usage, result.model);
+
+						runState.lastOutput = rawOutput;
+						if (rawOutput) runState.lastLine = getLastNonEmptyLine(rawOutput);
+
+						const completionMessage = {
+							customType: "subagent-command" as const,
+							content:
+								`[subagent:${selectedAgent}#${runId}] ${terminalLabel}` +
+								`\nPrompt: ${truncateLines(taskForDisplay, 2)}` +
+								(usage ? `\nUsage: ${usage}` : "") +
+								(runState.retryCount ? `\nRetries: ${runState.retryCount}/${MAX_SUBAGENT_AUTO_RETRIES}` : "") +
+								(runState.thoughtText ? `\nThought: ${runState.thoughtText}` : "") +
+								`\n\n${output}`,
+							display: true,
+							details: {
+								runId,
+								agent: selectedAgent,
+								task: taskForDisplay,
+								displayTask: runState.displayTask,
+								continuedFromRunId,
+								turnCount: runState.turnCount,
+								contextMode: runState.contextMode,
+								sessionFile: runState.sessionFile,
+								persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
+								startedAt: runState.startedAt,
+								elapsedMs: runState.elapsedMs,
+								lastActivityAt: runState.lastActivityAt,
+								exitCode: result.exitCode,
+								stopReason: result.stopReason,
+								usage: result.usage,
+								model: result.model,
+								source: result.agentSource,
+								errorClass: runState.errorClass,
+								peakContextTokens: runState.peakContextTokens,
+								lastToolName: runState.lastToolName,
+								lastToolOutputChars: runState.lastToolOutputChars,
+								thoughtText: runState.thoughtText,
+								retryCount: runState.retryCount,
+								status: runState.status,
+								runtime: runState.runtime,
+								claudeSessionId: runState.claudeSessionId,
+								claudeProjectDir: runState.claudeProjectDir,
+							},
+						};
+						if (hiddenFromMain) {
+							finalizeHumanOnlyCompletion(
+								store,
+								ctx,
+								runId,
+								`Hidden subagent #${runId} · ${selectedAgent}`,
+								completionMessage.content,
+								`hidden subagent #${runId} (${selectedAgent}) ${terminalLabel}`,
+								terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
+							);
+						} else {
+							deliverOrQueueCompletion(store, pi, ctx, runId, runState, completionMessage);
+							ctx.ui.notify(
+								`subagent #${runId} (${selectedAgent}) ${terminalLabel}`,
+								terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
+							);
+						}
+					} catch (error: any) {
+						if (runState.removed || store.disposed) {
+							discardRemovedAsyncInvocation(String(error));
+							return;
+						}
+						runState.status = "error";
+						runState.errorClass = isSubagentAbort({
+							signal: runState.abortController?.signal,
+							autoAbortReason: runState.autoAbortReason,
+							error,
+						})
+							? "aborted"
+							: "process_error";
+						const terminalLabel = getSubagentTerminalLabel(true, { errorClass: runState.errorClass });
+						runState.elapsedMs = Date.now() - runState.startedAt;
+						runState.lastLine =
+							runState.autoAbortReason ?? (error?.message ? String(error.message) : "Subagent execution failed");
+						runState.lastOutput = runState.lastLine;
+
+						const cmdErrorMessage = {
+							customType: "subagent-command" as const,
+							content:
+								`[subagent:${selectedAgent}#${runId}] ${terminalLabel}` +
+								`\nPrompt: ${truncateLines(taskForDisplay, 2)}` +
+								`\n\n${runState.lastLine}`,
+							display: true,
+							details: {
+								runId,
+								agent: selectedAgent,
+								task: taskForDisplay,
+								displayTask: runState.displayTask,
+								continuedFromRunId,
+								turnCount: runState.turnCount,
+								contextMode: runState.contextMode,
+								sessionFile: runState.sessionFile,
+								persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
+								startedAt: runState.startedAt,
+								elapsedMs: runState.elapsedMs,
+								lastActivityAt: runState.lastActivityAt,
+								error: runState.lastLine,
+								errorClass: runState.errorClass,
+								stopReason: runState.errorClass === "aborted" ? "aborted" : undefined,
+								peakContextTokens: runState.peakContextTokens,
+								lastToolName: runState.lastToolName,
+								lastToolOutputChars: runState.lastToolOutputChars,
+								thoughtText: runState.thoughtText,
+								status: runState.status,
+								runtime: runState.runtime,
+								claudeSessionId: runState.claudeSessionId,
+								claudeProjectDir: runState.claudeProjectDir,
+							},
+						};
+						if (hiddenFromMain) {
+							finalizeHumanOnlyCompletion(
+								store,
+								ctx,
+								runId,
+								`Hidden subagent #${runId} · ${selectedAgent}`,
+								cmdErrorMessage.content,
+								`hidden subagent #${runId} ${terminalLabel}: ${runState.lastLine}`,
+								terminalLabel === "aborted" ? "warning" : "error",
+							);
+						} else {
+							deliverOrQueueCompletion(store, pi, ctx, runId, runState, cmdErrorMessage);
+							ctx.ui.notify(
+								`subagent #${runId} ${terminalLabel}: ${runState.lastLine}`,
+								terminalLabel === "aborted" ? "warning" : "error",
+							);
+						}
+					} finally {
+						clearInterval(tick);
+						runState.abortController = undefined;
+						runState.abortPending = false;
+						if (!store.disposed) {
+							trimCommandRunHistory(store, {
+								maxRuns: 10,
+								ctx,
+								pi,
+								updateWidget: false,
+								removalReason: "trim",
+							});
+							updateCommandRunsWidget(store);
+						}
+					}
+				})();
+			};
+			return store.asyncTasks
+				? store.asyncTasks.invoke(taskForDisplay.slice(0, 500), undefined, launch, hiddenFromMain)
+				: launch();
 		},
 	};
 
