@@ -161,6 +161,65 @@ describe("dual-era MCP integration", () => {
 		}
 	}, 15_000);
 
+	it("delivers large tool arguments to modern and legacy stdio servers", async () => {
+		const messages = ["x".repeat(60_000), "한글 😀 ".repeat(12_000)];
+		for (const era of ["modern", "legacy"]) {
+			const fixturePath = fileURLToPath(new URL(`./test-fixtures/${era}-stdio-server.mjs`, import.meta.url));
+			const server = normalizeServer("LargeStdio", {
+				command: process.execPath,
+				args: [fixturePath],
+				...(era === "legacy" ? { env: { MOCK_MCP_DELAY_MS: "0" } } : {}),
+			});
+			if (!server) throw new Error(`Failed to normalize ${era} stdio fixture`);
+			const connection = new McpConnection(server);
+
+			try {
+				await connection.connect({ timeoutMs: 10_000 });
+				for (const message of messages) {
+					const result = await connection.callTool("echo", { message }, { timeoutMs: 10_000 });
+					expect(result).toMatchObject({ content: [{ type: "text", text: `${era}:${message}` }] });
+				}
+			} finally {
+				await connection.dispose();
+			}
+		}
+	}, 20_000);
+
+	it.each([1_024, 60_000, 2_000_000])(
+		"does not execute an expired %i-byte stdio request when a paused server resumes",
+		async (size) => {
+			tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-mcp-paused-"));
+			const controlPath = path.join(tempDir, "control");
+			const fixturePath = fileURLToPath(new URL("./test-fixtures/paused-stdio-server.mjs", import.meta.url));
+			const server = normalizeServer("PausedStdio", {
+				command: process.execPath,
+				args: [fixturePath],
+				env: { MOCK_MCP_CONTROL_PATH: controlPath, MOCK_MCP_RESUME_MS: "400" },
+			});
+			if (!server) throw new Error("Failed to normalize paused stdio fixture");
+			const connection = new McpConnection(server);
+
+			try {
+				await connection.connect({ timeoutMs: 10_000 });
+				fs.writeFileSync(`${controlPath}.pause`, "pause");
+				await vi.waitFor(() => expect(fs.existsSync(`${controlPath}.paused`)).toBe(true), { timeout: 2_000 });
+				await expect(connection.callTool("record", { body: "x".repeat(size) }, { timeoutMs: 100 })).rejects.toThrow(
+					/timed out/i,
+				);
+				await new Promise((resolve) => setTimeout(resolve, 500));
+				expect(fs.existsSync(`${controlPath}.received`)).toBe(false);
+				fs.rmSync(`${controlPath}.pause`);
+				await expect(connection.callTool("record", { body: "safe" }, { timeoutMs: 5_000 })).resolves.toMatchObject({
+					content: [{ type: "text", text: "received" }],
+				});
+				expect(fs.readFileSync(`${controlPath}.received`, "utf8")).toBe("4");
+			} finally {
+				await connection.dispose();
+			}
+		},
+		10_000,
+	);
+
 	it("reaps the actual stdio probe process when disposed during negotiation", async () => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-mcp-probe-dispose-"));
 		const pidPath = path.join(tempDir, "probe-pids.txt");
