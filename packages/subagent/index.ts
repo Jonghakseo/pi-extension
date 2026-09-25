@@ -121,12 +121,16 @@ export default function (pi: ExtensionAPI) {
 	let hangCheckTimer: ReturnType<typeof setInterval> | undefined;
 
 	pi.on("session_start", (_event, ctx) => {
+		// Fence tool admission synchronously, before lazy lifecycle work can yield.
+		try {
+			if (pi.events) asyncTasks.bind(ctx.sessionManager.getSessionId());
+		} catch (error) {
+			process.stderr.write(`[subagent] session binding failed: ${error instanceof Error ? error.message : error}\n`);
+			return;
+		}
 		enqueue(async (c) => {
 			c.store.disposed = false;
-			if (pi.events) {
-				asyncTasks.bind(ctx.sessionManager.getSessionId());
-				await asyncTasks.provider.whenDiscovered();
-			}
+			if (pi.events) await asyncTasks.provider.whenDiscovered();
 			c.commands.handleSessionStart(asyncTasks.wrap(pi), c.store, ctx as unknown as ExtensionContext);
 			c.escalation.maybeRegisterAskMaster(pi, ctx);
 		});

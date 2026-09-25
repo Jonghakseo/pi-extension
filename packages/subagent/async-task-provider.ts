@@ -68,6 +68,7 @@ export class AsyncTaskProvider {
 	private ready = false;
 	private stopped = false;
 	private discoveryClosed = false;
+	private requestedPiSessionId?: string;
 	private discoveryPromise?: Promise<void>;
 	private resolveDiscovery?: () => void;
 	private unsubscribe?: () => void;
@@ -92,6 +93,8 @@ export class AsyncTaskProvider {
 
 	bind(piSessionId: string, snapshotReady = true): void {
 		if (this.stopped || !isId(piSessionId)) return;
+		// Fence new admission even when the old owner must remain for resource callbacks.
+		this.requestedPiSessionId = piSessionId;
 		if (this.discovery?.piSessionId === piSessionId) {
 			if (this.ready !== snapshotReady) {
 				this.ready = snapshotReady;
@@ -148,7 +151,7 @@ export class AsyncTaskProvider {
 		return !!this.owner && this.ready;
 	}
 	get accepting(): boolean {
-		return this.supported && this.open && !this.stopped;
+		return this.supported && this.open && !this.stopped && this.requestedPiSessionId === this.owner?.piSessionId;
 	}
 
 	private announce(): void {
@@ -316,7 +319,7 @@ export class AsyncTaskProvider {
 			kind: input.kind,
 			title: input.title.slice(0, 500) || input.kind,
 			execution: "queued",
-			presence: "unknown",
+			presence: "settled",
 			registration: "reserved",
 			providerRevision: ++this.revision,
 			controlGeneration: this.generation,
@@ -443,7 +446,10 @@ export class AsyncTaskProvider {
 				completionId: randomUUID(),
 				rootTaskId: taskId,
 				target: "model",
-				state: this.accepting && task.controlGeneration === this.generation ? "pending" : "suppressed",
+				state:
+					this.supported && this.open && !this.stopped && task.controlGeneration === this.generation
+						? "pending"
+						: "suppressed",
 				controlGeneration: task.controlGeneration,
 			};
 			this.tickets.set(ticket.completionId, ticket);
@@ -472,7 +478,8 @@ export class AsyncTaskProvider {
 		const task = this.tasks.get(taskId);
 		return (
 			!!task &&
-			(task.presence !== "settled" ||
+			(task.registration === "reserved" ||
+				task.presence !== "settled" ||
 				[...this.tickets.values()].some(
 					(ticket) =>
 						ticket.rootTaskId === task.rootTaskId &&

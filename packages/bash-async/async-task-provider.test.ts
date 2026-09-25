@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/suspicious/noExplicitAny: dynamically loaded external host contract. */
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,6 +9,7 @@ type Frame = Record<string, unknown>;
 class Bus implements ProviderBus {
 	listeners = new Set<(message: unknown) => void>();
 	frames: Frame[] = [];
+	drop?: (frame: Frame) => boolean;
 	on(_channel: string, listener: (message: unknown) => void) {
 		this.listeners.add(listener);
 		return () => {
@@ -18,9 +20,12 @@ class Bus implements ProviderBus {
 		const frame = structuredClone(message) as Frame;
 		this.frames.push(frame);
 		validate?.(frame);
+		if (this.drop?.(frame)) return;
 		for (const listener of this.listeners) listener(frame);
 	}
 }
+let RealHost: any;
+let SubagentProvider: typeof import("../subagent/async-task-provider.js").AsyncTaskProvider;
 let validate: ((frame: unknown) => unknown) | undefined;
 beforeAll(async () => {
 	const root = process.env.PICKY_CONTRACT_ROOT;
@@ -32,6 +37,10 @@ beforeAll(async () => {
 		/* @vite-ignore */ pathToFileURL(join(root, "agentd/src/domain/async-task-contract.ts")).href
 	);
 	validate = (frame) => module.AsyncTaskHostMessageSchema.parse(frame);
+	RealHost = (
+		await import(/* @vite-ignore */ pathToFileURL(join(root, "agentd/src/runtime/async-task-host-bridge.ts")).href)
+	).AsyncTaskHostBridge;
+	SubagentProvider = (await import("../subagent/async-task-provider.js")).AsyncTaskProvider;
 	const fixtures = join(root, "contracts/extensions/async-tasks-v1");
 	for (const file of await readdir(fixtures))
 		if (file.endsWith(".json")) validate(JSON.parse(await readFile(join(fixtures, file), "utf8")));
@@ -95,6 +104,18 @@ function detail(bus: Bus) {
 }
 
 describe("provider grant and delivery protocol", () => {
+	it("retains a reserved registration across a rejected session switch", async () => {
+		const { provider, bus, approve } = setup();
+		const reservation = provider.reserve({ taskId: "pending", title: "pending", kind: "bash" });
+		expect(() => provider.bind("other")).toThrow("still owns tasks");
+		provider.bind("pi-session");
+		approve(bus.frames.find((frame) => frame.type === "task-register") as Frame);
+		expect(await reservation).toBe("pending");
+		expect(provider.start("pending")).toBe(true);
+		provider.finish("pending", "succeeded", "settled", false);
+		provider.shutdown();
+	});
+
 	it("waits for a durable grant, consumes it only once, and publishes terminal plus pending ticket atomically", async () => {
 		const { provider, bus, approve } = setup();
 		const reservation = provider.reserve({ taskId: "job", title: "test", kind: "bash" });
@@ -269,8 +290,10 @@ describe("provider grant and delivery protocol", () => {
 		await provider.reserve({ taskId: "job", title: "test", kind: "bash" });
 		provider.start("job");
 		expect(() => provider.bind("next-pi-session")).toThrow("still owns tasks");
+		await expect(provider.reserve({ title: "wrong session", kind: "bash" })).rejects.toThrow("admission is closed");
 		provider.finish("job", "succeeded", "settled");
 		const send = vi.fn();
+		provider.bind("pi-session");
 		provider.deliver(["job"], { details: {} }, send);
 		const metadata = send.mock.calls[0][0].details.asyncTasks;
 		host({ type: "completion-observed", deliveryId: metadata.deliveryId, completionIds: metadata.completionIds });
@@ -282,5 +305,77 @@ describe("provider grant and delivery protocol", () => {
 		provider.resource("job", "settled");
 		expect(bus.frames.at(-1)?.type).toBe("host-query");
 		provider.shutdown();
+	});
+});
+
+// The optional cross-repository contract command requires both real adapters and the real host.
+describe("real host admission", () => {
+	it.each(
+		["bash-async", "subagent"].flatMap((providerId) =>
+			["normal", "lost-reply", "aborted"].map((mode) => ({ providerId, mode })),
+		),
+	)("grants $providerId safely through the host transaction ($mode)", async ({ providerId, mode }) => {
+		if (!RealHost) return;
+		const bus = new Bus();
+		let state: any = { tasks: [], tickets: [] };
+		const host = new RealHost(
+			bus,
+			"session",
+			{
+				read: () => state,
+				transact: async (build: any) => {
+					state = structuredClone(build(state));
+					return state;
+				},
+			},
+			() => {},
+		);
+		await host.bind("pi-session", [providerId === "bash-async" ? "bash_async" : "subagent"]);
+		const Provider = providerId === "bash-async" ? AsyncTaskProvider : SubagentProvider;
+		const provider = new Provider(
+			bus,
+			providerId,
+			"1.0.0",
+			{ cancel: () => {}, detail: () => "", close: () => {} },
+			20,
+		);
+		provider.bind("pi-session");
+		await host.drain();
+		expect(host.coverage().tracking).toBe("ready");
+		const controller = new AbortController();
+		let dropped = false;
+		bus.drop = (frame) => {
+			if (mode === "normal" || dropped || frame.type !== "task-register-result" || frame.registration !== "approved")
+				return false;
+			dropped = true;
+			if (mode === "aborted") controller.abort();
+			return true;
+		};
+		try {
+			const reservation = provider.reserve(
+				{ taskId: "real-job", title: "finite", kind: providerId === "bash-async" ? "bash" : "subagent" },
+				controller.signal,
+			);
+			if (mode === "aborted") {
+				await expect(reservation).rejects.toThrow("not approved");
+				await host.drain();
+				expect(state.tasks).toMatchObject([{ registration: "abandoned", presence: "settled" }]);
+				expect(provider.start("real-job")).toBe(false);
+				return;
+			}
+			const id = await reservation;
+			if (!id) throw new Error("Real host did not grant admission");
+			expect(state.tasks).toHaveLength(1);
+			expect(state.tasks[0].grantId).toBeTruthy();
+			expect(provider.start(id)).toBe(true);
+			expect(provider.start(id)).toBe(false);
+			provider.resource(id, "active");
+			provider.finish(id, "succeeded", "settled", false);
+			await host.drain();
+			expect(state.tasks[0]).toMatchObject({ registration: "spawned", execution: "succeeded", presence: "settled" });
+		} finally {
+			provider.shutdown();
+			await host.dispose();
+		}
 	});
 });

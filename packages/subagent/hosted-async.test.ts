@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { SubagentAsyncTasks } from "./async-task-lifecycle.js";
 import { handleSessionStart, registerAll } from "./commands.js";
 import { STALE_PENDING_COMPLETION_MS } from "./constants.js";
+import extension from "./index.js";
 import { createStore } from "./store.js";
 import { createSubagentToolExecute } from "./tool-execute.js";
 
@@ -179,6 +180,70 @@ function setup() {
 }
 
 describe("hosted subagent production execution", () => {
+	it("rejects tool and slash starts after a failed session switch without losing origin completion", async () => {
+		const { host, pi, context } = setup();
+		lifecycle.shutdown();
+		const events = new Map<string, any>();
+		const commands = new Map<string, any>();
+		let execute: any;
+		pi.on.mockImplementation((name: string, callback: any) => {
+			events.set(name, callback);
+		});
+		pi.registerCommand.mockImplementation((name: string, definition: any) => {
+			commands.set(name, definition);
+		});
+		pi.registerTool.mockImplementation((definition: any) => {
+			if (definition.name === "subagent") execute = definition.execute;
+		});
+		const api = { ...pi, registerShortcut: vi.fn() };
+		let session = "origin";
+		const ctx = {
+			...context,
+			sessionManager: {
+				...context.sessionManager,
+				getSessionId: () => session,
+				getSessionFile: () => join(directory, `${session}.jsonl`),
+			},
+		};
+		extension(api as any);
+		try {
+			events.get("session_start")({}, ctx);
+			await events.get("before_agent_start")({ prompt: "test", systemPrompt: "" }, ctx);
+			const proc = child();
+			spawn.mockReturnValue(proc);
+			await execute("origin", { command: "subagent run worker -- origin task" }, undefined, undefined, ctx);
+			await vi.advanceTimersByTimeAsync(1001);
+			expect(spawn).toHaveBeenCalledOnce();
+			const count = host.frames.filter((f) => f.type === "task-register").length;
+			session = "other";
+			events.get("session_start")({}, ctx);
+			await events.get("before_agent_start")({ prompt: "test", systemPrompt: "" }, ctx);
+			await expect(
+				execute("wrong", { command: "subagent run worker -- wrong owner" }, undefined, undefined, ctx),
+			).rejects.toThrow();
+			await commands
+				.get("sub:isolate")
+				.handler("worker wrong slash owner", ctx)
+				.catch(() => {});
+			expect(host.frames.filter((f) => f.type === "task-register")).toHaveLength(count);
+			expect(spawn).toHaveBeenCalledOnce();
+			proc.finish();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(host.detail.tasks.find((t: any) => t.taskId === t.rootTaskId)).toMatchObject({
+				piSessionId: "origin",
+				execution: "succeeded",
+				presence: "settled",
+			});
+			expect(host.detail.tickets).toMatchObject([{ state: "pending" }]);
+			session = "origin";
+			events.get("session_start")({}, ctx);
+			await events.get("before_agent_start")({ prompt: "test", systemPrompt: "" }, ctx);
+			expect(host.detail.tickets).toMatchObject([{ state: "submitted" }]);
+		} finally {
+			await events.get("session_shutdown")({ reason: "exit" });
+		}
+	});
+
 	it("does not admit a run or spawn before the root and child durable grants", async () => {
 		const { host, store, execute, context, pi } = setup();
 		host.automatic = false;
