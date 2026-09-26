@@ -93,6 +93,11 @@ export function discardRemovedAsyncInvocation(content: string): void {
 	root.lifecycle.discardPending(root.id);
 }
 
+/** Only a host-cancelled invocation may omit its redundant abort notice. */
+export function isExpectedTrackedCancellation(): boolean {
+	return invocations.getStore()?.controller.signal.aborted === true;
+}
+
 export function asyncInvocationDetails(): Record<string, string> {
 	const invocation = invocations.getStore();
 	return invocation ? { asyncTaskRootId: invocation.id } : {};

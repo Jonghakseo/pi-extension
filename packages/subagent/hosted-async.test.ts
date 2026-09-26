@@ -375,6 +375,197 @@ describe("hosted subagent production execution", () => {
 		expect(pi.sendMessage.mock.calls.at(-1)?.[0].details.asyncTasks.taskIds).toEqual([root.taskId]);
 	});
 
+	it.each([
+		"cancel",
+		"closeAdmission",
+	])("keeps %s tracked cancellation output without warning bubbles", async (action) => {
+		const { host, execute, context, pi, store } = setup();
+		const proc = child();
+		spawn.mockReturnValue(proc);
+		await execute("cancelled", { command: "subagent run worker -- stop me" }, undefined, undefined, context);
+		await vi.advanceTimersByTimeAsync(1001);
+		const rootId = host.detail.tasks.find((task: any) => task.taskId === task.rootTaskId).taskId;
+		host.reply({ type: "control-request", action, taskId: rootId, deliveryIds: [] });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(context.ui.notify.mock.calls.filter(([, level]) => level === "warning")).toEqual([]);
+		expect(host.detail.tasks.find((task: any) => task.taskId === rootId)).toMatchObject({
+			execution: "cancelled",
+			presence: "settled",
+		});
+		expect(store.commandRuns.get(1)?.errorClass).toBe("aborted");
+		if (action === "cancel") {
+			expect(pi.sendMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+				content: expect.stringContaining("[subagent:worker#1] aborted"),
+				details: { asyncTaskRootId: rootId },
+			});
+		} else {
+			expect(pi.sendMessage).not.toHaveBeenCalled();
+		}
+		expect(host.detail.tickets).toMatchObject([{ state: action === "cancel" ? "submitted" : "suppressed" }]);
+		host.reply({
+			type: "control-request",
+			requestId: "retained-detail",
+			action: "detail",
+			taskId: rootId,
+			deliveryIds: [],
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		expect(host.frames.at(-1)).toMatchObject({
+			type: "control-result",
+			outcome: "settled",
+			detail: expect.stringContaining("[subagent:worker#1] aborted"),
+		});
+	});
+
+	it("omits a batch abort notice but keeps the single retained group outcome", async () => {
+		const { host, execute, context, pi } = setup();
+		const first = child();
+		const second = child();
+		spawn.mockReturnValueOnce(first).mockReturnValueOnce(second);
+		await execute(
+			"batch",
+			{ command: 'subagent batch --agent worker --task "one" --agent worker --task "two"' },
+			undefined,
+			undefined,
+			context,
+		);
+		await vi.advanceTimersByTimeAsync(1001);
+		const rootId = host.detail.tasks.find((task: any) => task.taskId === task.rootTaskId).taskId;
+		host.reply({ type: "control-request", action: "cancel", taskId: rootId, deliveryIds: [] });
+		await vi.advanceTimersByTimeAsync(1001);
+		expect(context.ui.notify.mock.calls.filter(([, level]) => level === "warning")).toEqual([]);
+		expect(host.detail.tasks.find((task: any) => task.taskId === rootId).execution).toBe("cancelled");
+		expect(host.detail.tickets).toMatchObject([{ state: "submitted" }]);
+		expect(pi.sendMessage.mock.calls.filter(([message]) => message.details?.asyncTasks)).toHaveLength(1);
+		expect(pi.sendMessage.mock.calls.at(-1)?.[0].content).toContain("Outcomes: 2 aborted");
+	});
+
+	it("does not warn for an aborted result returned after host cancellation", async () => {
+		const { host, execute, context, pi } = setup();
+		const proc = child();
+		proc.kill = vi.fn(() => true);
+		spawn.mockReturnValue(proc);
+		await execute("returned", { command: "subagent run worker -- stop me" }, undefined, undefined, context);
+		await vi.advanceTimersByTimeAsync(1001);
+		const rootId = host.detail.tasks.find((task: any) => task.taskId === task.rootTaskId).taskId;
+		host.reply({ type: "control-request", action: "cancel", taskId: rootId, deliveryIds: [] });
+		proc.stdout.emit(
+			"data",
+			Buffer.from(
+				`${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], stopReason: "aborted" } })}\n`,
+			),
+		);
+		proc.exitCode = 1;
+		proc.emit("exit", 1);
+		proc.emit("close", 1);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(context.ui.notify.mock.calls.filter(([, level]) => level === "warning")).toEqual([]);
+		expect(host.detail.tasks.find((task: any) => task.taskId === rootId).execution).toBe("cancelled");
+		expect(pi.sendMessage.mock.calls.at(-1)?.[0].content).toContain("[subagent:worker#1] aborted");
+	});
+
+	it("warns when a tracked child aborts without a host cancellation", async () => {
+		const { host, execute, context, pi } = setup();
+		const proc = child();
+		spawn.mockReturnValue(proc);
+		await execute("unexpected", { command: "subagent run worker -- unexpected abort" }, undefined, undefined, context);
+		await vi.advanceTimersByTimeAsync(1001);
+		proc.stdout.emit(
+			"data",
+			Buffer.from(
+				`${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], stopReason: "aborted" } })}\n`,
+			),
+		);
+		proc.exitCode = 1;
+		proc.emit("exit", 1);
+		proc.emit("close", 1);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(
+			context.ui.notify.mock.calls.some(([message, level]) => level === "warning" && message.includes("aborted")),
+		).toBe(true);
+		expect(host.detail.tasks.find((task: any) => task.taskId === task.rootTaskId).execution).toBe("cancelled");
+		expect(pi.sendMessage.mock.calls.at(-1)?.[0].content).toContain("[subagent:worker#1] aborted");
+	});
+
+	it("does not warn when a cancelled root rejects a queued continuation", async () => {
+		const { host, execute, context, pi } = setup();
+		const first = child();
+		spawn.mockReturnValue(first);
+		await execute(
+			"chain",
+			{ command: 'subagent chain --agent worker --task "one" --agent worker --task "two"' },
+			undefined,
+			undefined,
+			context,
+		);
+		await vi.advanceTimersByTimeAsync(1001);
+		first.finish();
+		await vi.advanceTimersByTimeAsync(0);
+		const rootId = host.detail.tasks.find((task: any) => task.taskId === task.rootTaskId).taskId;
+		host.reply({ type: "control-request", action: "cancel", taskId: rootId, deliveryIds: [] });
+		await vi.advanceTimersByTimeAsync(1001);
+		expect(spawn).toHaveBeenCalledOnce();
+		expect(context.ui.notify.mock.calls.filter(([, level]) => level === "warning")).toEqual([]);
+		expect(host.detail.tasks.find((task: any) => task.taskId === rootId).execution).toBe("cancelled");
+		expect(pi.sendMessage.mock.calls.at(-1)?.[0].content).toContain("[subagent-chain#");
+	});
+
+	it("still warns on an untracked TUI abort and reports a genuine tracked failure", async () => {
+		const { host, execute, context, pi, store } = setup();
+		const failed = child();
+		spawn.mockReturnValue(failed);
+		await execute("failed", { command: "subagent run worker -- fail" }, undefined, undefined, context);
+		await vi.advanceTimersByTimeAsync(1001);
+		failed.stdout.emit(
+			"data",
+			Buffer.from(
+				`${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "invalid request" }], stopReason: "error", errorMessage: "invalid request" } })}\n`,
+			),
+		);
+		failed.exitCode = 1;
+		failed.emit("exit", 1);
+		failed.emit("close", 1);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(
+			context.ui.notify.mock.calls.some(([message, level]) => level === "error" && message.includes("failed")),
+		).toBe(true);
+		expect(host.detail.tasks.find((task: any) => task.taskId === task.rootTaskId).execution).toBe("failed");
+		expect(pi.sendMessage.mock.calls.at(-1)?.[0].content).toContain("failed");
+
+		store.asyncTasks = undefined;
+		const stdinTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+		const stdoutTTY = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+		Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
+		Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+		try {
+			const untracked = child();
+			spawn.mockReturnValue(untracked);
+			await execute("tui", { command: "subagent run worker -- manual abort" }, undefined, undefined, {
+				...context,
+				hasUI: true,
+			});
+			await vi.advanceTimersByTimeAsync(1001);
+			untracked.stdout.emit(
+				"data",
+				Buffer.from(
+					`${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], stopReason: "aborted" } })}\n`,
+				),
+			);
+			untracked.exitCode = 1;
+			untracked.emit("exit", 1);
+			untracked.emit("close", 1);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(
+				context.ui.notify.mock.calls.some(([message, level]) => level === "warning" && message.includes("aborted")),
+			).toBe(true);
+		} finally {
+			if (stdinTTY) Object.defineProperty(process.stdin, "isTTY", stdinTTY);
+			else delete (process.stdin as any).isTTY;
+			if (stdoutTTY) Object.defineProperty(process.stdout, "isTTY", stdoutTTY);
+			else delete (process.stdout as any).isTTY;
+		}
+	});
+
 	it("makes continue a new attempt even when the visible run ID is reused", async () => {
 		const { host, execute, context, store } = setup();
 		const first = child();
@@ -415,6 +606,22 @@ describe("hosted subagent production execution", () => {
 		expect(host.frames.filter((frame) => frame.type === "task-register")).toHaveLength(registrationsBefore);
 		expect(spawn).toHaveBeenCalledOnce();
 		expect(pi.sendMessage.mock.calls.at(-1)?.[0].content).toContain("requires interactive UI");
+	});
+
+	it("keeps slash completion without an expected host-cancel warning", async () => {
+		const { host, pi, store, context } = setup();
+		const handler = registerAll(pi as any, store).commands.get("sub:isolate")?.handler;
+		if (!handler) throw new Error("slash command missing");
+		const proc = child();
+		spawn.mockReturnValue(proc);
+		await handler("worker finite slash task", context as any);
+		await vi.advanceTimersByTimeAsync(1001);
+		const rootId = host.detail.tasks.find((task: any) => task.taskId === task.rootTaskId).taskId;
+		host.reply({ type: "control-request", action: "cancel", taskId: rootId, deliveryIds: [] });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(context.ui.notify.mock.calls.filter(([, level]) => level === "warning")).toEqual([]);
+		expect(host.detail.tasks.find((task: any) => task.taskId === rootId).execution).toBe("cancelled");
+		expect(pi.sendMessage.mock.calls.at(-1)?.[0].content).toContain("[subagent:worker#1] aborted");
 	});
 
 	it("does not expose hidden output to model messages or activity", async () => {

@@ -15,6 +15,7 @@ import {
 	asyncInvocationDetails,
 	completeAsyncInvocation,
 	discardRemovedAsyncInvocation,
+	isExpectedTrackedCancellation,
 	retainAsyncCompletion,
 } from "./async-task-lifecycle.js";
 import { parseSubagentToolCommand, SUBAGENT_CLI_HELP_TEXT } from "./cli.js";
@@ -1724,10 +1725,11 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						if (entry) entry.pendingCompletion = makePendingCompletion(completionMessage, true);
 					}
 
-					ctx.ui?.notify?.(
-						`subagent tool run #${runState.id} (${resolvedAgent}) ${terminalLabel}`,
-						terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
-					);
+					if (terminalLabel !== "aborted" || !isExpectedTrackedCancellation())
+						ctx.ui?.notify?.(
+							`subagent tool run #${runState.id} (${resolvedAgent}) ${terminalLabel}`,
+							terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
+						);
 				} catch (error: unknown) {
 					if (runState.removed || store.disposed) {
 						discardRemovedAsyncInvocation(String(error));
@@ -1743,10 +1745,11 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						const entry = store.globalLiveRuns.get(runState.id);
 						if (entry) entry.pendingCompletion = makePendingCompletion(errorMessage, true);
 					}
-					ctx.ui?.notify?.(
-						`subagent tool run #${runState.id} ${terminalLabel}: ${runState.lastLine}`,
-						terminalLabel === "aborted" ? "warning" : "error",
-					);
+					if (terminalLabel !== "aborted" || !isExpectedTrackedCancellation())
+						ctx.ui?.notify?.(
+							`subagent tool run #${runState.id} ${terminalLabel}: ${runState.lastLine}`,
+							terminalLabel === "aborted" ? "warning" : "error",
+						);
 					updateCommandRunsWidget(store);
 				} finally {
 					clearRunAbortState(runState);
@@ -1926,14 +1929,15 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 								updateWidget: false,
 								removalReason: "trim",
 							});
-							ctx.ui?.notify?.(
-								batchTerminalStatus === "error"
-									? `subagent batch ${batchId} finished with errors`
-									: batchTerminalStatus === "aborted"
-										? `subagent batch ${batchId} aborted`
-										: `subagent batch ${batchId} completed`,
-								batchTerminalStatus === "error" ? "error" : batchTerminalStatus === "aborted" ? "warning" : "info",
-							);
+							if (batchTerminalStatus !== "aborted" || !isExpectedTrackedCancellation())
+								ctx.ui?.notify?.(
+									batchTerminalStatus === "error"
+										? `subagent batch ${batchId} finished with errors`
+										: batchTerminalStatus === "aborted"
+											? `subagent batch ${batchId} aborted`
+											: `subagent batch ${batchId} completed`,
+									batchTerminalStatus === "error" ? "error" : batchTerminalStatus === "aborted" ? "warning" : "info",
+								);
 						}
 					} catch (error: unknown) {
 						const finalized = finalizeRunError(runState, error);

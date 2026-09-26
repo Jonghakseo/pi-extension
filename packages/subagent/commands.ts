@@ -15,6 +15,7 @@ import {
 	asyncInvocationDetails,
 	completeAsyncInvocation,
 	discardRemovedAsyncInvocation,
+	isExpectedTrackedCancellation,
 	retainAsyncCompletion,
 } from "./async-task-lifecycle.js";
 import { loadSubagentConfig } from "./config.js";
@@ -978,7 +979,7 @@ function finalizeHumanOnlyCompletion(
 ): void {
 	completeAsyncInvocation(notifyLevel === "info" ? "completed" : notifyLevel === "warning" ? "aborted" : "error");
 	retainAsyncCompletion({ content: _content });
-	ctx.ui.notify(notifyMessage, notifyLevel);
+	if (notifyLevel !== "warning" || !isExpectedTrackedCancellation()) ctx.ui.notify(notifyMessage, notifyLevel);
 	store.globalLiveRuns.delete(runId);
 }
 
@@ -1669,10 +1670,11 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 							);
 						} else {
 							deliverOrQueueCompletion(store, pi, ctx, runId, runState, completionMessage);
-							ctx.ui.notify(
-								`subagent #${runId} (${selectedAgent}) ${terminalLabel}`,
-								terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
-							);
+							if (terminalLabel !== "aborted" || !isExpectedTrackedCancellation())
+								ctx.ui.notify(
+									`subagent #${runId} (${selectedAgent}) ${terminalLabel}`,
+									terminalLabel === "completed" ? "info" : terminalLabel === "aborted" ? "warning" : "error",
+								);
 						}
 					} catch (error: any) {
 						if (runState.removed || store.disposed) {
@@ -1738,10 +1740,11 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 							);
 						} else {
 							deliverOrQueueCompletion(store, pi, ctx, runId, runState, cmdErrorMessage);
-							ctx.ui.notify(
-								`subagent #${runId} ${terminalLabel}: ${runState.lastLine}`,
-								terminalLabel === "aborted" ? "warning" : "error",
-							);
+							if (terminalLabel !== "aborted" || !isExpectedTrackedCancellation())
+								ctx.ui.notify(
+									`subagent #${runId} ${terminalLabel}: ${runState.lastLine}`,
+									terminalLabel === "aborted" ? "warning" : "error",
+								);
 						}
 					} finally {
 						clearInterval(tick);
