@@ -52,6 +52,8 @@ For stdio and streamable HTTP servers, the bridge uses the official TypeScript S
 
 The stdio probe uses a shorter timeout than the full connection by default so a silent legacy server still has time to complete its `initialize` handshake. Set `PI_MCP_PROTOCOL_PROBE_TIMEOUT_MS` higher when a modern stdio server legitimately needs more than 10 seconds to start.
 
+When a stdio tool call times out, the bridge stops that server process and reconnects on the next call. A request still buffered in the pipe can otherwise execute after the caller has already received a timeout. Other calls in flight on the same server are interrupted by this reset; a request already processed by the server cannot be undone.
+
 Explicit `type: "sse"` configurations stay on the legacy protocol because HTTP+SSE is deprecated and does not support the new stateless transport model. See the [MCP 2026-07-28 changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog) and the [TypeScript SDK protocol version guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/protocol-versions.md).
 
 ## Notes
