@@ -1,0 +1,46 @@
+{
+	"name": "@ryan_nookpi/pi-skill-excalidraw",
+	"version": "0.1.0",
+	"description": "Pi skill that writes .excalidraw diagrams and opens them in a live-synced local Excalidraw window.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/skill-excalidraw"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/skill-excalidraw#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"pi-skill",
+		"excalidraw",
+		"diagram"
+	],
+	"files": [
+		"skills/excalidraw/SKILL.md",
+		"skills/excalidraw/scripts/",
+		"skills/excalidraw/references/",
+		"skills/excalidraw/assets/",
+		"skills/excalidraw/app/dist/",
+		"skills/excalidraw/app/src/",
+		"skills/excalidraw/app/index.html",
+		"skills/excalidraw/app/package.json",
+		"skills/excalidraw/app/pnpm-lock.yaml",
+		"skills/excalidraw/app/vite.config.js",
+		"README.md"
+	],
+	"pi": {
+		"skills": [
+			"./skills/excalidraw"
+		]
+	},
+	"scripts": {
+		"prepack": "pnpm --dir skills/excalidraw/app install --ignore-workspace --frozen-lockfile && pnpm --dir skills/excalidraw/app run build"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

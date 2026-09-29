@@ -46,12 +46,37 @@ function checkPublishedImports(dir, pkg) {
 	}
 }
 
+/** Skill-only packages: every declared skill root must hold a published SKILL.md whose `name` matches its directory. */
+function checkSkillPackage(dir, pkg) {
+	const packageDir = path.join(packagesDir, dir);
+	const published = pkg.files ?? ["**"];
+	for (const entry of pkg.pi.skills) {
+		const skillDir = entry.replace(/^\.\//, "").replace(/\/$/, "");
+		const relative = `${skillDir}/SKILL.md`;
+		const file = path.join(packageDir, relative);
+		if (!fs.existsSync(file)) throw new Error(`${dir}: ${relative} is missing`);
+		if (!isPublished(relative, published, packageDir))
+			throw new Error(`${dir}: ${relative} is missing from package.json files`);
+		const frontmatter = fs.readFileSync(file, "utf8").match(/^---\n([\s\S]*?)\n---/);
+		const name = frontmatter?.[1].match(/^name:\s*["']?([^"'\n]+)["']?\s*$/m)?.[1];
+		if (name !== path.posix.basename(skillDir))
+			throw new Error(`${dir}: ${relative} name "${name}" must match directory "${path.posix.basename(skillDir)}"`);
+		if (!fs.existsSync(path.join(packageDir, skillDir, "references", "setup.md")))
+			throw new Error(`${dir}: ${skillDir}/references/setup.md is required for first-time setup instructions`);
+	}
+}
+
 for (const dir of packageDirs) {
 	const pkgPath = path.join(packagesDir, dir, "package.json");
 	const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
 	if (!pkg.name) throw new Error(`${dir}: missing name`);
 	if (!pkg.version) throw new Error(`${dir}: missing version`);
 	if (pkg.private === true) throw new Error(`${dir}: package is private=true (not publishable)`);
+	if (pkg.pi?.skills && !pkg.pi.extensions) {
+		checkSkillPackage(dir, pkg);
+		process.stdout.write(`ok ${pkg.name}\n`);
+		continue;
+	}
 	if (pkg.pi?.extensions?.[0] !== "./index.ts") throw new Error(`${dir}: pi.extensions must start with ./index.ts`);
 	checkPublishedImports(dir, pkg);
 	process.stdout.write(`ok ${pkg.name}\n`);

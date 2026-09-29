@@ -1,0 +1,42 @@
+{
+	"name": "@ryan_nookpi/pi-skill-a4",
+	"version": "0.1.0",
+	"description": "Pi skill that converts Markdown into an A4 Microsoft Word document without changing its content.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/skill-a4"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/skill-a4#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"pi-skill",
+		"a4",
+		"docx",
+		"markdown"
+	],
+	"files": [
+		"skills/a4/SKILL.md",
+		"skills/a4/references/",
+		"skills/a4/scripts/*.py",
+		"!skills/a4/scripts/test-*.py",
+		"skills/a4/scripts/md-to-a4-html.mjs",
+		"README.md"
+	],
+	"pi": {
+		"skills": [
+			"./skills/a4"
+		]
+	},
+	"dependencies": {
+		"markdown-it": "^14.1.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

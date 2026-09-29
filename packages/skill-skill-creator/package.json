@@ -1,0 +1,33 @@
+{
+	"name": "@ryan_nookpi/pi-skill-skill-creator",
+	"version": "0.1.0",
+	"description": "Pi skill for creating, editing, and validating Agent Skills (SKILL.md, triggers, progressive disclosure).",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/skill-skill-creator"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/skill-skill-creator#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"pi-skill",
+		"skill-creator"
+	],
+	"files": [
+		"skills/",
+		"README.md"
+	],
+	"pi": {
+		"skills": [
+			"./skills/skill-creator"
+		]
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

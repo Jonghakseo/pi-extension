@@ -1,0 +1,20 @@
+{
+	"name": "pi-excalidraw-app",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"scripts": {
+		"build": "vite build",
+		"dev": "vite"
+	},
+	"dependencies": {
+		"@excalidraw/excalidraw": "0.18.1",
+		"@excalidraw/mermaid-to-excalidraw": "2.2.2",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0"
+	},
+	"devDependencies": {
+		"@vitejs/plugin-react": "^6.1.1",
+		"vite": "^8.3.1"
+	}
+}

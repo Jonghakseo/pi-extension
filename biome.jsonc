@@ -49,6 +49,27 @@
 			}
 		},
 		{
+			// Skill packages ship upstream helper scripts and a prebuilt Excalidraw app; they are CLIs that print to stdout/stderr.
+			// Keep upstream logic as-is: hook dependency and regex rewrites could change behavior.
+			"includes": ["packages/skill-*/skills/**"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noConsole": "off",
+						"noControlCharactersInRegex": "off"
+					},
+					"style": {
+						"useTemplate": "off"
+					},
+					"correctness": {
+						"noUnusedImports": "off",
+						"noUnusedFunctionParameters": "off",
+						"useExhaustiveDependencies": "off"
+					}
+				}
+			}
+		},
+		{
 			// CLI analysis script prints its report to stdout.
 			"includes": ["packages/vcc-ko/tools/*.mjs"],
 			"linter": {

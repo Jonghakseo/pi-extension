@@ -1,0 +1,40 @@
+{
+	"name": "@ryan_nookpi/pi-skill-tmux-terminal",
+	"version": "0.1.0",
+	"description": "Pi skill for driving TUI, REPL, and stdin programs through an isolated tmux PTY helper.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/skill-tmux-terminal"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/skill-tmux-terminal#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"pi-skill",
+		"tmux",
+		"terminal",
+		"pty"
+	],
+	"files": [
+		"skills/tmux-terminal/SKILL.md",
+		"skills/tmux-terminal/scripts/tmux-terminal.mjs",
+		"skills/tmux-terminal/references/",
+		"README.md"
+	],
+	"pi": {
+		"skills": [
+			"./skills/tmux-terminal"
+		]
+	},
+	"scripts": {
+		"test": "node --test skills/tmux-terminal/scripts/tmux-terminal.test.mjs"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
