@@ -17,10 +17,10 @@ compatibility: pnpm workspace, npm registry 접근, Node.js와 Python 3, macOS �
 ## 원커맨드 배포
 
 ```bash
-pnpm deploy <extension-name>  # 모든 packages/<extension-name>에 공통 (예: pnpm deploy memory-layer)
+pnpm run deploy <extension-name>  # 모든 packages/<extension-name>에 공통 (예: pnpm run deploy memory-layer)
 ```
 
-긴 작업이므로 bash 도구의 timeout을 최소 1,800초로 설정한다. 별도 `npm login`, `verify:strict`, `publish:<slug>`를 에이전트가 순서대로 호출하지 않는다. `scripts/deploy-package.mjs`가 전부 처리한다.
+`run`을 빼면 pnpm 내장 `deploy` 명령이 실행되어 `ERR_PNPM_NOTHING_TO_DEPLOY`로 실패한다. 긴 작업이므로 bash 도구의 timeout을 최소 1,800초로 설정한다. 별도 `npm login`, `verify:strict`, `publish:<slug>`를 에이전트가 순서대로 호출하지 않는다. `scripts/deploy-package.mjs`가 전부 처리한다.
 
 - `npm whoami`가 실패하고 재로그인이 필요한 경우 npm 웹 로그인 URL을 감지해 브라우저를 연다. 사용자에게 로그인 완료 메시지를 요구하지 않는다. 승인이 끝나면 `npm whoami`로 확인한다.
 - 현재 버전이 이미 Registry의 `latest`라면 빈 patch 버전으로 올린다. 로컬 버전이 Registry의 `latest`보다 오래됐거나, 게시된 버전이 `latest`가 아니라면 멈춘다. 수동 minor/major 지정은 명령 실행 전에 한다.

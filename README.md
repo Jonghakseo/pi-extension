@@ -94,7 +94,7 @@ Interactive/runtime-heavy extension entrypoints remain validated by the normal t
 ## Publish one package
 
 ```bash
-pnpm deploy <extension-name>   # packages/<extension-name>, e.g. pnpm deploy memory-layer
+pnpm run deploy <extension-name>   # packages/<extension-name>, e.g. pnpm run deploy memory-layer
 ```
 
 The runner (Node.js and Python 3) opens npm's browser login or publish approval when needed, then runs `verify:strict`, a single-package dry-run, publish under a PTY, and Registry verification. If the local version is already published as `latest`, it bumps the patch version automatically. Set minor/major versions in the package manifest before running it. It does not commit or push.

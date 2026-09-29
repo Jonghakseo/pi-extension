@@ -117,7 +117,7 @@ function compareVersions(a, b) {
 
 export async function deployPackage({ root, slug, run = runCommand, onAuthUrl = openBrowser, wait = sleep }) {
 	if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug ?? ""))
-		throw new Error("Specify one package slug, e.g. pnpm deploy memory-layer.");
+		throw new Error("Specify one package slug, e.g. pnpm run deploy memory-layer.");
 	const packagePath = path.join(root, "packages", slug, "package.json");
 	const raw = await fs.readFile(packagePath, "utf8");
 	const pkg = JSON.parse(raw);
