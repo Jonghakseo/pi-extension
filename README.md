@@ -30,6 +30,7 @@ packages/
   todo-write/            (deprecated, use todo-write-overlay)
   todo-write-overlay/
   until/
+  vcc-ko/
 ```
 
 ## Workspace

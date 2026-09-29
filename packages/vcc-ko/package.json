@@ -1,0 +1,53 @@
+{
+	"name": "@ryan_nookpi/pi-extension-vcc-ko",
+	"version": "0.1.0",
+	"description": "Korean-aware algorithmic conversation compactor for pi (fork of pi-vcc) with vcc_recall history search.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/vcc-ko"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/vcc-ko#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"compaction",
+		"korean"
+	],
+	"files": [
+		"index.ts",
+		"src/",
+		"tools/",
+		"README.md",
+		"RULES-GUIDE.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-ai": {
+			"optional": true
+		},
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		},
+		"typebox": {
+			"optional": true
+		}
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

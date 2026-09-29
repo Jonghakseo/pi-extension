@@ -32,6 +32,34 @@
 			"quoteStyle": "double"
 		}
 	},
+	"overrides": [
+		{
+			// Fork of sting8k/pi-vcc: keep upstream's loose session-entry typing and ANSI-stripping regexes.
+			"includes": ["packages/vcc-ko/**"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "off",
+						"noControlCharactersInRegex": "off"
+					},
+					"style": {
+						"noNonNullAssertion": "off"
+					}
+				}
+			}
+		},
+		{
+			// CLI analysis script prints its report to stdout.
+			"includes": ["packages/vcc-ko/tools/*.mjs"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noConsole": "off"
+					}
+				}
+			}
+		}
+	],
 	"assist": {
 		"enabled": true,
 		"actions": {
