@@ -121,6 +121,33 @@ describe("bash_async extension registration", () => {
 		}
 	});
 
+	it("delivers a completion that finishes during compaction without waiting for another turn", async () => {
+		let tool: any;
+		const handlers = new Map<string, (event?: unknown, context?: unknown) => unknown>();
+		const sendMessage = vi.fn();
+		bashAsync({
+			registerTool: (definition: any) => (tool = definition),
+			on: (event: string, handler: (event?: unknown, context?: unknown) => unknown) => handlers.set(event, handler),
+			sendMessage,
+		} as any);
+		// Pi reports compaction as not idle.
+		const context = { ...(await makeContext()), isIdle: () => false };
+		try {
+			handlers.get("session_before_compact")?.({ type: "session_before_compact" }, context);
+			const started = await tool.execute(
+				"call",
+				{ action: "start", command: "printf done", timeout: 0 },
+				undefined,
+				undefined,
+				context,
+			);
+			await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1), { timeout: 3_000 });
+			expect(sendMessage.mock.calls[0]?.[0].details.jobIds).toEqual([started.details.jobId]);
+		} finally {
+			await (handlers.get("session_shutdown") as () => Promise<void>)?.();
+		}
+	});
+
 	it("returns details for status, output, list, incremental output, and kill", async () => {
 		let tool: any;
 		let shutdown: (() => Promise<void>) | undefined;

@@ -49,6 +49,9 @@ export default function bashAsync(pi: ExtensionAPI): void {
 	const pollGuard = new PollGuard();
 	let uiContext: ExtensionContext | undefined;
 	let latestContext: ExtensionContext | undefined;
+	// Pi reports compaction as busy, but the model cannot read status or output until it ends, so
+	// holding a completion then only delays it. Deliver during compaction like any idle moment.
+	let compacting = false;
 	let runningJobsWidget: RunningJobsWidget | undefined;
 	let widgetInstalled = false;
 
@@ -114,7 +117,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 		provider.bind(context.sessionManager.getSessionId());
 	});
 	const notifications = new NotificationBatcher({
-		isAgentIdle: () => latestContext?.isIdle() ?? true,
+		isAgentIdle: () => compacting || (latestContext?.isIdle() ?? true),
 		deliveryState: (id) => provider.deliveryState(id),
 		send: (message, options) => {
 			provider.deliver(message.details.jobIds, message, (annotated) => pi.sendMessage(annotated, options));
@@ -175,6 +178,16 @@ export default function bashAsync(pi: ExtensionAPI): void {
 	pi.on("turn_end", (event, context) => {
 		latestContext = context;
 		if (event.toolResults.length === 0) notifications.flush({ force: true });
+	});
+
+	pi.on("session_before_compact", () => {
+		compacting = true;
+	});
+	pi.on("session_compact", () => {
+		compacting = false;
+	});
+	pi.on("agent_start", () => {
+		compacting = false;
 	});
 
 	pi.on("agent_end", (_event, context) => {

@@ -113,7 +113,13 @@ export class NotificationBatcher {
 			this.pending.clear();
 			return;
 		}
-		if (!options?.force && !this.agentIdle()) return;
+		if (!options?.force && !this.agentIdle()) {
+			// Busy without a turn boundary ahead (for example, compaction) would otherwise strand
+			// the completion. Keep holding, and deliver as soon as the agent is idle again.
+			this.timer = setTimeout(() => this.flush(), this.delayMs);
+			this.timer.unref?.();
+			return;
+		}
 
 		const included: CompletedJob[] = [];
 		let content = "";

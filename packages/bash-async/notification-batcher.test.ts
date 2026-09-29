@@ -58,6 +58,23 @@ describe("NotificationBatcher", () => {
 		vi.useRealTimers();
 	});
 
+	it("delivers a held completion once the agent is idle again without another turn boundary", () => {
+		vi.useFakeTimers();
+		const send = vi.fn();
+		let idle = false;
+		const batcher = new NotificationBatcher({ send, isAgentIdle: () => idle });
+		batcher.enqueue(job("a"));
+		vi.advanceTimersByTime(5_000);
+		expect(send).not.toHaveBeenCalled();
+
+		// Compaction ends: no turn_end or agent_end follows.
+		idle = true;
+		vi.advanceTimersByTime(500);
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(send.mock.calls[0]?.[0].details.jobIds).toEqual(["a"]);
+		vi.useRealTimers();
+	});
+
 	it("drops acknowledged jobs from the pending batch", () => {
 		vi.useFakeTimers();
 		const send = vi.fn();
