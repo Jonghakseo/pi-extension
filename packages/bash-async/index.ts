@@ -4,7 +4,14 @@ import { AsyncTaskProvider } from "./async-task-provider.js";
 import { JobManager } from "./job-manager.js";
 import { NotificationBatcher } from "./notification-batcher.js";
 import { PollGuard } from "./poll-guard.js";
-import { renderCallText, renderJobList, renderResultText, renderStart, renderStatus } from "./render.js";
+import {
+	renderCallText,
+	renderJobList,
+	renderResultText,
+	renderStart,
+	renderStatus,
+	renderStatusLine,
+} from "./render.js";
 import { createRunningJobsWidget, type RunningJobsWidget } from "./running-jobs-widget.js";
 import {
 	type BashAsyncParams,
@@ -41,6 +48,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 	let manager: JobManager;
 	const pollGuard = new PollGuard();
 	let uiContext: ExtensionContext | undefined;
+	let latestContext: ExtensionContext | undefined;
 	let runningJobsWidget: RunningJobsWidget | undefined;
 	let widgetInstalled = false;
 
@@ -101,8 +109,12 @@ export default function bashAsync(pi: ExtensionAPI): void {
 			manager.reopenAdmission();
 		},
 	});
-	pi.on("session_start", (_event, context) => provider.bind(context.sessionManager.getSessionId()));
+	pi.on("session_start", (_event, context) => {
+		latestContext = context;
+		provider.bind(context.sessionManager.getSessionId());
+	});
 	const notifications = new NotificationBatcher({
+		isAgentIdle: () => latestContext?.isIdle() ?? true,
 		deliveryState: (id) => provider.deliveryState(id),
 		send: (message, options) => {
 			provider.deliver(message.details.jobIds, message, (annotated) => pi.sendMessage(annotated, options));
@@ -123,7 +135,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 		promptSnippet: "Run long finite non-interactive jobs with bash_async.",
 		promptGuidelines: [
 			"Use bash_async start only for finite non-interactive commands whose result is not needed immediately.",
-			"Do not call sleep or poll status, output, or list to wait. Continue only with independent work; otherwise end the turn. Every terminal result arrives automatically as a follow-up.",
+			"Do not call sleep or poll status, output, or list to wait. Continue only with independent work; otherwise end the turn. Every terminal result arrives automatically as a follow-up; jobs you kill and results already read via status or output are not re-reported.",
 			"Repeated status, output, or list queries that return no new information are rate limited and fail with an error.",
 			"bash_async does not support TUI, REPL, stdin, or interactive terminal programs.",
 		],
@@ -139,13 +151,35 @@ export default function bashAsync(pi: ExtensionAPI): void {
 			return new Text(text ? theme.fg("toolOutput", text) : "", 0, 0);
 		},
 		async execute(_toolCallId, args, signal, _onUpdate, context) {
+			latestContext = context;
 			if (context.mode === "tui") uiContext = context;
 			else {
 				clearRunningJobsWidget();
 				uiContext = undefined;
 			}
-			return execute(manager, pollGuard, args as BashAsyncParams, context, signal);
+			return execute(
+				manager,
+				pollGuard,
+				(jobId) => {
+					notifications.acknowledge(jobId);
+					provider.discardPending(jobId);
+				},
+				args as BashAsyncParams,
+				context,
+				signal,
+			);
 		},
+	});
+
+	// Held completions go out with the final turn so the follow-up is picked up in the same agent run.
+	pi.on("turn_end", (event, context) => {
+		latestContext = context;
+		if (event.toolResults.length === 0) notifications.flush({ force: true });
+	});
+
+	pi.on("agent_end", (_event, context) => {
+		latestContext = context;
+		notifications.flushWhenIdle();
 	});
 
 	pi.on("session_shutdown", async () => {
@@ -162,6 +196,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 async function execute(
 	manager: JobManager,
 	pollGuard: PollGuard,
+	acknowledge: (jobId: string) => void,
 	args: BashAsyncParams,
 	context: ExtensionContext,
 	signal?: AbortSignal,
@@ -191,8 +226,10 @@ async function execute(
 	if (params.action === "status") {
 		const details = manager.status(params.jobId);
 		if (!details) return errorResult(`job not found: ${params.jobId}`);
-		if (isTerminalJobStatus(details.status)) forgetJobPolls(pollGuard, params.jobId);
-		else {
+		if (isTerminalJobStatus(details.status)) {
+			forgetJobPolls(pollGuard, params.jobId);
+			acknowledge(params.jobId);
+		} else {
 			const decision = pollGuard.check(`status:${params.jobId}`, details.status);
 			if (!decision.allowed) return pollBlockedResult("status", decision.retryInMs);
 		}
@@ -201,15 +238,24 @@ async function execute(
 	if (params.action === "output") {
 		const output = manager.output(params.jobId, params);
 		if (!output) return errorResult(`job not found: ${params.jobId}`);
-		if (isTerminalJobStatus(output.job.status)) forgetJobPolls(pollGuard, params.jobId);
-		else {
+		const terminal = isTerminalJobStatus(output.job.status);
+		if (terminal) {
+			forgetJobPolls(pollGuard, params.jobId);
+			acknowledge(params.jobId);
+		} else {
 			// Offsets identify the returned line range, so a range already seen means the caller learns nothing new.
 			const decision = pollGuard.check(`output:${params.jobId}`, `${output.startOffset}:${output.nextOffset}`);
 			// An incremental read that returned lines already moved its cursor, so dropping it would lose that output.
 			const consumed = params.incremental === true && output.nextOffset > output.startOffset;
 			if (!decision.allowed && !consumed) return pollBlockedResult("output", decision.retryInMs);
 		}
-		const text = [output.warning, output.text || "(no output)", `Log: ${output.job.log.path}`]
+		// A terminal read replaces the follow-up, so it must carry the final status the follow-up would have.
+		const text = [
+			terminal ? renderStatusLine(output.job) : undefined,
+			output.warning,
+			output.text || "(no output)",
+			`Log: ${output.job.log.path}`,
+		]
 			.filter(Boolean)
 			.join("\n");
 		return result(text, {
@@ -225,6 +271,7 @@ async function execute(
 	forgetJobPolls(pollGuard, params.jobId);
 	const killed = await manager.kill(params.jobId);
 	if (!killed) return errorResult(`job not found: ${params.jobId}`);
+	if (isTerminalJobStatus(killed.status)) acknowledge(killed.id);
 	const details = manager.status(killed.id);
 	return details ? result(renderStatus(details), details) : errorResult(`job not found: ${params.jobId}`);
 }

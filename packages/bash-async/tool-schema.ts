@@ -10,7 +10,7 @@ export const DEFAULT_TIMEOUT_SECONDS = 1_800;
 export const DEFAULT_OUTPUT_LINES = 50;
 export const MAX_OUTPUT_LINES = 200;
 
-export const TOOL_DESCRIPTION = `Run a finite, non-interactive shell command in the background. Use bash_async start for commands expected to take more than 30 seconds when the next action does not need their result immediately. Do not call sleep or poll status, output, or list to wait. Continue only with work that does not depend on the job; otherwise end the turn. Success, failure, timeout, and kill results arrive automatically as a follow-up. Query output only when early output is needed or the user asks; repeated queries that return no new information are rate limited and fail. TUI, REPL, and commands requiring stdin are unsupported.`;
+export const TOOL_DESCRIPTION = `Run a finite, non-interactive shell command in the background. Use bash_async start for commands expected to take more than 30 seconds when the next action does not need their result immediately. Do not call sleep or poll status, output, or list to wait. Continue only with work that does not depend on the job; otherwise end the turn. Success, failure, and timeout results arrive automatically as a follow-up; jobs you kill or whose final result you already read via status or output are not re-reported. Query output only when early output is needed or the user asks; repeated queries that return no new information are rate limited and fail. TUI, REPL, and commands requiring stdin are unsupported.`;
 
 export const toolParameters = Type.Object({
 	action: StringEnum(BASH_ASYNC_ACTIONS, {

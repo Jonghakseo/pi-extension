@@ -37,6 +37,58 @@ describe("NotificationBatcher", () => {
 		vi.useRealTimers();
 	});
 
+	it("holds completions while the agent is busy and delivers them as one message once idle", () => {
+		vi.useFakeTimers();
+		const send = vi.fn();
+		let idle = false;
+		const batcher = new NotificationBatcher({ send, isAgentIdle: () => idle });
+		batcher.enqueue(job("a"));
+		vi.advanceTimersByTime(500);
+		batcher.enqueue(job("b"));
+		vi.advanceTimersByTime(500);
+		expect(send).not.toHaveBeenCalled();
+
+		batcher.flushWhenIdle();
+		vi.advanceTimersByTime(100);
+		expect(send).not.toHaveBeenCalled();
+		idle = true;
+		vi.advanceTimersByTime(50);
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(send.mock.calls[0]?.[0].details.jobIds).toEqual(["a", "b"]);
+		vi.useRealTimers();
+	});
+
+	it("drops acknowledged jobs from the pending batch", () => {
+		vi.useFakeTimers();
+		const send = vi.fn();
+		const batcher = new NotificationBatcher({ send, isAgentIdle: () => false });
+		batcher.enqueue(job("read"));
+		batcher.enqueue(job("unread"));
+		batcher.acknowledge("read");
+		batcher.flush({ force: true });
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(send.mock.calls[0]?.[0].details.jobIds).toEqual(["unread"]);
+
+		batcher.acknowledge("unread");
+		batcher.flushWhenIdle();
+		vi.runAllTimers();
+		expect(send).toHaveBeenCalledTimes(1);
+		vi.useRealTimers();
+	});
+
+	it("falls back to sending after the idle wait times out", () => {
+		vi.useFakeTimers();
+		const send = vi.fn();
+		const batcher = new NotificationBatcher({ send, isAgentIdle: () => false });
+		batcher.enqueue(job("stuck"));
+		batcher.flushWhenIdle();
+		vi.advanceTimersByTime(9_900);
+		expect(send).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(200);
+		expect(send).toHaveBeenCalledTimes(1);
+		vi.useRealTimers();
+	});
+
 	it("discards pending messages after shutdown", () => {
 		vi.useFakeTimers();
 		const send = vi.fn();

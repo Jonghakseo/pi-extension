@@ -15,6 +15,7 @@ async function makeContext() {
 		cwd,
 		mode: "print",
 		hasUI: false,
+		isIdle: () => true,
 		model: undefined,
 		sessionManager: { getSessionId: () => "index-test", getSessionFile: () => undefined },
 	};
@@ -63,6 +64,61 @@ describe("bash_async extension registration", () => {
 			"Do not call sleep",
 		);
 		expect(tool.renderResult(invalid, { expanded: false }, theme).render(100).join("\n")).toContain("bash_async:");
+	});
+
+	it("does not re-report jobs that were killed or whose terminal result was already read", async () => {
+		let tool: any;
+		const handlers = new Map<string, (event?: unknown, context?: unknown) => unknown>();
+		const sendMessage = vi.fn();
+		let idle = false;
+		vi.stubEnv("PI_BASH_ASYNC_POLL_COOLDOWN_MS", "0");
+		bashAsync({
+			registerTool: (definition: any) => (tool = definition),
+			on: (event: string, handler: (event?: unknown, context?: unknown) => unknown) => handlers.set(event, handler),
+			sendMessage,
+		} as any);
+		const context = { ...(await makeContext()), isIdle: () => idle };
+		const run = (action: Record<string, unknown>) => tool.execute("call", action, undefined, undefined, context);
+		const waitTerminal = (jobId: string) =>
+			vi.waitFor(async () => {
+				const listed = await run({ action: "list" });
+				expect(listed.details.jobs.find((entry: any) => entry.id === jobId)?.status).toBe("succeeded");
+			});
+
+		try {
+			const killed = await run({ action: "start", command: "sleep 30", timeout: 0 });
+			await run({ action: "kill", jobId: killed.details.jobId });
+
+			const statusRead = await run({ action: "start", command: "printf status", timeout: 0 });
+			await waitTerminal(statusRead.details.jobId);
+			await run({ action: "status", jobId: statusRead.details.jobId });
+
+			const outputRead = await run({ action: "start", command: "printf output; exit 3", timeout: 0 });
+			await vi.waitFor(async () => {
+				const output = await run({ action: "output", jobId: outputRead.details.jobId });
+				// The terminal read stands in for the follow-up, so it must carry the final status.
+				expect(output.content[0].text).toContain(`[${outputRead.details.jobId}] failed (exit 3)`);
+			});
+
+			const unread = await run({ action: "start", command: "printf unread", timeout: 0 });
+			await waitTerminal(unread.details.jobId);
+
+			await new Promise((resolve) => setTimeout(resolve, 600));
+			expect(sendMessage).not.toHaveBeenCalled();
+			handlers.get("turn_end")?.({ type: "turn_end", toolResults: [{}], message: {} }, context);
+			expect(sendMessage).not.toHaveBeenCalled();
+			handlers.get("turn_end")?.({ type: "turn_end", toolResults: [], message: {} }, context);
+			expect(sendMessage).toHaveBeenCalledTimes(1);
+			expect(sendMessage.mock.calls[0]?.[0].details.jobIds).toEqual([unread.details.jobId]);
+			expect(sendMessage.mock.calls[0]?.[1]).toEqual({ triggerTurn: true, deliverAs: "followUp" });
+
+			idle = true;
+			handlers.get("agent_end")?.({ type: "agent_end" }, context);
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			expect(sendMessage).toHaveBeenCalledTimes(1);
+		} finally {
+			await (handlers.get("session_shutdown") as () => Promise<void>)?.();
+		}
 	});
 
 	it("returns details for status, output, list, incremental output, and kill", async () => {

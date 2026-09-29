@@ -443,6 +443,8 @@ export class JobManager {
 			if (isTerminalJobStatus(job.status)) continue;
 			this.detachTimedOutJob(job);
 		}
+		// Closed-marker writes must finish before shutdown returns, or the log escapes retention cleanup.
+		await this.waitFor(this.logMaintenance, graceMs);
 	}
 
 	closeAllLogs(): void {

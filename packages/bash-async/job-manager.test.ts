@@ -562,6 +562,25 @@ describe("JobManager capacity and settlement boundaries", () => {
 });
 
 describe("JobManager log retention", () => {
+	it("marks a log closed before shutdown returns so retention can reclaim it later", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "bash-async-shutdown-marker-"));
+		tempDirectories.push(directory);
+		const manager = new JobManager({
+			logsDirectory: directory,
+			execute: ({ job }) =>
+				new Promise((resolve) =>
+					job.abortController.signal.addEventListener("abort", () => resolve({ exitCode: null })),
+				),
+		});
+		const started = await manager.start({ command: "wait", timeoutSeconds: 0, context: context(directory) });
+		if (!started.ok) throw new Error("job not accepted");
+		await vi.waitFor(() => expect(manager.get(started.details.jobId)?.status).toBe("running"));
+
+		await manager.abortAndSettleAll({ graceMs: 1_000 });
+
+		await expect(access(`${started.details.logPath}.closed`)).resolves.toBeUndefined();
+	});
+
 	it("does not recursively remove a session directory when cleanup races a new start", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "bash-async-cleanup-race-"));
 		tempDirectories.push(directory);

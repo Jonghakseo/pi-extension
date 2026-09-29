@@ -20,7 +20,7 @@ The extension registers the `bash_async` tool with five actions:
 - `kill`: stop a queued or running job
 - `list`: list retained jobs
 
-Use `start` when the next action does not need the command result immediately. Completion or failure arrives automatically through a follow-up message, so do not poll `status`, `output`, or `list`, and do not run sleep loops while waiting. Query output only when an early result is useful or the user asks for it. A repeated `status`, `output`, or `list` query that would return the same information as the previous one fails with a rate-limit error until the job state changes or the cooldown expires.
+Use `start` when the next action does not need the command result immediately. Completion or failure arrives automatically through a follow-up message, so do not poll `status`, `output`, or `list`, and do not run sleep loops while waiting. Query output only when an early result is useful or the user asks for it. Completions that finish while the agent is busy are held until its turn ends. A job you kill, or whose final result you already read through `status` or `output`, is not reported again. A repeated `status`, `output`, or `list` query that would return the same information as the previous one fails with a rate-limit error until the job state changes or the cooldown expires.
 
 TUI programs, REPLs, commands requiring stdin, and selection menus are unsupported.
 

@@ -470,10 +470,14 @@ export class AsyncTaskProvider {
 	}
 
 	discardPending(taskId: string): void {
+		let changed = false;
 		for (const ticket of this.tickets.values()) {
-			if (ticket.rootTaskId === taskId && !ticket.deliveryId) ticket.state = "suppressed";
+			if (ticket.rootTaskId === taskId && !ticket.deliveryId && ticket.state !== "suppressed") {
+				ticket.state = "suppressed";
+				changed = true;
+			}
 		}
-		this.publish();
+		if (changed) this.publish();
 	}
 
 	failPending(taskId: string, reason: string): void {
