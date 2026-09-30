@@ -61,6 +61,8 @@ export async function runCommand(command, args, { cwd, quiet = false, timeoutMs,
 				entered = true;
 				child.stdin.write("\n");
 			}
+			// In a PTY, answering npm's ENTER prompt makes npm open the URL itself; opening it here too duplicates the window.
+			if (tty) return;
 			for (const line of lines) {
 				for (const url of authUrls(line)) {
 					if (!seen.has(url)) {
@@ -85,7 +87,7 @@ export async function runCommand(command, args, { cwd, quiet = false, timeoutMs,
 		child.on("close", (code) => {
 			if (timer) clearTimeout(timer);
 			child.stdin?.destroy();
-			for (const line of Object.values(pending)) {
+			for (const line of tty ? [] : Object.values(pending)) {
 				for (const url of authUrls(line)) {
 					if (!seen.has(url)) onAuthUrl?.(url);
 				}

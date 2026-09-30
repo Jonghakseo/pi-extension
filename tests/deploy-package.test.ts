@@ -136,7 +136,7 @@ describe("common package deploy", () => {
 		expect(opened).toEqual([]);
 	});
 
-	it("provides a real PTY to publish and answers npm's browser prompt once", async () => {
+	it("provides a real PTY to publish and lets npm open the approval URL once", async () => {
 		const opened: string[] = [];
 		const code = [
 			"if (!process.stdin.isTTY || !process.stdout.isTTY) process.exit(2);",
@@ -152,7 +152,7 @@ describe("common package deploy", () => {
 		});
 		expect(result.code).toBe(0);
 		expect(result.stdout).toContain("approved");
-		expect(opened).toEqual(["https://www.npmjs.com/auth/cli/test-pty"]);
+		expect(opened).toEqual([]);
 	});
 
 	it("detects npm's web approval URL without a TTY", async () => {
