@@ -263,10 +263,14 @@ function lint(file) {
 				}
 			}
 			if (isSkel(e) && SHAPES.has(e.type) && e.label?.text && typeof e.width === "number") {
-				const need = textWidthEstimate(e.label.text, e.label.fontSize ?? 20) + 24;
-				if (need > e.width)
+				// Fonts render wider than the estimate; diamonds need extra room around their text.
+				const fontSize = e.label.fontSize ?? 20;
+				const scale = e.type === "diamond" ? 1.5 : 1;
+				const needW = (textWidthEstimate(e.label.text, fontSize) + 48) * scale;
+				const needH = (fontSize * 1.25 * e.label.text.split("\n").length + 32) * scale;
+				if (needW > e.width || (typeof e.height === "number" && needH > e.height))
 					warns.push(
-						`${e.id}: 라벨 "${e.label.text.split("\n")[0]}"이 너비 ${e.width}보다 길어 보임 (약 ${Math.round(need)}px 필요)`,
+						`${e.id}: 라벨 "${e.label.text.split("\n")[0]}"이 ${e.width}×${e.height}에 빠듯해 보임 (약 ${Math.round(needW)}×${Math.round(needH)}px 필요)`,
 					);
 			}
 		}
