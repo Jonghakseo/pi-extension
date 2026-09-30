@@ -31,6 +31,12 @@ Bridge [Claude Code MCP](https://modelcontextprotocol.io/) server configurations
 pi install npm:@ryan_nookpi/pi-extension-claude-mcp-bridge
 ```
 
+## Pi 0.99.0 and newer
+
+Pi now includes [built-in MCP support](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/docs/mcp.md#extensions). Both loaders can read `.pi/mcp.json` and register tools as `mcp__<server>__<tool>`. This bridge registers `/mcp-status`, not `/mcp`, so it does not automatically replace the built-in loader.
+
+If you keep this bridge for its legacy SSE transport, schema cache, or tool-toggle UI, disable the built-in `mcp` extension in `pi config`, or add `"-builtin:mcp"` to your existing `extensions` setting. Do not replace the other entries in that setting. Otherwise, use Pi's built-in MCP support and remove this bridge to avoid duplicate server connections and tool names.
+
 ## Runtime controls
 
 | Environment variable | Behavior |
