@@ -11,7 +11,7 @@ packages/
   bash-async/
   cc-system-prompt/
   claude-hooks-bridge/
-  claude-mcp-bridge/
+  claude-mcp-bridge/     (deprecated, use pi's built-in MCP)
   claude-spinner/
   clipboard/
   codex-fast-mode/
@@ -107,7 +107,6 @@ pi install npm:@ryan_nookpi/pi-extension-auto-name
 pi install npm:@ryan_nookpi/pi-extension-bash-async
 pi install npm:@ryan_nookpi/pi-extension-cc-system-prompt
 pi install npm:@ryan_nookpi/pi-extension-claude-hooks-bridge
-pi install npm:@ryan_nookpi/pi-extension-claude-mcp-bridge
 pi install npm:@ryan_nookpi/pi-extension-claude-spinner
 pi install npm:@ryan_nookpi/pi-extension-clipboard
 pi install npm:@ryan_nookpi/pi-extension-codex-fast-mode

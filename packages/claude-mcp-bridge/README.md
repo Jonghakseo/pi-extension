@@ -1,5 +1,9 @@
 # claude-mcp-bridge
 
+> **⚠️ Deprecated.** pi now supports MCP natively (pi 0.99+), so this bridge is no longer maintained.
+> Move your servers to `~/.pi/agent/mcp.json` (or `.pi/mcp.json` in trusted projects) with `pi mcp add`, check them with `pi mcp list`, then run `pi remove npm:@ryan_nookpi/pi-extension-claude-mcp-bridge`.
+> The built-in client does not read `~/.claude.json` or `.mcp.json`, so servers configured only there must be re-added.
+
 Bridge [Claude Code MCP](https://modelcontextprotocol.io/) server configurations into pi — auto-discovers and registers MCP tools from stdio, SSE, and streamable-HTTP servers.
 
 ## What it does
