@@ -1,6 +1,6 @@
 ---
 name: chrome-cdp
-description: "사용자의 실제 Chrome 세션(로그인 상태·열린 탭)을 검사·조작할 때 사용한다. '내 브라우저에서 확인', '열린 탭 봐줘', 로그인 상태에서만 재현되는 프론트엔드 이슈 조사, 인증된 dev/admin 화면 검증, 임의 raw CDP 메서드 호출이 필요할 때 적용한다. 사용자 세션이 필요 없는 격리 브라우저 자동화에는 쓰지 않는다."
+description: "로그인 상태와 열린 탭이 있는 사용자의 실제 Chrome 세션을 검사·조작할 때 사용한다."
 license: MIT (see LICENSE)
 compatibility: Requires the chrome-devtools CLI (chrome-devtools-mcp >= 1.0, installed globally via npm or mise) and Chrome 144+ with remote debugging enabled for auto-connect. Raw CDP mode requires a Chromium launched with a custom debugging profile.
 ---

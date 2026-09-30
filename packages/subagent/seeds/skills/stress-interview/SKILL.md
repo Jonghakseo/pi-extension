@@ -1,6 +1,6 @@
 ---
 name: stress-interview
-description: Run verifier, reviewer, and challenger in parallel to pressure-test a change before release. Use when a user requests multi-angle review, release readiness, adversarial validation, or a stress interview.
+description: Use when the user wants a change pressure-tested from multiple angles before release.
 disable-model-invocation: false
 ---
 

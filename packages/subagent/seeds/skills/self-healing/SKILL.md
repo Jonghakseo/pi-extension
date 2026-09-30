@@ -1,6 +1,6 @@
 ---
 name: self-healing
-description: Run a bounded two-cycle review-and-repair loop using stress-interview and worker. Use when a user requests self-healing, automatic review fixes, or a review-repair-recheck workflow.
+description: Use when the user asks for self-healing, an automatic review-fix-recheck loop on a change.
 disable-model-invocation: false
 ---
 

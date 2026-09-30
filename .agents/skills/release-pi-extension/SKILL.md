@@ -1,6 +1,6 @@
 ---
 name: release-pi-extension
-description: pi-extension 모노레포의 개별 패키지를 npm에 배포하고 필요 시 커밋과 Git push까지 검증한다. 사용자가 이 레포에서 "배포해줘", "npm publish", "패키지 릴리스", "버전 올리고 배포", "커밋+배포+푸시"처럼 실제 release를 명시적으로 요청할 때 사용한다. 일반 commit/push만 요청하면 ship을 사용한다.
+description: pi-extension 모노레포 패키지를 npm에 배포할 때 사용한다.
 compatibility: pnpm workspace, npm registry 접근, Node.js와 Python 3, macOS 또는 Linux. 브라우저에서 npm 로그인 및 게시 승인이 가능해야 한다.
 ---
 

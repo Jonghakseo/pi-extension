@@ -1,6 +1,6 @@
 ---
 name: tmux-terminal
-description: "TUI, REPL, stdin, selection menu처럼 실제 PTY 화면 캡처와 키 입력이 필요한 터미널을 전용 tmux helper로 안전하게 제어할 때 사용한다. 일반 빌드, 테스트, 서버, 유한 비대화형 명령에는 사용하지 않는다."
+description: "TUI·REPL처럼 화면 확인과 키 입력이 필요한 대화형 터미널을 제어할 때 사용한다."
 ---
 
 # tmux-terminal

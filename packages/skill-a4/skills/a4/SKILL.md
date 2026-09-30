@@ -1,6 +1,6 @@
 ---
 name: a4
-description: Convert any Markdown document into an A4-style Microsoft Word document (.docx) while preserving the original content without summarizing, rewriting, translating, or reordering it. Use when the user asks to make Markdown into A4, Word, DOCX/DOC, proposal/report/contract-style document, or a print-ready file. Also use for 계약서·제안서·보고서 인쇄용 변환, Pretendard or other custom fonts, Regular/Medium/SemiBold weight restrictions, maximum font-size counts, minimum body size, and table font-size requirements.
+description: Markdown 문서를 A4 인쇄용 Word(.docx)로 변환할 때 사용한다.
 ---
 
 # A4 Markdown to Microsoft Word DOCX
