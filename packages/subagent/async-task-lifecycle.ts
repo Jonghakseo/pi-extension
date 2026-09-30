@@ -15,6 +15,15 @@ interface Invocation {
 const invocations = new AsyncLocalStorage<Invocation>();
 const resources = new AsyncLocalStorage<(presence: Presence) => void>();
 
+/**
+ * Pi can start the next agent turn synchronously inside sendMessage(triggerTurn).
+ * Run it outside this invocation's async context so tool calls in that turn start
+ * their own roots instead of attaching to an already finished one.
+ */
+function outsideInvocation<T>(work: () => T): T {
+	return invocations.exit(() => resources.exit(work));
+}
+
 export function currentResourceObserver(): (presence: Presence) => void {
 	return resources.getStore() ?? (() => {});
 }
@@ -247,7 +256,7 @@ export class SubagentAsyncTasks {
 					// A persisted completion from another provider instance must never auto-replay.
 					if (typeof details.asyncTaskRootId === "string" && !root) return;
 					if (!root || options?.triggerTurn === false || (!root.result && options?.triggerTurn !== true)) {
-						target.sendMessage(message, options);
+						outsideInvocation(() => target.sendMessage(message, options));
 						return;
 					}
 					if (root.hidden) return;
@@ -259,7 +268,9 @@ export class SubagentAsyncTasks {
 						root.id,
 						(typeof message.content === "string" ? message.content : JSON.stringify(message.content)).slice(0, 4096),
 					);
-					this.provider.deliver([root.id], message, (annotated) => target.sendMessage(annotated, options));
+					this.provider.deliver([root.id], message, (annotated) =>
+						outsideInvocation(() => target.sendMessage(annotated, options)),
+					);
 				};
 				return send;
 			},

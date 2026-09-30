@@ -717,6 +717,44 @@ describe("hosted subagent production execution", () => {
 		expect(pi.sendMessage.mock.calls.filter(([message]) => message.details?.asyncTasks)).toHaveLength(1);
 	});
 
+	it("delivers a run started by the turn that a finished batch completion triggered", async () => {
+		const { host, execute, context, pi } = setup();
+		const batchChildren = [child(), child()];
+		const workerChild = child();
+		spawn.mockReturnValueOnce(batchChildren[0]).mockReturnValueOnce(batchChildren[1]).mockReturnValueOnce(workerChild);
+		let followUpTurn: Promise<unknown> | undefined;
+		// Pi starts the triggered turn from inside sendMessage, so that turn's tool calls run in
+		// whatever async context the completion was sent from.
+		pi.sendMessage.mockImplementation((_message: any, options: any) => {
+			if (options?.triggerTurn && !followUpTurn)
+				followUpTurn = execute("worker", { command: "subagent run worker -- fix it" }, undefined, undefined, context);
+		});
+		await execute(
+			"batch",
+			{ command: 'subagent batch --agent worker --task "verify" --agent worker --task "review"' },
+			undefined,
+			undefined,
+			context,
+		);
+		for (const batchChild of batchChildren) {
+			await vi.advanceTimersByTimeAsync(1001);
+			batchChild.finish();
+		}
+		await vi.advanceTimersByTimeAsync(0);
+		await followUpTurn;
+		await vi.advanceTimersByTimeAsync(1001);
+		workerChild.finish();
+		await vi.advanceTimersByTimeAsync(0);
+
+		const roots = host.detail.tasks.filter((task: any) => task.taskId === task.rootTaskId);
+		expect(roots).toHaveLength(2);
+		expect(roots.every((root: any) => root.execution === "succeeded")).toBe(true);
+		expect(host.detail.tickets).toMatchObject([{ state: "submitted" }, { state: "submitted" }]);
+		const delivered = pi.sendMessage.mock.calls.filter(([message]) => message.details?.asyncTasks);
+		expect(delivered).toHaveLength(2);
+		expect(delivered[1]?.[0].content).toContain("[subagent:worker#3] completed");
+	});
+
 	it("retains expired pending output and reports failed delivery rather than losing the obligation", async () => {
 		const { host, execute, context, pi, store } = setup();
 		let active = context.sessionManager.getSessionFile();
