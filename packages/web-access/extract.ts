@@ -575,7 +575,7 @@ async function extractViaHttp(url: string, signal?: AbortSignal, options?: Extra
 			};
 		}
 
-		const markdown = turndown.turndown(article.content);
+		const markdown = turndown.turndown(article.content ?? "");
 		activityMonitor.logComplete(activityId, response.status);
 
 		if (markdown.length < MIN_USEFUL_CONTENT) {
