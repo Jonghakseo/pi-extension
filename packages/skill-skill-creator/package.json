@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-skill-skill-creator",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Pi skill for creating, editing, and validating Agent Skills (SKILL.md, triggers, progressive disclosure).",
 	"license": "MIT",
 	"repository": {

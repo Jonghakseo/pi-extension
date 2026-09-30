@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-skill-excalidraw",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Pi skill that writes .excalidraw diagrams and opens them in a live-synced local Excalidraw window.",
 	"license": "MIT",
 	"repository": {
