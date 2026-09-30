@@ -2,6 +2,78 @@
 
 이 문서는 `pi-extension` 모노레포를 Pi 본체의 다음 릴리스에 맞춰 업데이트할 때 같은 조사를 반복하지 않기 위한 기준 문서다.
 
+## 0.99.1 업데이트 조사 (2026-09-30)
+
+전역 CLI는 이미 `0.99.1`이다. 저장소 SDK를 `0.85.0 → 0.99.1`로 올렸으며 전역 설치는 변경하지 않았다.
+
+### 공식 변경 내역과 영향
+
+공식 [coding-agent](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/CHANGELOG.md), [pi-ai](https://github.com/earendil-works/pi/blob/v0.99.1/packages/ai/CHANGELOG.md), [agent](https://github.com/earendil-works/pi/blob/v0.99.1/packages/agent/CHANGELOG.md), [pi-tui](https://github.com/earendil-works/pi/blob/v0.99.1/packages/tui/CHANGELOG.md)에서 `0.85.1`, `0.86.0`, `0.86.1`, `0.87.0`, `0.87.1`, `0.99.0`, `0.99.1`을 확인했다. `Unreleased`는 적용 대상에서 제외했다.
+
+| 변경 내역 | 저장소 영향과 조치 |
+| --- | --- |
+| `0.85.1` SDK import 배포 오류 수정, GPT-6 Astra 추가 | `packageExtensions`의 `pi-server` 보정을 제거했다. 공개 SDK import 회귀 테스트를 그대로 유지한다. |
+| `0.86.0` provider 입력의 `TranscriptContext` 정규화, 도구 메시지 JSON 제한 | `codex-fast-mode`는 context를 공개 `/compat` adapter에 그대로 위임한다. 사용자 provider context를 직접 분해하지 않는다. 타입 검사와 provider payload 테스트를 통과했다. |
+| `0.86.0` `pi.on()` unsubscribe, `modelRegistry.stream()`, 네이티브 클립보드 | 새 API로 단순화할 수 있는지 검토했다. 기존 peer가 구버전을 허용하므로 새 API만으로 대체하지 않는다. |
+| `0.86.1` 클립보드 fallback, provider 오류 처리 수정 | upstream 수정 혜택을 받는다. 별도 copy/paste 도구를 제공하는 `clipboard`는 유지한다. |
+| `0.87.0` canonical session context, `turn_end` 경계, `context_with_system` | `headroom`, `until`, `vcc-ko`는 custom 메시지를 필터링하며 system 메시지 존재를 전제하지 않는다. `bash-async`는 기존 `toolResults`를 읽는다. 제거된 `shouldStopAfterTurn`, 메시지 직접 대입, exhaustive event switch 사용은 없다. |
+| `0.87.1` 모델 카탈로그, 압축·CLI 오류 처리 수정 | SDK 갱신으로 반영한다. 별도의 CLI/parser 호환 수정은 없다. |
+| `0.99.0` 내장 MCP/codemode, tool exposure·중첩 호출 API | `claude-mcp-bridge`와 `.pi/mcp.json`, 도구 이름이 겹칠 수 있다. README에 내장 MCP 비활성화 또는 브리지 제거 선택을 안내했다. 구현은 자동 전환하지 않는다. |
+| `0.99.0` system 테마, TUI 색상 query API 교체, 이미지·분류 모델 통합 | 제거된 색상 query/이미지 API 사용은 없다. `claude-spinner`, `subagent`의 실제 테마·편집기 조합은 수동 확인 대상으로 남긴다. |
+| `0.99.0` GPT-5.4 Codex 카탈로그 제거, Fast 가격 계산 수정 | 카탈로그 테스트에서 GPT-5.4를 제외하고 Astra를 포함한다. 기존 모델 payload 지원과 `service_tier: "priority"`는 유지한다. |
+| `0.99.1` GPT-6.1 Sol 추가·기본 모델 변경, bundled 로그인 수정 | upstream 기본 모델 변경을 반영하지만 fast-mode의 지원 모델 범위는 임의로 넓히지 않는다. 새 모델 fast-mode 지원은 별도 검토가 필요하다. |
+
+### 저장소 탐색과 의존성 변경
+
+- 버전 소유자는 루트 `package.json` 1개다. Pi SDK `devDependencies` 3개와 `pnpm.overrides` 4개를 `0.99.1`로 맞췄다.
+- `packages/*/package.json` 26개가 optional Pi peer를 선언한다. `until`의 `>=0.84.3`, 나머지 `*` 범위를 유지한다. 이 검증이 구버전 전체 지원을 새로 증명하는 것은 아니다.
+- `pnpm@10.24.0`, 루트 workspace, `pnpm-lock.yaml`을 사용한다. lockfile은 기존 Git 비추적 정책을 유지하면서 로컬에서 갱신했다. 별도 build script 없이 TypeScript 소스를 배포한다.
+- 적용되는 `AGENTS.md`, 별도 upgrade/runbook은 발견되지 않았다. 이 문서와 `pnpm run verify:strict`를 기준으로 삼았다. `pi-caveman/`의 설치 산출물은 제외했고 manifest 없는 추가 extension source는 발견하지 못했다.
+- 설치 전 lockfile을 보존해 비교했다. `pi-server`, `pi-client`, `pi-protocol` 의존성이 빠지고 `pi-mcp`, `pi-codemode`, `quickjs-wasi`가 추가된다. `pi-telemetry`는 `0.99.1`로 갱신된다. 새 SDK의 요구에 따라 `undici`, `esbuild` 등 전이 의존성도 바뀌었다. Pi 외 직접 의존성 선언은 바꾸지 않았다. 설치 로그는 55개 추가·63개 제거를 보고했다.
+
+### 코드 개선 검토와 실제 수정
+
+| 분류 | 대표 구현 | 조치와 근거 |
+| --- | --- | --- |
+| 유지 3건 | `service_tier` payload, 사용자 정의 spinner, Bash 중단 패치 | upstream Fast 가격·테마·프로세스 종료 수정이 각 사용자 계약을 대체하지 않는다. |
+| 필수 수정 1건 | `codex-fast-mode/index.test.ts` | 변경된 실제 카탈로그와 타입에 맞춘다. GPT-5.4 payload 테스트는 유지한다. |
+| 삭제 1건 | `pnpm.packageExtensions` | `0.85.1` 공식 배포 오류 수정과 보정 없는 `0.99.1` 실제 SDK import 성공으로 제거 근거를 확인했다. 런타임 동작은 기존 import 테스트로 보호한다. |
+| 대체 보류 3건 | `clipboard`, `/compat` import, `claude-mcp-bridge` | peer의 구버전 허용, 클립보드 fallback 동작, 브리지의 SSE·schema cache·toggle UI가 새 API와 같다는 증거가 부족하다. |
+| 단순화 0건 | 새 이벤트·tool orchestration API | 최소 지원 버전이나 노출 동작을 임의로 바꾸지 않는다. |
+
+기존 `patches/pi-coding-agent@0.85.0.patch`를 내용 변경 없이 `patches/pi-coding-agent@0.99.1.patch`로 옮기고 workspace selector를 갱신했다. 최신 [Bash 소스](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/src/core/tools/bash.ts)에도 `await fsAccess()`와 `spawn()` 사이 중단 확인이 없다.
+
+새 `tests/pi-bash-abort.test.ts`는 실제 공개 `createLocalBashOperations()`로 cwd 검사 중 중단한 명령이 셸을 시작하지 않는지 검증한다. 별도 Node 프로세스에서 native ESM spawn 경계를 관찰한다. 패치 없이 셸 시작 1회로 실패하고, 패치 적용 후 시작 0회로 통과함을 확인했다. installed SDK를 잠시 무패치 상태로 재현한 뒤 `finally`에서 원상복구했다.
+
+내장 MCP와 브리지의 설정·도구 이름 중복은 [공식 MCP 문서](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/docs/mcp.md#extensions)와 현재 등록 코드로 확인했다. 실제 서버 중복 연결은 재현하지 않았고 사용자의 MCP 설정도 변경하지 않았다.
+
+### 검증 결과와 한계
+
+- 최초 typecheck와 전체 test에서 제거된 GPT-5.4 카탈로그 테스트가 실패했다. 테스트를 카탈로그 변경에 맞춘 뒤 최종 필수 검증을 통과했다.
+- `pnpm run verify:strict` 통과. Biome 403개 파일, TypeScript, 141개 테스트 파일의 1,697개 테스트, 패키지 배포 구성 검사, 지정 소스의 100% coverage를 확인했다.
+- coverage는 statements 823/823, branches 627/627, functions 142/142, lines 742/742다. 저장소 전체 소스의 커버리지 수치는 아니다.
+- `pnpm install --frozen-lockfile --ignore-scripts` 통과. 공개 SDK import, `pi -v`의 `0.99.1`도 확인했다. 별도 build script가 없어 빌드는 실행하지 않았다.
+- `env -i`, 임시 HOME·TMPDIR·agent 디렉터리, 빈 cwd, `PI_OFFLINE=1`, Node 실제 절대 경로로 `discoverAndLoadExtensions()`를 실행했다. 26개 factory 로드·등록이 모두 성공하고 errors는 비어 있었다. 최초 실행은 등록 완료 후 background timer 때문에 종료되지 않아 timeout이 났다. 등록 한정 스모크는 결과 검사 후 명시적 exit로 끝내 재실행을 통과했다. 종료 생명주기·session_start·도구 실행·TUI는 검증 범위 밖이다.
+- 설치 시 `@google/genai`, `esbuild` build script 차단 경고가 있었지만 허용 정책을 바꾸지 않았다. 실행한 검증은 통과했다.
+
+### 업데이트 시각화
+
+위젯 도구가 제공되지 않아 Mermaid로 정리한다.
+
+```mermaid
+flowchart TD
+    A[전역 Pi 0.99.1 유지] --> B[공식 릴리스 7개 확인]
+    B --> C[버전 소유자 1개와 peer 선언 26개 탐색]
+    C --> D[저장소 SDK 0.85.0에서 0.99.1로 갱신]
+    D --> E[카탈로그 테스트 수정과 import 보정 삭제]
+    E --> F[Bash 중단 패치 유지와 회귀 테스트 추가]
+    F --> G[타입 검사와 1697개 테스트 통과]
+    G --> H[지정 소스 커버리지 100퍼센트와 등록 스모크 26개 통과]
+    H --> I[내장 MCP 공존과 실제 테마 조합은 수동 확인]
+```
+
+후속 확인은 내장 MCP와 브리지 중 하나 선택, 테마·spinner·멘션 편집기 조합 확인, 새 기본 모델의 fast-mode 지원 여부다. 자동 배포·커밋·push는 하지 않았다.
+
 ## 0.85.0 업데이트 조사 (2026-09-05)
 
 - 전역 CLI와 npm 최신 정식 릴리스는 `0.85.0`이다. 저장소 SDK의 적용 대상은 `0.84.3 → 0.85.0`이다.

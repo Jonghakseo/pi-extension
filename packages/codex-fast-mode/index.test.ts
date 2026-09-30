@@ -158,9 +158,9 @@ describe("codex fast mode", () => {
 		);
 	});
 
-	// Pi 0.85.0 does not bundle Astra; this extension does not register models itself.
+	// Pi 0.99.1 bundles Astra but no longer lists GPT-5.4. Keep legacy payload support.
 	it.each(
-		SUPPORTED_MODEL_IDS.filter((modelId) => modelId !== GPT_6_SUPPORTED_MODEL_ID),
+		SUPPORTED_MODEL_IDS.filter((modelId) => modelId !== "gpt-5.4"),
 	)("keeps bundled %s on the openai-codex provider with openai-codex-responses api", (modelId) => {
 		const model = getModel("openai-codex", modelId);
 		expect(model.provider).toBe("openai-codex");
