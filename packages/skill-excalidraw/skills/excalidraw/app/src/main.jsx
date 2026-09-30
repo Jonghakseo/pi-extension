@@ -3,6 +3,7 @@ import {
 	convertToExcalidrawElements,
 	Excalidraw,
 	exportToBlob,
+	FONT_FAMILY,
 	restoreElements,
 	serializeAsJSON,
 } from "@excalidraw/excalidraw";
@@ -27,6 +28,33 @@ const CLIENT_ID = crypto.randomUUID();
 const SAVE_DEBOUNCE_MS = 400;
 const RESTORE_OPTS = { refreshDimensions: true, repairBindings: true };
 const randomNonce = () => Math.floor(Math.random() * 2 ** 31);
+const FONT_NAME = Object.fromEntries(Object.entries(FONT_FAMILY).map(([name, id]) => [id, name]));
+
+/** Same font stack Excalidraw measures and renders text with. */
+function fontString(fontSize = 20, fontFamily = FONT_FAMILY.Excalifont) {
+	const name = FONT_NAME[fontFamily] ?? "Excalifont";
+	const cjk = fontFamily === FONT_FAMILY.Excalifont ? ", Xiaolai" : "";
+	return `${fontSize}px ${name}${cjk}, Segoe UI Emoji`;
+}
+
+/**
+ * Load the glyphs the scene's text needs before measuring it. Excalidraw
+ * measures with whatever font is ready, and CJK glyphs (Xiaolai) load lazily per
+ * unicode-range chunk; a width measured with a fallback font stays in the
+ * element after the real font arrives, and the renderer clips text to it.
+ */
+async function loadTextFonts(elements) {
+	const chars = new Map();
+	for (const e of elements) {
+		if (e.isDeleted) continue;
+		const src = e.type === "text" ? e : e.label;
+		if (typeof src?.text !== "string" || !src.text) continue;
+		const font = fontString(src.fontSize, src.fontFamily);
+		chars.set(font, (chars.get(font) ?? "") + src.text);
+	}
+	await Promise.all([...chars].map(([font, text]) => document.fonts.load(font, text).catch(() => [])));
+	await document.fonts.ready;
+}
 
 async function api(pathname, init = {}) {
 	return fetch(`/api/files/${FILE_ID}${pathname}`, {
@@ -132,6 +160,7 @@ function App() {
 			const API = excalidrawAPI;
 			const local = API.getSceneElementsIncludingDeleted();
 			const prepared = await prepareScene(content, local);
+			await loadTextFonts(prepared.elements);
 			// Label centering needs the text size re-measured by restoreElements.
 			const { elements: remote } = recenterLabels(restoreElements(prepared.elements, local, RESTORE_OPTS));
 			// Anything restore/recenter fixed (dangling bindings, text size, label
@@ -199,6 +228,33 @@ function App() {
 		[excalidrawAPI, save],
 	);
 
+	/**
+	 * Re-measure text with the fonts that are loaded now and save if any size
+	 * changed. Covers glyphs that finished loading after the last measurement
+	 * (Excalidraw only repaints on font load; it keeps the stale width).
+	 */
+	const refitText = useCallback(async () => {
+		const API = excalidrawAPI;
+		if (!s.ready || API.getAppState().editingTextElement) return false;
+		const current = API.getSceneElementsIncludingDeleted();
+		await loadTextFonts(current);
+		const live = current.filter((e) => !e.isDeleted);
+		const restored = new Map(restoreElements(live, null, RESTORE_OPTS).map((e) => [e.id, e]));
+		const merged = current.map((e) => (e.type === "text" && restored.has(e.id) ? restored.get(e.id) : e));
+		const { elements: fitted } = recenterLabels(merged);
+		let changed = 0;
+		const next = fitted.map((e, i) => {
+			const prev = current[i];
+			if (e.type !== "text" || contentKey(prev) === contentKey(e)) return prev;
+			changed++;
+			return { ...e, version: prev.version + 1, versionNonce: randomNonce() };
+		});
+		if (!changed) return false;
+		API.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER });
+		await save();
+		return true;
+	}, [excalidrawAPI, save]);
+
 	const snapshot = useCallback(
 		async ({ reqId, rev }) => {
 			const API = excalidrawAPI;
@@ -219,7 +275,8 @@ function App() {
 				);
 				return;
 			}
-			await document.fonts.ready;
+			// Fix stale text sizes first so the PNG matches what the window shows.
+			await enqueue(refitText);
 			try {
 				const blob = await exportToBlob({
 					elements: API.getSceneElements(),
@@ -237,8 +294,22 @@ function App() {
 				await post(JSON.stringify({ error: err.message }), "application/json");
 			}
 		},
-		[excalidrawAPI],
+		[excalidrawAPI, refitText],
 	);
+
+	useEffect(() => {
+		if (!excalidrawAPI) return;
+		let timer;
+		const onFontsLoaded = () => {
+			clearTimeout(timer);
+			timer = setTimeout(() => enqueue(refitText), 150);
+		};
+		document.fonts.addEventListener("loadingdone", onFontsLoaded);
+		return () => {
+			clearTimeout(timer);
+			document.fonts.removeEventListener("loadingdone", onFontsLoaded);
+		};
+	}, [excalidrawAPI, refitText]);
 
 	useEffect(() => {
 		if (!excalidrawAPI) return;

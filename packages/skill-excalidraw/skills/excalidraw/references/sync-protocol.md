@@ -27,7 +27,7 @@
   1. `pendingMermaid`가 있으면 mermaid 결과로 요소 전체 교체.
   2. 스켈레톤 정규화(`convertMixed`). 정식 frame에는 `children: []`를 넣어 변환기 크래시를 막는다.
   3. `repairScene`: 도형 이동에 따른 직선 화살표 재계산, 바인딩 역참조 보강.
-  4. `restoreElements(remote, local, {refreshDimensions, repairBindings})`: 텍스트 재측정, 끊긴 바인딩 제거.
+  4. `loadTextFonts`로 씬의 텍스트 글리프를 `document.fonts.load`로 받은 뒤 `restoreElements(remote, local, {refreshDimensions, repairBindings})`: 텍스트 재측정, 끊긴 바인딩 제거.
   5. `recenterLabels`: 재측정된 크기로 라벨을 도형 안에 다시 정렬.
   6. 저장 안 된 로컬 변경이 있으면 `threeWayMerge`.
   7. 파일에서 사라진 요소는 `isDeleted` tombstone으로, 내용이 바뀐 요소는 `version+1`·새 `versionNonce`로 만든다. Excalidraw Store는 versionNonce로 변경을 감지하므로 이게 없으면 LLM 변경이 히스토리에 안 남고, 이후 Cmd+Z가 LLM 이전 값으로 되감긴다.
@@ -35,7 +35,7 @@
   9. 1–5단계에서 내용이 바뀌었거나 병합으로 로컬 변경이 남았으면 곧바로 파일에 다시 저장한다.
 - 3-way 기준선: 마지막 동기화 시점의 요소별 `{version, contentKey}`. 로컬만 바뀐 요소는 로컬, 원격이 바뀐 요소는 원격이 이긴다.
 - 로컬 편집 저장: `onChange`에서 요소 version 합이 바뀐 경우만 400ms debounce 후 PUT.
-- 스냅샷: CLI → POST `/snapshot` → 서버가 첫 번째 연결 창에 `snapshot {reqId, rev}` → 창이 해당 rev 반영까지 최대 5초 대기 후 `exportToBlob` → POST `/api/snapshots/<reqId>` → CLI가 PNG 저장. 창이 그 rev를 반영하지 못했으면(마지막 반영 오류 포함) PNG 대신 에러 JSON을 보내고 CLI는 실패로 끝난다.
+- 스냅샷: CLI → POST `/snapshot` → 서버가 첫 번째 연결 창에 `snapshot {reqId, rev}` → 창이 해당 rev 반영까지 최대 5초 대기 → `refitText`(아래 폰트 절) → `exportToBlob` → POST `/api/snapshots/<reqId>` → CLI가 PNG 저장. 창이 그 rev를 반영하지 못했으면(마지막 반영 오류 포함) PNG 대신 에러 JSON을 보내고 CLI는 실패로 끝난다.
 
 ## 보안
 
@@ -45,3 +45,11 @@
 ## 폰트
 
 빌드할 때 `node_modules/@excalidraw/excalidraw/dist/prod/fonts`를 `dist/fonts`로 복사하고 `window.EXCALIDRAW_ASSET_PATH = "/"`로 로컬에서 서빙한다(오프라인 동작, 한글은 Xiaolai 손글씨 대체 폰트). 로컬 로드에 실패하면 Excalidraw가 CDN으로 폴백한다.
+
+Xiaolai는 unicode-range 청크 단위로 늦게 로드된다. Excalidraw는 그 순간 쓸 수 있는 폰트로 텍스트 `width`를 재고, 폰트가 도착하면 다시 그리기만 한다(`Fonts.onLoaded`는 shape 캐시만 지우고 크기는 유지). 대체 폰트로 잰 폭이 남으면 창은 텍스트를 그 폭에서 잘라 그리고, 앱은 그 폭을 파일에 저장한다. `exportToBlob`은 새로 그려서 잘림이 PNG에 안 보인다. 그래서 앱은 다음 세 곳에서 폰트를 맞춘다.
+
+- 원격 반영 4단계: 재측정 전에 필요한 글리프를 로드한다.
+- `document.fonts`의 `loadingdone`(150ms debounce): `refitText`가 텍스트 요소만 다시 재고 라벨을 재정렬한다. 크기가 바뀌었으면 `captureUpdate: NEVER`로 반영하고 저장한다. 텍스트 편집 중이면 건너뛴다.
+- 스냅샷 직전: 같은 `refitText`를 큐에서 돌려 PNG와 창이 같은 크기를 쓰게 한다.
+
+예전 버전이 좁은 폭을 저장한 파일도 창에서 열면 이 경로로 스스로 고쳐진다.
