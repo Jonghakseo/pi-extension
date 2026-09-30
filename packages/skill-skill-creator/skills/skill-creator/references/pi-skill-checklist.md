@@ -52,6 +52,7 @@ Anything else (e.g. Claude Code's `argument-hint`) is silently dropped by Pi.
 ## Trigger quality
 
 - [ ] `description` says both what the skill does and when to use it.
+- [ ] `description` is 1-2 sentences with only purpose and trigger situation; implementation details, trigger phrase lists, and exclusions live in the body.
 - [ ] Includes realistic user phrases and domain keywords.
 - [ ] Avoids over-broad trigger wording that would steal unrelated tasks.
 - [ ] Near-miss cases are documented in the body if needed.

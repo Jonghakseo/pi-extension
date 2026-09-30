@@ -40,7 +40,8 @@ MAX_NAME = 64
 MAX_COMPATIBILITY = 500
 
 # Soft warnings.
-MIN_DESCRIPTION_LEN = 40
+MIN_DESCRIPTION_LEN = 15
+SOFT_DESCRIPTION_MAX = 200
 SOFT_LINE_LIMIT = 500
 
 # Body link patterns: things that look like skill-relative resource refs.
@@ -151,6 +152,12 @@ def _check_description(desc: str, errors: List[str], warnings: List[str]) -> Non
         warnings.append(
             f"description is only {len(desc)} chars; auto-trigger will be weak. "
             "Include both what the skill does and when to use it."
+        )
+    if len(desc) > SOFT_DESCRIPTION_MAX:
+        warnings.append(
+            f"description is {len(desc)} chars; keep it to 1-2 sentences of purpose and "
+            "trigger situation. Move implementation details, trigger phrase lists, and "
+            "exclusions into the body."
         )
     lower = desc.lower()
     trigger_hints = ("use when", "use to", "사용", "때", "할 때", "쓰", "면 ", "when ", "if you")
