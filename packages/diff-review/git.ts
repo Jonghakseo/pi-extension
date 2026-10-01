@@ -106,9 +106,55 @@ function isSameBranchRef(ref: string, branch: string): boolean {
 	return ref === branch || ref.endsWith(`/${branch}`);
 }
 
-async function findReviewBase(pi: ExtensionAPI, repoRoot: string): Promise<ReviewBaseInfo | null> {
+export interface ReviewWindowOptions {
+	/** Base ref picked explicitly (e.g. from the review window). Takes precedence over every other source. */
+	baseRef?: string | null;
+}
+
+async function listBaseRefCandidates(pi: ExtensionAPI, repoRoot: string): Promise<string[]> {
+	const output = await runGitAllowFailure(pi, repoRoot, [
+		"for-each-ref",
+		"--sort=-committerdate",
+		"--format=%(refname:short)",
+		"refs/heads",
+		"refs/remotes",
+	]);
+	const refs = output
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter((ref) => ref.length > 0 && !ref.startsWith("-") && ref !== "origin" && !ref.endsWith("/HEAD"));
+	return [...new Set(refs)];
+}
+
+async function resolveExplicitReviewBase(pi: ExtensionAPI, repoRoot: string, baseRef: string): Promise<ReviewBaseInfo> {
+	if (baseRef.startsWith("-")) {
+		throw new Error(`Invalid base ref: ${baseRef}`);
+	}
+	const mergeBase = (await runGitAllowFailure(pi, repoRoot, ["merge-base", "HEAD", baseRef])).trim();
+	if (mergeBase.length === 0) {
+		throw new Error(`Could not find a merge base between HEAD and ${baseRef}.`);
+	}
+	return { mergeBase, baseRef };
+}
+
+async function findReviewBase(
+	pi: ExtensionAPI,
+	repoRoot: string,
+	explicitBaseRef?: string | null,
+): Promise<ReviewBaseInfo | null> {
+	const explicit = explicitBaseRef?.trim();
+	if (explicit) {
+		return resolveExplicitReviewBase(pi, repoRoot, explicit);
+	}
+
 	const branch = await currentBranch(pi, repoRoot);
 	const candidates: string[] = [];
+	// DIFF_REVIEW_BASE overrides auto-detection but silently falls through to it if the ref does not resolve.
+	const envRef = process.env.DIFF_REVIEW_BASE?.trim();
+	if (envRef && !envRef.startsWith("-")) {
+		candidates.push(envRef);
+	}
+
 	const upstreamRef = await getUpstreamRef(pi, repoRoot);
 	if (upstreamRef && !isSameBranchRef(upstreamRef, branch)) {
 		candidates.push(upstreamRef);
@@ -508,17 +554,20 @@ function toBranchReviewFile(change: ChangedPath): ReviewFile {
 export async function getReviewWindowData(
 	pi: ExtensionAPI,
 	cwd: string,
+	options: ReviewWindowOptions = {},
 ): Promise<{
 	repoRoot: string;
 	files: ReviewFile[];
 	commits: ReviewCommitInfo[];
 	branchBaseRef: string | null;
 	branchMergeBaseSha: string | null;
+	availableBaseRefs: string[];
 	repositoryHasHead: boolean;
 }> {
 	const repoRoot = await getRepoRoot(pi, cwd);
 	const repositoryHasHead = await hasHead(pi, repoRoot);
-	const reviewBase = repositoryHasHead ? await findReviewBase(pi, repoRoot) : null;
+	const reviewBase = repositoryHasHead ? await findReviewBase(pi, repoRoot, options.baseRef) : null;
+	const availableBaseRefs = repositoryHasHead ? await listBaseRefCandidates(pi, repoRoot) : [];
 	const branchComparisonBase = reviewBase?.mergeBase ?? (repositoryHasHead ? "HEAD" : null);
 	const workingTreeStatus = await getWorkingTreeStatusInfo(pi, repoRoot);
 	const branchChanges = repositoryHasHead
@@ -541,6 +590,7 @@ export async function getReviewWindowData(
 		commits: [...workingTreeCommit, ...fallbackCommits],
 		branchBaseRef: reviewBase?.baseRef ?? null,
 		branchMergeBaseSha: branchComparisonBase,
+		availableBaseRefs,
 		repositoryHasHead,
 	};
 }
@@ -825,6 +875,8 @@ export async function loadReviewFileContents(
 }
 
 export const __testing = {
+	findReviewBase,
+	listBaseRefCandidates,
 	parseStatusPorcelainZ,
 	shouldNormalizeBranchChanges,
 };

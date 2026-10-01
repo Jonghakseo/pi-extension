@@ -94,6 +94,8 @@ export interface ReviewRequestCommitPayload {
 export interface ReviewRequestReviewDataPayload {
 	type: "request-review-data";
 	requestId: string;
+	/** Base ref to compare against. `null` resets to auto-detection; omitted keeps the current selection. */
+	baseRef?: string | null;
 }
 
 export interface ReviewClipboardReadPayload {
@@ -161,6 +163,7 @@ export interface ReviewReviewDataMessage {
 	commits: ReviewCommitInfo[];
 	branchBaseRef: string | null;
 	branchMergeBaseSha: string | null;
+	availableBaseRefs: string[];
 	repositoryHasHead: boolean;
 }
 
@@ -198,5 +201,6 @@ export interface ReviewWindowData {
 	commits: ReviewCommitInfo[];
 	branchBaseRef: string | null;
 	branchMergeBaseSha: string | null;
+	availableBaseRefs: string[];
 	repositoryHasHead: boolean;
 }

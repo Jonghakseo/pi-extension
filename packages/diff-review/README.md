@@ -21,6 +21,15 @@ pi install npm:@ryan_nookpi/pi-extension-diff-review
 - lets you leave overall comments and file/line comments
 - appends the collected feedback back into the pi editor as a follow-up prompt
 
+## Choosing the base branch
+
+By default the branch scope compares `HEAD` against the first base that resolves, in this order: the branch upstream (when it is not the same-named remote branch), `origin/HEAD`, `origin/main`, `origin/master`, `origin/develop`, `main`, `master`, `develop`.
+
+To compare against something else:
+
+- pick a branch from the **Base** dropdown in the review window header (`Auto` restores the default detection), or
+- set the `DIFF_REVIEW_BASE` environment variable (for example `DIFF_REVIEW_BASE=origin/release-1.0 pi`) to change the default for new review windows. If the ref cannot be resolved, auto-detection is used.
+
 ## Requirements
 
 - pi
