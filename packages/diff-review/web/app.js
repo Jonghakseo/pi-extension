@@ -19,6 +19,8 @@ const state = {
 	commitErrors: {}, // sha -> error message
 	reviewDataRequestId: null,
 	reviewDataRequestStartedAt: null,
+	baseRefOverride: null, // explicit base picked in the UI; null = auto-detected
+	pendingBaseRefOverride: undefined, // base awaiting confirmation from the host
 	comments: [],
 	overallComment: "",
 	hideUnchanged: true,
@@ -57,6 +59,8 @@ const editorContainerEl = document.getElementById("editor-container");
 const diffEditorHostEl = document.getElementById("diff-editor-host");
 const singleEditorHostEl = document.getElementById("single-editor-host");
 const refreshReviewButton = document.getElementById("refresh-review-button");
+const baseRefWrapperEl = document.getElementById("base-ref-wrapper");
+const baseRefSelectEl = document.getElementById("base-ref-select");
 const submitButton = document.getElementById("submit-button");
 const cancelButton = document.getElementById("cancel-button");
 const overallCommentButton = document.getElementById("overall-comment-button");
@@ -784,7 +788,7 @@ function clearWorkingTreeCommitState() {
 	}
 }
 
-function requestLatestReviewData() {
+function requestLatestReviewData(options = {}) {
 	if (!window.glimpse?.send) return;
 	if (state.reviewDataRequestId != null) return;
 	const requestStartedAt = Date.now();
@@ -792,7 +796,34 @@ function requestLatestReviewData() {
 	state.reviewDataRequestId = requestId;
 	state.reviewDataRequestStartedAt = requestStartedAt;
 	updateReviewRefreshButton();
-	window.glimpse.send({ type: "request-review-data", requestId });
+	updateBaseRefSelect();
+	const payload = { type: "request-review-data", requestId };
+	if (options.baseRef !== undefined) payload.baseRef = options.baseRef;
+	window.glimpse.send(payload);
+}
+
+function updateBaseRefSelect() {
+	if (!baseRefSelectEl || !baseRefWrapperEl) return;
+	const refs = Array.isArray(reviewData.availableBaseRefs) ? reviewData.availableBaseRefs : [];
+	if (reviewData.repositoryHasHead === false || refs.length === 0) {
+		baseRefWrapperEl.style.display = "none";
+		return;
+	}
+	baseRefWrapperEl.style.display = "flex";
+	const autoLabel = !state.baseRefOverride && reviewData.branchBaseRef ? `Auto (${reviewData.branchBaseRef})` : "Auto";
+	baseRefSelectEl.replaceChildren();
+	const addOption = (value, label) => {
+		const option = document.createElement("option");
+		option.value = value;
+		option.textContent = label;
+		baseRefSelectEl.appendChild(option);
+	};
+	addOption("", autoLabel);
+	const options =
+		state.baseRefOverride && !refs.includes(state.baseRefOverride) ? [state.baseRefOverride, ...refs] : refs;
+	for (const ref of options) addOption(ref, ref);
+	baseRefSelectEl.value = state.baseRefOverride ?? "";
+	baseRefSelectEl.disabled = state.reviewDataRequestId != null;
 }
 
 function refreshReviewData() {
@@ -1845,7 +1876,13 @@ window.__reviewReceive = (message) => {
 		reviewData.commits = Array.isArray(message.commits) ? message.commits : [];
 		reviewData.branchBaseRef = message.branchBaseRef ?? null;
 		reviewData.branchMergeBaseSha = message.branchMergeBaseSha ?? null;
+		reviewData.availableBaseRefs = Array.isArray(message.availableBaseRefs) ? message.availableBaseRefs : [];
 		reviewData.repositoryHasHead = message.repositoryHasHead === true;
+		if (state.pendingBaseRefOverride !== undefined) {
+			state.baseRefOverride = state.pendingBaseRefOverride;
+			state.pendingBaseRefOverride = undefined;
+		}
+		updateBaseRefSelect();
 		const requestStartedAt = state.reviewDataRequestStartedAt;
 		state.reviewDataRequestId = null;
 		state.reviewDataRequestStartedAt = null;
@@ -1875,7 +1912,9 @@ window.__reviewReceive = (message) => {
 		if (state.reviewDataRequestId !== message.requestId) return;
 		state.reviewDataRequestId = null;
 		state.reviewDataRequestStartedAt = null;
+		state.pendingBaseRefOverride = undefined;
 		updateReviewRefreshButton();
+		updateBaseRefSelect();
 		alert(`Failed to refresh review data: ${message.message || "Unknown error"}`);
 		return;
 	}
@@ -2084,6 +2123,16 @@ if (refreshReviewButton) {
 	});
 }
 
+if (baseRefSelectEl) {
+	baseRefSelectEl.addEventListener("change", () => {
+		if (state.reviewDataRequestId != null) return;
+		const nextBaseRef = baseRefSelectEl.value || null;
+		if (nextBaseRef === state.baseRefOverride) return;
+		state.pendingBaseRefOverride = nextBaseRef;
+		requestLatestReviewData({ baseRef: nextBaseRef });
+	});
+}
+
 toggleUnchangedButton.addEventListener("click", () => {
 	state.hideUnchanged = !state.hideUnchanged;
 	applyEditorOptions();
@@ -2172,5 +2221,6 @@ ensureActiveFileForScope();
 renderTree();
 renderCommitList();
 renderFileComments();
+updateBaseRefSelect();
 updateSidebarLayout();
 setupMonaco();
