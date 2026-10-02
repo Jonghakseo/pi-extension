@@ -2,6 +2,26 @@
 
 이 문서는 `pi-extension` 모노레포를 Pi 본체의 다음 릴리스에 맞춰 업데이트할 때 같은 조사를 반복하지 않기 위한 기준 문서다.
 
+## 1.0.0 업데이트 조사 (2026-10-01)
+
+전역 CLI는 `0.99.2`이고 npm 최신은 `1.0.0`이다. 저장소 SDK를 `0.99.1 → 1.0.0`으로 올렸으며 전역 설치는 변경하지 않았다.
+
+공식 [coding-agent](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md), [pi-ai](https://github.com/earendil-works/pi/blob/main/packages/ai/CHANGELOG.md), [agent](https://github.com/earendil-works/pi/blob/main/packages/agent/CHANGELOG.md), [pi-tui](https://github.com/earendil-works/pi/blob/main/packages/tui/CHANGELOG.md)에서 `0.99.2`, `1.0.0`을 확인했다. `Unreleased`는 제외했다.
+
+| 변경 내역 | 저장소 영향과 조치 |
+| --- | --- |
+| `1.0.0` agent-core에서 실험적 harness·`./node`·`./harness/*` subpath 제거 | 직접 import는 `subagent/types.ts`의 `AgentToolResult` 하나이며 유지된다. 제거된 API 사용 없음. |
+| `1.0.0` TUI 기본 fullscreen | `todo-write-overlay`, `idle-screensaver`, `claude-spinner` 등의 실제 화면 조합은 수동 확인 대상이다. 코드 변경 없음. |
+| `1.0.0` codemode에서 `typeof tools.name` 대신 `"name" in tools` | 저장소 사용처 없음. |
+| `0.99.2` MCP 도구·namespace 이름의 `-`를 `_`로 정규화 | `claude-mcp-bridge`의 `sanitizeName()`이 이미 `[^a-z0-9_]`를 `_`로 바꾸므로 영향 없음. |
+| `0.99.2` 이름·handler 없는 명령 등록 시 로드 실패 | 격리 로드 스모크에서 26개 entrypoint 모두 errors 없이 로드됨. |
+| `0.99.2` pi-ai `/models` 경량 entry point | 대체 보류. `/compat` import 교체는 peer 하한 상향이 필요하다. |
+
+- 루트 `package.json`의 `devDependencies` 3개와 `pnpm.overrides` 4개를 `1.0.0`으로 맞췄다. 패키지 peer(`*`, `until`의 `>=0.84.3`)는 유지했다.
+- `1.0.0` `bash.js`에도 `fsAccess()`와 `spawn()` 사이 중단 확인이 없다. patch 문맥이 같아 내용 변경 없이 `patches/pi-coding-agent@1.0.0.patch`로 옮겼다.
+- lockfile 비교 결과 Pi 계열(`chord`, `pi-codemode`, `pi-mcp`, `pi-telemetry` 포함)만 `1.0.0`으로 바뀌었고 비 Pi 전이 의존성 변화는 없다.
+- 검증: `pnpm run verify:strict` 통과(141개 파일, 1,697개 테스트, 지정 소스 coverage 100%). 공개 SDK import 성공. `env -i` 격리 환경에서 `discoverAndLoadExtensions()`로 26개 entrypoint 로드, errors 0건.
+
 ## 0.99.1 업데이트 조사 (2026-09-30)
 
 전역 CLI는 이미 `0.99.1`이다. 저장소 SDK를 `0.85.0 → 0.99.1`로 올렸으며 전역 설치는 변경하지 않았다.
