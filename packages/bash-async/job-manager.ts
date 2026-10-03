@@ -26,6 +26,8 @@ export const MAX_RETAINED_JOBS = 20;
 export const COMPLETED_JOB_TTL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_KILL_GRACE_MS = 5_000;
 export const DEFAULT_MAX_CLOSED_LOG_BYTES = 1024 * 1024 * 1024;
+/** Budget for an inline tail. Larger than a paged output read because it replaces the follow-up. */
+export const MAX_TAIL_BYTES = 8 * 1024;
 const CLOSED_LOG_MARKER_SUFFIX = ".closed";
 
 export interface StartJobInput {
@@ -51,6 +53,15 @@ export interface JobOutputResult {
 	nextOffset: number;
 	retainedFromOffset: number;
 	warning?: string;
+}
+
+export interface JobTailResult {
+	job: BashAsyncJob;
+	lines: string[];
+	startOffset: number;
+	nextOffset: number;
+	retainedFromOffset: number;
+	finalLineShortened: boolean;
 }
 
 export interface SessionEnvironment {
@@ -124,6 +135,39 @@ interface ClosedLog {
 }
 
 type ExecutionAdapter = (request: ExecutionRequest) => Promise<{ exitCode: number | null }>;
+
+/** Keeps the end of an oversized line; a tail that shows its head would hide the outcome it was read for. */
+function tailUtf8(value: string, maxBytes: number): string {
+	if (Buffer.byteLength(value) <= maxBytes) return value;
+	const characters = [...value];
+	let used = 0;
+	let start = characters.length;
+	for (let index = characters.length - 1; index >= 0; index--) {
+		const bytes = Buffer.byteLength(characters[index] ?? "");
+		if (used + bytes > maxBytes) break;
+		used += bytes;
+		start = index;
+	}
+	return characters.slice(start).join("");
+}
+
+/** Fills from the newest line backwards so a byte budget never costs the end of the output. */
+function tailWithinBytes(lines: string[], maxBytes: number): { lines: string[]; finalLineShortened: boolean } {
+	const selected: string[] = [];
+	let used = 0;
+	for (let index = lines.length - 1; index >= 0; index--) {
+		const line = lines[index] ?? "";
+		const lineBytes = Buffer.byteLength(line) + (selected.length === 0 ? 0 : 1);
+		if (used + lineBytes > maxBytes) {
+			// A single oversized final line still has to show the outcome, so shorten it instead of dropping it.
+			if (selected.length === 0) return { lines: [tailUtf8(line, maxBytes)], finalLineShortened: true };
+			break;
+		}
+		selected.unshift(line);
+		used += lineBytes;
+	}
+	return { lines: selected, finalLineShortened: false };
+}
 
 function titleFor(command: string, provided?: string): string {
 	if (provided?.trim()) return provided;
@@ -368,6 +412,23 @@ export class JobManager {
 		return { job: this.publicJob(job), ...output };
 	}
 
+	/** Newest retained lines within a byte budget, for callers that must not lose the end of the output. */
+	tail(jobId: string, options: { lines?: number; maxBytes?: number } = {}): JobTailResult | undefined {
+		const job = this.jobs.get(jobId);
+		if (!job) return undefined;
+		const summary = job.logWriter.summary();
+		const bounded = tailWithinBytes(job.logWriter.tail(options.lines), options.maxBytes ?? MAX_TAIL_BYTES);
+		const nextOffset = summary.retainedFromOffset + summary.retainedLineCount;
+		return {
+			job: this.publicJob(job),
+			lines: bounded.lines,
+			startOffset: nextOffset - bounded.lines.length,
+			nextOffset,
+			retainedFromOffset: summary.retainedFromOffset,
+			finalLineShortened: bounded.finalLineShortened,
+		};
+	}
+
 	status(jobId: string): StatusResultDetails | undefined {
 		const job = this.jobs.get(jobId);
 		if (!job) return undefined;
@@ -385,6 +446,30 @@ export class JobManager {
 			logBytes: log.bytes,
 			logTruncated: log.truncated,
 		};
+	}
+
+	/**
+	 * Waits until the job reaches a terminal status, the window elapses, or the signal aborts.
+	 * Resolves true only when the job is terminal, so callers re-read state instead of trusting the race.
+	 */
+	async waitForTerminal(jobId: string, windowMs: number, signal?: AbortSignal): Promise<boolean> {
+		const job = this.jobs.get(jobId);
+		if (!job) return false;
+		if (isTerminalJobStatus(job.status)) return true;
+		if (windowMs <= 0 || signal?.aborted) return false;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let onAbort: (() => void) | undefined;
+		await Promise.race([
+			job.settled,
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, windowMs);
+				onAbort = resolve;
+				signal?.addEventListener("abort", onAbort, { once: true });
+			}),
+		]);
+		if (timer) clearTimeout(timer);
+		if (onAbort) signal?.removeEventListener("abort", onAbort);
+		return isTerminalJobStatus(job.status);
 	}
 
 	async kill(jobId: string, graceMs = DEFAULT_KILL_GRACE_MS): Promise<KillResult> {

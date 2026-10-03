@@ -10,7 +10,20 @@ export const DEFAULT_TIMEOUT_SECONDS = 1_800;
 export const DEFAULT_OUTPUT_LINES = 50;
 export const MAX_OUTPUT_LINES = 200;
 
-export const TOOL_DESCRIPTION = `Run a finite, non-interactive shell command in the background. Use bash_async start for commands expected to take more than 30 seconds when the next action does not need their result immediately. Do not call sleep or poll status, output, or list to wait. Continue only with work that does not depend on the job; otherwise end the turn. Success, failure, and timeout results arrive automatically as a follow-up; jobs you kill or whose final result you already read via status or output are not re-reported. Query output only when early output is needed or the user asks; repeated queries that return no new information are rate limited and fail. TUI, REPL, and commands requiring stdin are unsupported.`;
+const TOOL_DESCRIPTION_REST = `Do not call sleep or poll status, output, or list to wait. Continue only with work that does not depend on the job; otherwise end the turn. Success, failure, and timeout results arrive automatically as a follow-up; jobs you kill or whose final result you already read via status or output are not re-reported. Query output only when early output is needed or the user asks; repeated queries that return no new information are rate limited and fail. TUI, REPL, and commands requiring stdin are unsupported.`;
+
+/** Formats the sync window the way both the tool description and start results state it. */
+export function formatSyncWindow(windowMs: number): string {
+	// Only whole seconds become "Ns"; rounding 1500 ms to "2s" would state a window that is never waited.
+	return windowMs >= 1_000 && windowMs % 1_000 === 0 ? `${windowMs / 1_000}s` : `${windowMs}ms`;
+}
+
+/** Built from the window in effect so the model is never told about a wait that does not happen. */
+export function toolDescription(syncWindowMs: number): string {
+	if (syncWindowMs <= 0)
+		return `Run a finite, non-interactive shell command in the background. ${TOOL_DESCRIPTION_REST}`;
+	return `Run a finite, non-interactive shell command, in the background if it takes long. start waits up to ${formatSyncWindow(syncWindowMs)}: a command that finishes within it returns its final status and output inline and is not reported again; a longer command keeps running in the background. ${TOOL_DESCRIPTION_REST}`;
+}
 
 export const toolParameters = Type.Object({
 	action: StringEnum(BASH_ASYNC_ACTIONS, {

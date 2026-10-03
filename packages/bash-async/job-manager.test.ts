@@ -299,6 +299,24 @@ describe("JobManager real-process integration", () => {
 		expect(manager.output(started.details.jobId, { incremental: true })?.text).toBe("");
 	});
 
+	it("keeps the end of a single line that exceeds the inline tail budget", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "bash-async-manager-"));
+		tempDirectories.push(directory);
+		const manager = new JobManager({ logsDirectory: directory });
+		const started = await manager.start({
+			command: `printf 'line-head'; head -c 9000 /dev/zero | tr '\\0' x; printf 'line-end\\n'`,
+			timeoutSeconds: 5,
+			context: context(directory),
+		});
+		if (!started.ok) throw new Error("job not accepted");
+		await vi.waitFor(() => expect(manager.get(started.details.jobId)?.status).toBe("succeeded"));
+		const tail = manager.tail(started.details.jobId);
+		expect(tail?.finalLineShortened).toBe(true);
+		expect(tail?.lines).toHaveLength(1);
+		expect(tail?.lines[0]?.endsWith("line-end")).toBe(true);
+		expect(tail?.lines[0]?.startsWith("line-head")).toBe(false);
+	});
+
 	it("does not create Pi's duplicate unbounded output temp file", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "bash-async-manager-"));
 		tempDirectories.push(directory);

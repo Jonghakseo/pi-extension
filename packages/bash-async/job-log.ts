@@ -57,7 +57,7 @@ function clampOffset(value: number): number {
 	return Math.max(0, Math.floor(value));
 }
 
-function truncateUtf8(value: string, maxBytes: number): string {
+export function truncateUtf8(value: string, maxBytes: number): string {
 	if (Buffer.byteLength(value) <= maxBytes) return value;
 	let result = "";
 	let used = 0;

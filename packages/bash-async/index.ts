@@ -11,17 +11,20 @@ import {
 	renderStart,
 	renderStatus,
 	renderStatusLine,
+	renderTerminalLine,
 } from "./render.js";
 import { createRunningJobsWidget, type RunningJobsWidget } from "./running-jobs-widget.js";
 import {
 	type BashAsyncParams,
-	TOOL_DESCRIPTION,
+	formatSyncWindow,
+	MAX_OUTPUT_LINES,
 	TOOL_LABEL,
 	TOOL_NAME,
+	toolDescription,
 	toolParameters,
 	validateBashAsyncParams,
 } from "./tool-schema.js";
-import { type BashAsyncResultDetails, isTerminalJobStatus } from "./types.js";
+import { type BashAsyncResultDetails, isTerminalJobStatus, type StatusResultDetails } from "./types.js";
 
 function result(text: string, details: BashAsyncResultDetails): AgentToolResult<BashAsyncResultDetails> {
 	return { content: [{ type: "text", text }], details };
@@ -38,6 +41,50 @@ function pollBlockedResult(action: string, retryInMs: number): AgentToolResult<B
 }
 
 const RUNNING_JOBS_WIDGET_KEY = "bash-async-running-jobs";
+export const DEFAULT_SYNC_WINDOW_MS = 10_000;
+/** A mistyped value must not turn every start into a long blocking call. */
+export const MAX_SYNC_WINDOW_MS = 60_000;
+
+/** Read once at registration so the tool description and start behavior agree; 0 restores purely asynchronous starts. */
+export function syncWindowMs(): number {
+	const raw = process.env.PI_BASH_ASYNC_SYNC_WINDOW_MS;
+	if (raw === undefined || raw.trim() === "") return DEFAULT_SYNC_WINDOW_MS;
+	const configured = Number(raw);
+	if (!Number.isFinite(configured) || configured < 0) return DEFAULT_SYNC_WINDOW_MS;
+	return Math.min(MAX_SYNC_WINDOW_MS, Math.floor(configured));
+}
+
+/** The inline result replaces the follow-up, so it must end with the final lines, not the first ones. */
+function terminalOutputResult(
+	manager: JobManager,
+	status: StatusResultDetails,
+): AgentToolResult<BashAsyncResultDetails> {
+	const tail = manager.tail(status.jobId, { lines: MAX_OUTPUT_LINES });
+	if (!tail) return errorResult(`job not found: ${status.jobId}`);
+	const notes: string[] = [];
+	if (tail.startOffset > 0) notes.push(`showing the last ${tail.lines.length} of ${tail.nextOffset} lines`);
+	if (tail.finalLineShortened) notes.push("the last line was shortened");
+	if (tail.job.log.truncated) notes.push("the log stopped at its size cap");
+	// The log path follows on its own line, so repeating it here would only cost context.
+	const note = notes.length > 0 ? `(${notes.join("; ")}; read the log below for the full output)` : undefined;
+	return result(
+		[renderTerminalLine(tail.job, status), note, tail.lines.join("\n") || "(no output)", `Log: ${tail.job.log.path}`]
+			.filter(Boolean)
+			.join("\n"),
+		{
+			jobId: tail.job.id,
+			status: tail.job.status,
+			exitCode: tail.job.exitCode,
+			runtimeMs: status.runtimeMs,
+			errorSummary: status.errorSummary,
+			logPath: tail.job.log.path,
+			startOffset: tail.startOffset,
+			nextOffset: tail.nextOffset,
+			retainedFromOffset: tail.retainedFromOffset,
+			logTruncated: tail.job.log.truncated,
+		},
+	);
+}
 
 function forgetJobPolls(pollGuard: PollGuard, jobId: string): void {
 	pollGuard.forget(`status:${jobId}`);
@@ -45,6 +92,7 @@ function forgetJobPolls(pollGuard: PollGuard, jobId: string): void {
 }
 
 export default function bashAsync(pi: ExtensionAPI): void {
+	const windowMs = syncWindowMs();
 	let manager: JobManager;
 	const pollGuard = new PollGuard();
 	let uiContext: ExtensionContext | undefined;
@@ -132,12 +180,17 @@ export default function bashAsync(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: TOOL_NAME,
 		label: TOOL_LABEL,
-		description: TOOL_DESCRIPTION,
+		description: toolDescription(windowMs),
 		parameters: toolParameters,
 		executionMode: "parallel",
-		promptSnippet: "Run long finite non-interactive jobs with bash_async.",
+		promptSnippet:
+			windowMs > 0
+				? "Run finite non-interactive commands with bash_async."
+				: "Run long finite non-interactive jobs with bash_async.",
 		promptGuidelines: [
-			"Use bash_async start only for finite non-interactive commands whose result is not needed immediately.",
+			windowMs > 0
+				? `Use bash_async start for finite non-interactive commands. If the command finishes within ${formatSyncWindow(windowMs)}, start returns its final status and output inline; otherwise it keeps running in the background.`
+				: "Use bash_async start only for finite non-interactive commands whose result is not needed immediately.",
 			"Do not call sleep or poll status, output, or list to wait. Continue only with independent work; otherwise end the turn. Every terminal result arrives automatically as a follow-up; jobs you kill and results already read via status or output are not re-reported.",
 			"Repeated status, output, or list queries that return no new information are rate limited and fail with an error.",
 			"bash_async does not support TUI, REPL, stdin, or interactive terminal programs.",
@@ -169,6 +222,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 				},
 				args as BashAsyncParams,
 				context,
+				windowMs,
 				signal,
 			);
 		},
@@ -212,6 +266,7 @@ async function execute(
 	acknowledge: (jobId: string) => void,
 	args: BashAsyncParams,
 	context: ExtensionContext,
+	windowMs: number,
 	signal?: AbortSignal,
 ): Promise<AgentToolResult<BashAsyncResultDetails>> {
 	const validation = validateBashAsyncParams(args);
@@ -226,7 +281,36 @@ async function execute(
 			context,
 			acceptanceSignal: signal,
 		});
-		return started.ok ? result(renderStart(started.details), started.details) : errorResult(started.error);
+		if (!started.ok) return errorResult(started.error);
+		const jobId = started.details.jobId;
+		// start drains synchronously, so a job still queued here waits for a concurrency slot, not for
+		// a moment. Blocking on it would spend the whole window and learn nothing.
+		if (windowMs > 0 && started.details.status === "running") {
+			const terminal = await manager.waitForTerminal(jobId, windowMs, signal);
+			if (!terminal && signal?.aborted) {
+				// The user interrupted the run; a detached job would wake the agent again with a follow-up.
+				await manager.kill(jobId);
+			}
+			const status = manager.status(jobId);
+			if (status && isTerminalJobStatus(status.status)) {
+				// The inline result replaces the follow-up, exactly like a terminal status or output read.
+				forgetJobPolls(pollGuard, jobId);
+				acknowledge(jobId);
+				return terminalOutputResult(manager, status);
+			}
+			if (!status) {
+				// A parallel start evicted the finished job while we waited. Its completion is still pending,
+				// so it must not be acknowledged here: the follow-up is now the only way to learn the result.
+				forgetJobPolls(pollGuard, jobId);
+				return result(
+					`Job ${jobId} finished while start was waiting and is no longer retained, so its final status is not in this result. It arrives as a follow-up; the log holds the full output.\nLog: ${started.details.logPath}`,
+					{ jobId, logPath: started.details.logPath },
+				);
+			}
+			// A job that was already running can only be terminal or still running, so the start result stands.
+			return result(renderStart(started.details, windowMs), started.details);
+		}
+		return result(renderStart(started.details), started.details);
 	}
 	if (params.action === "list") {
 		const jobs = manager.list();

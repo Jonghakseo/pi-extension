@@ -1,3 +1,4 @@
+import { truncateUtf8 } from "./job-log.js";
 import type { BashAsyncJob } from "./types.js";
 
 export const COMPLETION_DELAY_MS = 500;
@@ -24,19 +25,6 @@ export interface CompletionBatcherOptions {
 
 export interface CompletedJob extends BashAsyncJob {
 	tail: string[];
-}
-
-function truncateUtf8(text: string, maxBytes: number): string {
-	if (Buffer.byteLength(text) <= maxBytes) return text;
-	let result = "";
-	let size = 0;
-	for (const character of text) {
-		const characterBytes = Buffer.byteLength(character);
-		if (size + characterBytes > maxBytes) break;
-		result += character;
-		size += characterBytes;
-	}
-	return result;
 }
 
 function formatDuration(job: BashAsyncJob): string {

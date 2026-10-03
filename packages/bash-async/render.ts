@@ -1,13 +1,27 @@
 import { type Component, Text } from "@earendil-works/pi-tui";
+import { formatSyncWindow } from "./tool-schema.js";
 import type { BashAsyncJob, StartResultDetails, StatusResultDetails } from "./types.js";
 
-export function renderStart(details: StartResultDetails): string {
-	return `Started background job ${details.jobId} (${details.status}): ${details.title}\nDo not call sleep or poll status, output, or list to wait. Continue only with work that does not depend on this job; otherwise end the turn. Success, failure, and timeout results arrive automatically as a follow-up; jobs you kill or whose final result you already read via status or output are not re-reported.`;
+export function renderStart(details: StartResultDetails, syncWindowMs = 0): string {
+	const still = syncWindowMs > 0 ? ` and is still ${details.status} after ${formatSyncWindow(syncWindowMs)}` : "";
+	return `Started background job ${details.jobId} (${details.status})${still}: ${details.title}\nDo not call sleep or poll status, output, or list to wait. Continue only with work that does not depend on this job; otherwise end the turn. Success, failure, and timeout results arrive automatically as a follow-up; jobs you kill or whose final result you already read via status or output are not re-reported.`;
 }
 
 export function renderStatusLine(job: BashAsyncJob): string {
 	const exit = job.exitCode === undefined || job.exitCode === null ? "" : ` (exit ${job.exitCode})`;
 	return `[${job.id}] ${job.status}${exit}`;
+}
+
+/** Runtimes inside the sync window are often sub-second, where rounding to seconds would only print "0s". */
+function formatRuntime(runtimeMs: number): string {
+	const runtime = Math.max(0, runtimeMs);
+	return runtime < 1_000 ? `${Math.round(runtime)}ms` : `${(runtime / 1_000).toFixed(1)}s`;
+}
+
+/** An inline start result replaces the follow-up, so it carries the runtime and error the follow-up would have shown. */
+export function renderTerminalLine(job: BashAsyncJob, details: StatusResultDetails): string {
+	const error = details.errorSummary ? `: ${details.errorSummary}` : "";
+	return `${renderStatusLine(job)} in ${formatRuntime(details.runtimeMs)}${error}`;
 }
 
 export function renderStatus(details: StatusResultDetails): string {
