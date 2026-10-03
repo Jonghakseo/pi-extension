@@ -14,6 +14,7 @@ import {
 	renderTerminalLine,
 } from "./render.js";
 import { createRunningJobsWidget, type RunningJobsWidget } from "./running-jobs-widget.js";
+import { formatRunningReminder, withRunningReminder } from "./running-reminder.js";
 import {
 	type BashAsyncParams,
 	formatSyncWindow,
@@ -102,6 +103,8 @@ export default function bashAsync(pi: ExtensionAPI): void {
 	let compacting = false;
 	let runningJobsWidget: RunningJobsWidget | undefined;
 	let widgetInstalled = false;
+	// Jobs carry no session, and a hosted runtime can switch sessions while an earlier session's jobs run on.
+	const jobSessions = new Map<string, string>();
 
 	const clearRunningJobsWidget = () => {
 		const context = uiContext;
@@ -213,7 +216,8 @@ export default function bashAsync(pi: ExtensionAPI): void {
 				clearRunningJobsWidget();
 				uiContext = undefined;
 			}
-			return execute(
+			const sessionId = context.sessionManager.getSessionId();
+			const outcome = await execute(
 				manager,
 				pollGuard,
 				(jobId) => {
@@ -225,7 +229,25 @@ export default function bashAsync(pi: ExtensionAPI): void {
 				windowMs,
 				signal,
 			);
+			const params = args as BashAsyncParams;
+			const details = outcome.details as { jobId?: unknown } | undefined;
+			if (params.action === "start" && typeof details?.jobId === "string") jobSessions.set(details.jobId, sessionId);
+			return outcome;
 		},
+	});
+
+	// context runs before every LLM call, including turns started by a delivered follow-up, which
+	// before_agent_start never sees. The reminder rides on the request copy and is never stored.
+	pi.on("context", (event, context) => {
+		if (jobSessions.size === 0) return;
+		const sessionId = context.sessionManager.getSessionId();
+		const unfinished = manager.list().filter((job) => !isTerminalJobStatus(job.status));
+		const unfinishedIds = new Set(unfinished.map((job) => job.id));
+		for (const id of jobSessions.keys()) if (!unfinishedIds.has(id)) jobSessions.delete(id);
+		const pending = unfinished.filter((job) => jobSessions.get(job.id) === sessionId);
+		const now = Date.now();
+		const text = formatRunningReminder(pending, now);
+		return text ? { messages: withRunningReminder(event.messages, text, now) } : undefined;
 	});
 
 	// Held completions go out with the final turn so the follow-up is picked up in the same agent run.

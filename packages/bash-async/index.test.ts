@@ -534,3 +534,89 @@ describe("bash_async start sync window", () => {
 		}
 	}, 10_000);
 });
+
+describe("bash_async still-running reminder", () => {
+	beforeEach(() => vi.stubEnv("PI_BASH_ASYNC_SYNC_WINDOW_MS", "0"));
+
+	async function setup() {
+		let tool: any;
+		const handlers = new Map<string, (event?: any, context?: any) => any>();
+		const sendMessage = vi.fn();
+		bashAsync({
+			registerTool: (definition: any) => (tool = definition),
+			on: (event: string, handler: (event?: any, context?: any) => any) => handlers.set(event, handler),
+			sendMessage,
+		} as any);
+		const context = await makeContext();
+		const start = (command: string, title: string) =>
+			tool.execute("call", { action: "start", command, title, timeout: 0 }, undefined, undefined, context);
+		const turnContext = (messages: unknown[], ctx: unknown = context) =>
+			handlers.get("context")?.({ type: "context", messages }, ctx);
+		const shutdown = () => handlers.get("session_shutdown")?.();
+		return { start, turnContext, shutdown, sendMessage, context };
+	}
+
+	const userTurn = [{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 }];
+
+	it("adds nothing when no job was started or every job has finished", async () => {
+		const { start, turnContext, shutdown, sendMessage } = await setup();
+		try {
+			expect(turnContext(userTurn)).toBeUndefined();
+			await start("printf done", "Quick print");
+			await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1), { timeout: 3_000 });
+			expect(turnContext(userTurn)).toBeUndefined();
+		} finally {
+			await shutdown();
+		}
+	});
+
+	it("names a running job on a request copy without touching the stored messages", async () => {
+		const { start, turnContext, shutdown } = await setup();
+		try {
+			const started = await start("sleep 30", "Swift tests");
+			const messages = [...userTurn];
+			const result = turnContext(messages);
+			expect(messages).toHaveLength(1);
+			expect(result.messages).toHaveLength(2);
+			const reminder = result.messages[1];
+			expect(reminder).toMatchObject({ role: "custom", display: false });
+			expect(reminder.content).toContain("Still running (results NOT delivered yet)");
+			expect(reminder.content).toContain(`bash_async job ${started.details.jobId} "Swift tests"`);
+			expect(reminder.content).toContain("until their completion notification arrives");
+		} finally {
+			await shutdown();
+		}
+	});
+
+	it("lists only the still-running job on a turn started by another job's delivered completion", async () => {
+		const { start, turnContext, shutdown, sendMessage } = await setup();
+		try {
+			const slow = await start("sleep 30", "Slow build");
+			const fast = await start("printf done", "Fast check");
+			await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1), { timeout: 3_000 });
+			const [delivered, options] = sendMessage.mock.calls[0] ?? [];
+			expect(delivered.details.jobIds).toEqual([fast.details.jobId]);
+			expect(options).toMatchObject({ triggerTurn: true });
+
+			// Pi starts this turn from the delivered message itself, without a user prompt.
+			const result = turnContext([...userTurn, { role: "custom", ...delivered, timestamp: 2 }]);
+			const reminder = result.messages.at(-1).content as string;
+			expect(reminder).toContain(`bash_async job ${slow.details.jobId} "Slow build"`);
+			expect(reminder).not.toContain(fast.details.jobId);
+			expect(reminder).not.toContain("Fast check");
+		} finally {
+			await shutdown();
+		}
+	});
+
+	it("ignores jobs started by a different session", async () => {
+		const { start, turnContext, shutdown, context } = await setup();
+		try {
+			await start("sleep 30", "Other session job");
+			const otherSession = { ...context, sessionManager: { ...context.sessionManager, getSessionId: () => "other" } };
+			expect(turnContext(userTurn, otherSession)).toBeUndefined();
+		} finally {
+			await shutdown();
+		}
+	});
+});

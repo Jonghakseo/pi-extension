@@ -31,6 +31,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { SubagentAsyncTasks } from "./async-task-lifecycle.js";
 import { HANG_CHECK_INTERVAL_MS } from "./constants.js";
 import { SUBAGENT_COMMANDS, SUBAGENT_SHORTCUTS, type SubagentCommandName } from "./registration-manifest.js";
+import { handleRunningReminderContext } from "./running-reminder.js";
 
 interface SubagentCore {
 	store: import("./store.js").SubagentStore;
@@ -166,6 +167,19 @@ export default function (pi: ExtensionAPI) {
 		const c = await loadCore();
 		await chain;
 		return c.commands.handleBeforeAgentStart(event, ctx, c.store);
+	});
+
+	// before_agent_start misses turns started by a delivered completion; context covers every LLM call.
+	// No core means no run was ever started, so there is nothing to wait for.
+	pi.on("context", (event, ctx) => {
+		if (!core || core.store.disposed) return;
+		let sessionFile: string | undefined;
+		try {
+			sessionFile = ctx.sessionManager.getSessionFile?.();
+		} catch {
+			sessionFile = undefined;
+		}
+		return handleRunningReminderContext(event.messages, core.store, sessionFile);
 	});
 
 	// If input arrives while the core is still loading, awaiting here lets the

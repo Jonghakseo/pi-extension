@@ -755,6 +755,65 @@ describe("hosted subagent production execution", () => {
 		expect(delivered[1]?.[0].content).toContain("[subagent:worker#3] completed");
 	});
 
+	it("reminds each turn of runs still running, including a turn started by another run's completion", async () => {
+		const { pi, context } = setup();
+		lifecycle.shutdown();
+		const events = new Map<string, any>();
+		let execute: any;
+		pi.on.mockImplementation((name: string, callback: any) => events.set(name, callback));
+		pi.registerTool.mockImplementation((definition: any) => {
+			if (definition.name === "subagent") execute = definition.execute;
+		});
+		const ctx = { ...context, sessionManager: { ...context.sessionManager, getSessionId: () => "origin" } };
+		const turn = (messages: unknown[], turnCtx: unknown = ctx) =>
+			events.get("context")({ type: "context", messages }, turnCtx);
+		const userTurn = [{ role: "user", content: [{ type: "text", text: "go" }], timestamp: 1 }];
+		extension({ ...pi, registerShortcut: vi.fn() } as any);
+		try {
+			events.get("session_start")({}, ctx);
+			await events.get("before_agent_start")({ prompt: "go", systemPrompt: "" }, ctx);
+			expect(turn(userTurn)).toBeUndefined();
+
+			const slow = child();
+			const fast = child();
+			spawn.mockReturnValueOnce(slow).mockReturnValueOnce(fast);
+			await execute("slow", { command: "subagent run worker -- slow audit" }, undefined, undefined, ctx);
+			await execute("fast", { command: "subagent run worker -- quick lint" }, undefined, undefined, ctx);
+			await vi.advanceTimersByTimeAsync(1001);
+			await vi.advanceTimersByTimeAsync(1001);
+			expect(spawn).toHaveBeenCalledTimes(2);
+			const both = turn(userTurn);
+			expect(both.messages).toHaveLength(2);
+			expect(both.messages[1]).toMatchObject({ role: "custom", display: false });
+			expect(both.messages[1].content).toContain('subagent run #1 worker "slow audit"');
+			expect(both.messages[1].content).toContain('subagent run #2 worker "quick lint"');
+			// A run from another session file belongs to that session's turns only.
+			const foreign = {
+				...ctx,
+				sessionManager: { ...ctx.sessionManager, getSessionFile: () => join(directory, "x.jsonl") },
+			};
+			expect(turn(userTurn, foreign)).toBeUndefined();
+
+			fast.finish();
+			await vi.advanceTimersByTimeAsync(0);
+			const delivered = pi.sendMessage.mock.calls.find(([message]) => message.details?.asyncTasks);
+			expect(delivered?.[0].content).toContain("[subagent:worker#2] completed");
+			expect(delivered?.[1]).toMatchObject({ triggerTurn: true });
+			// Pi starts this turn from the delivered completion; no user prompt or before_agent_start precedes it.
+			const followUp = turn([...userTurn, { role: "custom", ...delivered?.[0], timestamp: 2 }]);
+			const reminder = followUp.messages.at(-1).content as string;
+			expect(reminder).toContain('subagent run #1 worker "slow audit"');
+			expect(reminder).not.toContain("#2");
+			expect(reminder).toContain("until their completion notification arrives");
+
+			slow.finish();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(turn(userTurn)).toBeUndefined();
+		} finally {
+			await events.get("session_shutdown")({ reason: "exit" });
+		}
+	});
+
 	it("retains expired pending output and reports failed delivery rather than losing the obligation", async () => {
 		const { host, execute, context, pi, store } = setup();
 		let active = context.sessionManager.getSessionFile();

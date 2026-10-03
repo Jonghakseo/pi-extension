@@ -27,6 +27,7 @@
 		"poll-guard.ts",
 		"render.ts",
 		"running-jobs-widget.ts",
+		"running-reminder.ts",
 		"tool-schema.ts",
 		"types.ts",
 		"README.md"
