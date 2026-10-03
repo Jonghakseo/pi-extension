@@ -14,7 +14,7 @@ import {
 	renderTerminalLine,
 } from "./render.js";
 import { createRunningJobsWidget, type RunningJobsWidget } from "./running-jobs-widget.js";
-import { formatRunningReminder, withRunningReminder } from "./running-reminder.js";
+import { collectReminderJobs, handleRunningReminderContext, ReminderAnchors } from "./running-reminder.js";
 import {
 	type BashAsyncParams,
 	formatSyncWindow,
@@ -105,6 +105,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 	let widgetInstalled = false;
 	// Jobs carry no session, and a hosted runtime can switch sessions while an earlier session's jobs run on.
 	const jobSessions = new Map<string, string>();
+	const reminderAnchors = new ReminderAnchors();
 
 	const clearRunningJobsWidget = () => {
 		const context = uiContext;
@@ -165,6 +166,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 	});
 	pi.on("session_start", (_event, context) => {
 		latestContext = context;
+		reminderAnchors.clear();
 		provider.bind(context.sessionManager.getSessionId());
 	});
 	const notifications = new NotificationBatcher({
@@ -236,18 +238,18 @@ export default function bashAsync(pi: ExtensionAPI): void {
 		},
 	});
 
-	// context runs before every LLM call, including turns started by a delivered follow-up, which
-	// before_agent_start never sees. The reminder rides on the request copy and is never stored.
+	// context runs before every LLM call, including turns started by a delivered completion or a steer that
+	// before_agent_start never sees, and including every request inside a tool loop. Reminders are pinned to
+	// the message they were first rendered after so mid-turn requests keep them without moving the cached
+	// prefix. They ride on the request copy and are never stored.
 	pi.on("context", (event, context) => {
-		if (jobSessions.size === 0) return;
+		if (jobSessions.size === 0 && reminderAnchors.isEmpty()) return;
 		const sessionId = context.sessionManager.getSessionId();
-		const unfinished = manager.list().filter((job) => !isTerminalJobStatus(job.status));
-		const unfinishedIds = new Set(unfinished.map((job) => job.id));
-		for (const id of jobSessions.keys()) if (!unfinishedIds.has(id)) jobSessions.delete(id);
-		const pending = unfinished.filter((job) => jobSessions.get(job.id) === sessionId);
-		const now = Date.now();
-		const text = formatRunningReminder(pending, now);
-		return text ? { messages: withRunningReminder(event.messages, text, now) } : undefined;
+		const tracked = collectReminderJobs(manager.list(), notifications.pendingJobs());
+		const trackedIds = new Set(tracked.map((job) => job.id));
+		for (const id of jobSessions.keys()) if (!trackedIds.has(id)) jobSessions.delete(id);
+		const pending = tracked.filter((job) => jobSessions.get(job.id) === sessionId);
+		return handleRunningReminderContext(reminderAnchors, sessionId, event.messages, pending, Date.now());
 	});
 
 	// Held completions go out with the final turn so the follow-up is picked up in the same agent run.
@@ -273,6 +275,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", async () => {
 		pollGuard.clear();
+		reminderAnchors.clear();
 		clearRunningJobsWidget();
 		uiContext = undefined;
 		provider.shutdown();

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import bashAsync, { syncWindowMs } from "./index.js";
+import { collectReminderJobs } from "./running-reminder.js";
 import { TOOL_NAME } from "./tool-schema.js";
 
 const directories: string[] = [];
@@ -540,6 +541,7 @@ describe("bash_async still-running reminder", () => {
 
 	async function setup() {
 		let tool: any;
+		let idle = true;
 		const handlers = new Map<string, (event?: any, context?: any) => any>();
 		const sendMessage = vi.fn();
 		bashAsync({
@@ -547,16 +549,38 @@ describe("bash_async still-running reminder", () => {
 			on: (event: string, handler: (event?: any, context?: any) => any) => handlers.set(event, handler),
 			sendMessage,
 		} as any);
-		const context = await makeContext();
+		const context = { ...(await makeContext()), isIdle: () => idle };
 		const start = (command: string, title: string) =>
 			tool.execute("call", { action: "start", command, title, timeout: 0 }, undefined, undefined, context);
 		const turnContext = (messages: unknown[], ctx: unknown = context) =>
 			handlers.get("context")?.({ type: "context", messages }, ctx);
 		const shutdown = () => handlers.get("session_shutdown")?.();
-		return { start, turnContext, shutdown, sendMessage, context };
+		return {
+			start,
+			turnContext,
+			shutdown,
+			sendMessage,
+			context,
+			setIdle: (value: boolean) => {
+				idle = value;
+			},
+		};
 	}
 
 	const userTurn = [{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 }];
+	const assistantCall = {
+		role: "assistant",
+		content: [{ type: "toolCall", id: "call", name: "bash_async" }],
+		timestamp: 2,
+	};
+	const toolResult = {
+		role: "toolResult",
+		toolCallId: "call",
+		toolName: "bash_async",
+		content: [{ type: "text", text: "started" }],
+		isError: false,
+		timestamp: 3,
+	};
 
 	it("adds nothing when no job was started or every job has finished", async () => {
 		const { start, turnContext, shutdown, sendMessage } = await setup();
@@ -580,7 +604,7 @@ describe("bash_async still-running reminder", () => {
 			expect(result.messages).toHaveLength(2);
 			const reminder = result.messages[1];
 			expect(reminder).toMatchObject({ role: "custom", display: false });
-			expect(reminder.content).toContain("Still running (results NOT delivered yet)");
+			expect(reminder.content).toContain("Still running or awaiting delivery (results NOT delivered yet)");
 			expect(reminder.content).toContain(`bash_async job ${started.details.jobId} "Swift tests"`);
 			expect(reminder.content).toContain("until their completion notification arrives");
 		} finally {
@@ -618,5 +642,89 @@ describe("bash_async still-running reminder", () => {
 		} finally {
 			await shutdown();
 		}
+	});
+
+	it("warns inside the tool loop that started the job and repeats the reminder verbatim", async () => {
+		const { start, turnContext, shutdown } = await setup();
+		try {
+			// The turn opens with no job at all, which is exactly when a commit gets invented.
+			expect(turnContext(userTurn)).toBeUndefined();
+			const started = await start("sleep 30", "Swift tests");
+
+			const afterStart = [...userTurn, assistantCall, toolResult];
+			const first = turnContext(afterStart);
+			expect(first.messages).toHaveLength(4);
+			expect(first.messages.at(-1).content).toContain(`bash_async job ${started.details.jobId} "Swift tests"`);
+
+			const nextCall = { ...assistantCall, timestamp: 4 };
+			const nextResult = { ...toolResult, toolCallId: "call2", timestamp: 5 };
+			const second = turnContext([...afterStart, nextCall, nextResult]);
+			// Same text at the same place: the request only grows past the cached prefix.
+			expect(second.messages.slice(0, 4)).toEqual(first.messages);
+			expect(second.messages).toHaveLength(6);
+		} finally {
+			await shutdown();
+		}
+	});
+
+	it("adds a fresh reminder when a new turn starts and keeps the earlier one in place", async () => {
+		const { start, turnContext, shutdown } = await setup();
+		try {
+			await start("sleep 30", "Swift tests");
+			const first = turnContext(userTurn);
+			const second = turnContext([
+				...userTurn,
+				{ role: "user", content: [{ type: "text", text: "news?" }], timestamp: 9 },
+			]);
+			expect(second.messages.slice(0, 2)).toEqual(first.messages);
+			expect(second.messages).toHaveLength(4);
+			expect(second.messages.at(-1).content).toContain('"Swift tests"');
+		} finally {
+			await shutdown();
+		}
+	});
+
+	it("keeps a finished job listed while its completion waits for a turn boundary", async () => {
+		const { start, turnContext, shutdown, sendMessage, setIdle } = await setup();
+		try {
+			setIdle(false);
+			const job = await start("printf done", "Quick print");
+			await vi.waitFor(
+				() => {
+					const held = turnContext(userTurn);
+					expect(held?.messages.at(-1).content).toContain(
+						`bash_async job ${job.details.jobId} "Quick print" finished, result not delivered yet`,
+					);
+				},
+				{ timeout: 3_000 },
+			);
+			expect(sendMessage).not.toHaveBeenCalled();
+
+			setIdle(true);
+			await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1), { timeout: 3_000 });
+			// The delivered job earns no new reminder; only the frozen one from before delivery remains.
+			const settled = turnContext([
+				...userTurn,
+				{ role: "user", content: [{ type: "text", text: "done?" }], timestamp: 9 },
+			]);
+			expect(settled.messages).toHaveLength(3);
+			expect(settled.messages.at(-1).role).toBe("user");
+		} finally {
+			await shutdown();
+		}
+	});
+});
+
+describe("bash_async reminder job collection", () => {
+	const job = (id: string, status: string) => ({ id, title: id, status, queuedAt: 0, startedAt: 0 }) as any;
+
+	it("keeps a terminal job the manager already evicted while the batcher still owes its completion", () => {
+		const listed = [job("a", "running"), job("b", "succeeded")];
+		const collected = collectReminderJobs(listed, [job("b", "succeeded"), job("c", "failed")]);
+		expect(collected.map((entry) => entry.id)).toEqual(["a", "b", "c"]);
+	});
+
+	it("drops terminal jobs whose completion already went out", () => {
+		expect(collectReminderJobs([job("a", "running"), job("b", "succeeded")], [])).toHaveLength(1);
 	});
 });

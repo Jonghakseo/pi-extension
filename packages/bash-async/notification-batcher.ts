@@ -75,6 +75,11 @@ export class NotificationBatcher {
 		this.pending.delete(jobId);
 	}
 
+	/** Jobs that already finished but whose completion has not reached the model yet. */
+	pendingJobs(): readonly CompletedJob[] {
+		return [...this.pending.values()];
+	}
+
 	/** Delivers held completions once the agent becomes idle, or after a bounded wait. */
 	flushWhenIdle(): void {
 		if (this.idleTimer) clearTimeout(this.idleTimer);

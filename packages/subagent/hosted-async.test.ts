@@ -808,7 +808,10 @@ describe("hosted subagent production execution", () => {
 
 			slow.finish();
 			await vi.advanceTimersByTimeAsync(0);
-			expect(turn(userTurn)).toBeUndefined();
+			// Settled runs earn no new reminder; only the frozen ones from earlier turns stay in place.
+			const settled = turn([...userTurn, { role: "user", content: [{ type: "text", text: "news?" }], timestamp: 3 }]);
+			expect(settled.messages.at(-1)).toMatchObject({ role: "user" });
+			expect(settled.messages.filter((message: any) => message.role === "custom")).toHaveLength(1);
 		} finally {
 			await events.get("session_shutdown")({ reason: "exit" });
 		}

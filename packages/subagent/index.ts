@@ -31,7 +31,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { SubagentAsyncTasks } from "./async-task-lifecycle.js";
 import { HANG_CHECK_INTERVAL_MS } from "./constants.js";
 import { SUBAGENT_COMMANDS, SUBAGENT_SHORTCUTS, type SubagentCommandName } from "./registration-manifest.js";
-import { handleRunningReminderContext } from "./running-reminder.js";
+import { handleRunningReminderContext, ReminderAnchors } from "./running-reminder.js";
 
 interface SubagentCore {
 	store: import("./store.js").SubagentStore;
@@ -121,9 +121,11 @@ export default function (pi: ExtensionAPI) {
 
 	let hangCheckTimer: ReturnType<typeof setInterval> | undefined;
 	let sessionGeneration = 0;
+	const reminderAnchors = new ReminderAnchors();
 
 	pi.on("session_start", (_event, ctx) => {
 		const generation = ++sessionGeneration;
+		reminderAnchors.clear();
 		const sessionId = ctx.sessionManager.getSessionId();
 		// Fence tool admission synchronously, before lazy lifecycle work can yield.
 		try {
@@ -149,6 +151,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (event) => {
 		++sessionGeneration;
+		reminderAnchors.clear();
 		asyncTasks.shutdown();
 		if (hangCheckTimer) {
 			clearInterval(hangCheckTimer);
@@ -169,7 +172,9 @@ export default function (pi: ExtensionAPI) {
 		return c.commands.handleBeforeAgentStart(event, ctx, c.store);
 	});
 
-	// before_agent_start misses turns started by a delivered completion; context covers every LLM call.
+	// before_agent_start misses turns started by a delivered completion or a steer; context covers every
+	// LLM call, including the ones inside a tool loop. Reminders are pinned to the message they were first
+	// rendered after, so mid-turn requests keep them without moving the cached prefix.
 	// No core means no run was ever started, so there is nothing to wait for.
 	pi.on("context", (event, ctx) => {
 		if (!core || core.store.disposed) return;
@@ -179,7 +184,7 @@ export default function (pi: ExtensionAPI) {
 		} catch {
 			sessionFile = undefined;
 		}
-		return handleRunningReminderContext(event.messages, core.store, sessionFile);
+		return handleRunningReminderContext(reminderAnchors, event.messages, core.store, sessionFile);
 	});
 
 	// If input arrives while the core is still loading, awaiting here lets the
