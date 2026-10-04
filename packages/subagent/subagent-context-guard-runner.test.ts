@@ -113,6 +113,20 @@ describe("runPiAgent proactive context guard", () => {
 		expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
 	});
 
+	it("preserves the context guard failure when shutdown agent_end follows in the same stdout chunk", async () => {
+		const model = "openai-codex/gpt-5.3-codex-spark";
+		const messageEnd = assistantMessageEnd(model, "toolUse", 115_000);
+		const { result } = await run(
+			model,
+			[messageEnd, JSON.stringify({ type: "agent_end", willRetry: false, messages: [JSON.parse(messageEnd).message] })],
+			false,
+		);
+		expect(result.exitCode).toBe(1);
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("context guard:");
+		expect(result.errorClass).toBe("context_overflow");
+	});
+
 	it("does not trip on a terminal stop message even at high token counts", async () => {
 		const model = "openai-codex/gpt-5.6-sol";
 		const { result } = await run(

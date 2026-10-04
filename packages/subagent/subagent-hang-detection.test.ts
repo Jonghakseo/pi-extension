@@ -87,6 +87,28 @@ describe("subagent hang detection with persisted session fallback", () => {
 		expect(pi.sendMessage).not.toHaveBeenCalled();
 	});
 
+	it.each(["error", "aborted"])("keeps a persisted %s response running until completion is confirmed", (stopReason) => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-hang-"));
+		const sessionFile = path.join(tmpDir, "session.jsonl");
+		fs.writeFileSync(
+			sessionFile,
+			`${JSON.stringify({
+				type: "message",
+				timestamp: Date.now(),
+				message: { role: "assistant", stopReason, content: [], errorMessage: "Connection error." },
+			})}\n`,
+		);
+		const store = createStore();
+		const run = makeRun(sessionFile);
+		store.commandRuns.set(run.id, run);
+		const pi = { sendMessage: vi.fn() } as any;
+		checkForHungRuns(store, pi);
+		expect(run.status).toBe("running");
+		fs.appendFileSync(sessionFile, `${JSON.stringify({ type: "subagent_done", exitCode: 1, stopReason })}\n`);
+		checkForHungRuns(store, pi);
+		expect(run.status).toBe("error");
+	});
+
 	it("marks the run done from the persisted terminal session state instead of auto-aborting", () => {
 		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-hang-"));
 		const sessionFile = path.join(tmpDir, "session.jsonl");

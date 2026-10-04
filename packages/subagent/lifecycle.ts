@@ -31,6 +31,13 @@ function reconcileRunWithPersistedSession(run: CommandRunState): void {
 		run.lastActivityAt = snapshot.latestActivityAt;
 	}
 	if (!snapshot.isTerminal) return;
+	// A live Pi child can still retry a persisted error. Only its runner's
+	// completion marker proves that failure recovery has finished.
+	if (
+		!snapshot.completionMarker &&
+		(snapshot.terminalStopReason === "error" || snapshot.terminalStopReason === "aborted")
+	)
+		return;
 
 	const exitCode =
 		snapshot.completionMarker?.exitCode ??

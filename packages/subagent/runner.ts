@@ -762,6 +762,9 @@ async function runPiAgent(
 			let lastProcessSignal: NodeJS.Signals | null = null;
 			let lastEventAt = Date.now();
 			let sawAgentEnd = false;
+			// Covers both backoff and the resumed attempt, until Pi reports recovery
+			// or a final agent_end. Raw history can retain errors throughout this time.
+			let retryPending = false;
 			let settleReason = "unknown";
 			let unparsedStdoutCount = 0;
 			const unparsedStdoutTail: string[] = [];
@@ -813,10 +816,24 @@ async function runPiAgent(
 				}, 5000);
 			};
 
+			const clearCompletionFallbacks = () => {
+				if (agentEndFallbackTimer) clearTimeout(agentEndFallbackTimer);
+				if (terminalMessageFallbackTimer) clearTimeout(terminalMessageFallbackTimer);
+				agentEndFallbackTimer = undefined;
+				terminalMessageFallbackTimer = undefined;
+			};
+
 			const syncFromPersistedSession = (allowResolve: boolean): boolean => {
 				if (!sessionFile) return false;
 				const snapshot = readPersistedSessionSnapshot(sessionFile, { startOffset: persistedSessionBaseOffset });
-				if (snapshot.terminalStopReason && !currentResult.stopReason) {
+				const unconfirmedFailure =
+					!snapshot.completionMarker &&
+					(snapshot.terminalStopReason === "error" || snapshot.terminalStopReason === "aborted");
+				if (
+					snapshot.terminalStopReason &&
+					!currentResult.stopReason &&
+					(procExited || settled || (!retryPending && !unconfirmedFailure))
+				) {
 					currentResult.stopReason = snapshot.terminalStopReason;
 				}
 				if (snapshot.messages.length > currentResult.messages.length) {
@@ -824,7 +841,18 @@ async function runPiAgent(
 					currentResult.liveText = undefined;
 					emitUpdate();
 				}
-				if (!allowResolve || !snapshot.isTerminal || settled || procExited || wasAborted) return false;
+				// Persistence can beat stdout. An error response alone is not proof
+				// that Pi has finished: agent_end/auto_retry_start decide its recovery.
+				if (
+					!allowResolve ||
+					!snapshot.isTerminal ||
+					settled ||
+					procExited ||
+					wasAborted ||
+					retryPending ||
+					unconfirmedFailure
+				)
+					return false;
 
 				const forcedCode =
 					snapshot.completionMarker?.exitCode ??
@@ -855,15 +883,44 @@ async function runPiAgent(
 					return;
 				}
 				lastEventAt = Date.now();
+				// Once the local context guard settles the run, late shutdown events
+				// must not replace its failure with the child's last toolUse response.
+				if (contextGuardTripped) return;
+
+				if (event.type === "auto_retry_start") {
+					retryPending = true;
+					sawAgentEnd = false;
+					clearCompletionFallbacks();
+					return;
+				}
+
+				if (event.type === "auto_retry_end") {
+					retryPending = false;
+					if (event.success === false) {
+						currentResult.stopReason = "error";
+						if (event.finalError) currentResult.errorMessage = event.finalError;
+						sawAgentEnd = true;
+						writeCompletionMarkerOnce(1);
+						scheduleAgentEndForceResolve();
+					} else if (currentResult.stopReason === "error" || currentResult.stopReason === "aborted") {
+						// Successful recovery may arrive without its message_end on stdout.
+						// Wait for the successful agent_end instead of reusing the old error.
+						currentResult.stopReason = undefined;
+						currentResult.errorMessage = undefined;
+					} else if (currentResult.stopReason && currentResult.stopReason !== "toolUse") {
+						writeCompletionMarkerOnce(0);
+						scheduleTerminalMessageForceResolve();
+					}
+					return;
+				}
 
 				if (event.type === "agent_start" || event.type === "turn_start") {
 					sawAgentEnd = false;
+					currentResult.stopReason = undefined;
+					currentResult.errorMessage = undefined;
 					currentResult.liveThinking = undefined;
 					currentResult.thoughtText = undefined;
-					if (terminalMessageFallbackTimer) {
-						clearTimeout(terminalMessageFallbackTimer);
-						terminalMessageFallbackTimer = undefined;
-					}
+					clearCompletionFallbacks();
 					return;
 				}
 
@@ -873,21 +930,32 @@ async function runPiAgent(
 					// its objects are freshly deserialized, so reference-based deduplication
 					// would append every prior message again.
 					const eventMessages = (event.messages ?? []) as Message[];
-					const terminalMessage = [...eventMessages].reverse().find((msg) => Boolean((msg as any).stopReason));
+					const terminalMessage = [...eventMessages]
+						.reverse()
+						.find((msg) => msg.role === "assistant" && Boolean(msg.stopReason));
 					if (terminalMessage) {
 						const fingerprint = JSON.stringify(terminalMessage);
 						const alreadyCaptured = currentResult.messages.some((msg) => JSON.stringify(msg) === fingerprint);
 						if (!alreadyCaptured) currentResult.messages.push(terminalMessage);
-						if (!currentResult.stopReason) {
-							currentResult.stopReason = (terminalMessage as any).stopReason;
-							if ((terminalMessage as any).errorMessage) {
-								currentResult.errorMessage = (terminalMessage as any).errorMessage;
-							}
-						}
+						currentResult.stopReason = (terminalMessage as any).stopReason;
+						currentResult.errorMessage = (terminalMessage as any).errorMessage;
 					} else if (currentResult.messages.length === 0 && eventMessages.length > 0) {
 						currentResult.messages.push(eventMessages[eventMessages.length - 1]);
 					}
-					if (currentResult.stopReason && currentResult.stopReason !== "toolUse") {
+					if (event.willRetry === true) {
+						retryPending = true;
+						sawAgentEnd = false;
+						clearCompletionFallbacks();
+						return;
+					}
+					retryPending = false;
+					if (
+						currentResult.stopReason &&
+						currentResult.stopReason !== "toolUse" &&
+						// Older Pi versions omit willRetry; defer their failure marker
+						// until fallback so auto_retry_start can still cancel completion.
+						(currentResult.stopReason !== "error" || event.willRetry === false)
+					) {
 						writeCompletionMarkerOnce(
 							currentResult.stopReason === "error" || currentResult.stopReason === "aborted" ? 1 : 0,
 						);
@@ -977,7 +1045,7 @@ async function runPiAgent(
 						}
 						if (!currentResult.model && msg.model) currentResult.model = msg.model;
 						if (msg.stopReason) currentResult.stopReason = msg.stopReason;
-						if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
+						currentResult.errorMessage = msg.errorMessage;
 						currentResult.liveThinking = undefined;
 
 						// Extract thoughtText from thinking block first line only
@@ -989,8 +1057,15 @@ async function runPiAgent(
 							}
 						}
 						const terminalStopReason = (msg as any).stopReason;
-						if (terminalStopReason && terminalStopReason !== "toolUse") {
-							writeCompletionMarkerOnce(terminalStopReason === "error" || terminalStopReason === "aborted" ? 1 : 0);
+						// Error message_end precedes Pi's retry decision. Do not publish
+						// completion or arm a timeout while it may still recover.
+						if (
+							terminalStopReason &&
+							terminalStopReason !== "toolUse" &&
+							terminalStopReason !== "error" &&
+							!retryPending
+						) {
+							writeCompletionMarkerOnce(terminalStopReason === "aborted" ? 1 : 0);
 							scheduleTerminalMessageForceResolve();
 						}
 					}
@@ -1062,11 +1137,18 @@ async function runPiAgent(
 			};
 
 			function scheduleTerminalMessageForceResolve() {
-				if (!currentResult.stopReason || currentResult.stopReason === "toolUse" || settled || procExited) return;
+				if (
+					!currentResult.stopReason ||
+					currentResult.stopReason === "toolUse" ||
+					retryPending ||
+					settled ||
+					procExited
+				)
+					return;
 				if (terminalMessageFallbackTimer) clearTimeout(terminalMessageFallbackTimer);
 
 				terminalMessageFallbackTimer = setTimeout(() => {
-					if (settled || procExited || wasAborted) return;
+					if (settled || procExited || wasAborted || retryPending) return;
 
 					const forcedCode = currentResult.stopReason === "error" || currentResult.stopReason === "aborted" ? 1 : 0;
 
@@ -1082,12 +1164,12 @@ async function runPiAgent(
 			// (e.g. lingering extension timers/transports). In that case, force
 			// resolve after a short quiet period so runs do not remain "running" forever.
 			function scheduleAgentEndForceResolve() {
-				if (!sawAgentEnd || settled || procExited) return;
+				if (!sawAgentEnd || retryPending || settled || procExited) return;
 				if (agentEndFallbackTimer) clearTimeout(agentEndFallbackTimer);
 
 				const marker = lastEventAt;
 				agentEndFallbackTimer = setTimeout(() => {
-					if (settled || procExited || wasAborted) return;
+					if (settled || procExited || wasAborted || retryPending) return;
 					if (lastEventAt !== marker) return;
 
 					const forcedCode = currentResult.stopReason === "error" || currentResult.stopReason === "aborted" ? 1 : 0;
