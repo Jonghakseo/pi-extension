@@ -91,6 +91,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		try {
+			let selectedBaseRef: string | null = null;
 			let reviewData = await getReviewWindowData(pi, ctx.cwd);
 			const { repoRoot } = reviewData;
 			if (reviewData.files.length === 0 && reviewData.commits.length === 0) {
@@ -259,7 +260,9 @@ export default function (pi: ExtensionAPI) {
 
 					const handleRequestReviewData = async (message: ReviewRequestReviewDataPayload): Promise<void> => {
 						try {
-							const nextReviewData = await getReviewWindowData(pi, repoRoot);
+							const requestedBaseRef = message.baseRef === undefined ? selectedBaseRef : message.baseRef;
+							const nextReviewData = await getReviewWindowData(pi, repoRoot, { baseRef: requestedBaseRef });
+							selectedBaseRef = requestedBaseRef;
 							clearRefreshableCaches();
 							reviewData = nextReviewData;
 							for (const file of reviewData.files) fileMap.set(file.id, file);
@@ -270,6 +273,7 @@ export default function (pi: ExtensionAPI) {
 								commits: reviewData.commits,
 								branchBaseRef: reviewData.branchBaseRef,
 								branchMergeBaseSha: reviewData.branchMergeBaseSha,
+								availableBaseRefs: reviewData.availableBaseRefs,
 								repositoryHasHead: reviewData.repositoryHasHead,
 							});
 						} catch (error) {
