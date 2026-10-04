@@ -6,13 +6,12 @@ function setup() {
 	const handlers = new Map<string, (event?: unknown, ctx?: unknown) => unknown>();
 	const sendMessage = vi.fn();
 	let idle = true;
-	let pending = false;
 	const pi = {
 		on: (event: string, handler: (event?: unknown, ctx?: unknown) => unknown) => handlers.set(event, handler),
 		sendMessage,
 	};
 	const guarded = guardQueuedDeliveries(pi as unknown as ExtensionAPI);
-	const ctx = { isIdle: () => idle, hasPendingMessages: () => pending };
+	const ctx = { isIdle: () => idle };
 	const emit = (type: string, event: Record<string, unknown> = {}) => handlers.get(type)?.({ type, ...event }, ctx);
 	return {
 		guarded,
@@ -20,9 +19,6 @@ function setup() {
 		emit,
 		setIdle: (value: boolean) => {
 			idle = value;
-		},
-		setPending: (value: boolean) => {
-			pending = value;
 		},
 	};
 }
@@ -74,21 +70,22 @@ describe("guardQueuedDeliveries", () => {
 		for (const [message] of sendMessage.mock.calls) expect(message).toBe(completion);
 	});
 
-	it("waits for Pi to deliver a message an abort left in the queue", () => {
-		const { guarded, sendMessage, emit, setIdle, setPending } = setup();
+	it("keeps only the restored copy when an abort left the original queued", () => {
+		const { guarded, sendMessage, emit, setIdle } = setup();
 		emit("agent_start");
 		setIdle(false);
-		guarded.sendMessage(completion, { triggerTurn: true, deliverAs: "followUp" });
-		// A non-Escape abort keeps Pi's queue, so re-appending now would deliver the message twice.
+		guarded.sendMessage(completion, { triggerTurn: true, deliverAs: "steer" });
 		setIdle(true);
-		setPending(true);
 		emit("agent_settled");
-		expect(sendMessage).toHaveBeenCalledTimes(1);
+		const restored = sendMessage.mock.calls[1]?.[0];
 
-		emit("message_end", { message: sendMessage.mock.calls[0]?.[0] });
-		setPending(false);
-		emit("agent_settled");
-		expect(sendMessage).toHaveBeenCalledTimes(1);
+		// Pi still held the original and delivers it on the next run, after the restored copy.
+		const user = { role: "user", content: "next", timestamp: 1 };
+		const original = { role: "custom", ...sendMessage.mock.calls[0]?.[0], timestamp: 2 };
+		const copy = { role: "custom", ...restored, timestamp: 0 };
+		const result = emit("context", { messages: [copy, user, original] }) as { messages: unknown[] };
+		expect(result.messages).toEqual([copy, user]);
+		expect(emit("context", { messages: [user] })).toBeUndefined();
 	});
 
 	it("forgets queued messages on session shutdown", () => {

@@ -18,6 +18,10 @@ function guardId(message: unknown): string | undefined {
  * busy would vanish. This tracks every turn-triggering message queued during a run, and when the run
  * settles without the message reaching the model, appends it to the session without starting a turn:
  * the user sees it now, and the model sees it on the next prompt.
+ *
+ * Extensions cannot tell Escape from other aborts: Pi's pending count covers only typed messages, not
+ * extension messages. An abort while the model streams keeps the original queued, and Pi delivers it on
+ * the next run after the restored copy. Both carry the same guard id, so the model input keeps only the first.
  */
 export function guardQueuedDeliveries(pi: ExtensionAPI): ExtensionAPI {
 	let context: ExtensionContext | undefined;
@@ -32,13 +36,7 @@ export function guardQueuedDeliveries(pi: ExtensionAPI): ExtensionAPI {
 		}
 	};
 
-	const stillQueued = (ctx: ExtensionContext) => {
-		try {
-			return ctx.hasPendingMessages();
-		} catch {
-			return false;
-		}
-	};
+	const restored = new Set<string>();
 
 	pi.on("agent_start", (_event, ctx) => {
 		context = ctx;
@@ -50,14 +48,32 @@ export function guardQueuedDeliveries(pi: ExtensionAPI): ExtensionAPI {
 	pi.on("agent_settled", (_event, ctx) => {
 		context = ctx;
 		if (queued.size === 0) return;
-		// Only Escape clears the queue. Any other abort leaves it intact, and Pi delivers it on the next run.
-		if (stillQueued(ctx)) return;
-		const lost = [...queued.values()];
+		const lost = [...queued.entries()];
 		queued.clear();
-		for (const message of lost) pi.sendMessage(message, { triggerTurn: false });
+		for (const [id, message] of lost) {
+			restored.add(id);
+			pi.sendMessage(message, { triggerTurn: false });
+		}
+	});
+	pi.on("context", (event) => {
+		if (restored.size === 0) return;
+		const seen = new Set<string>();
+		let dropped = false;
+		const messages = event.messages.filter((message) => {
+			const id = guardId(message);
+			if (!id || !restored.has(id)) return true;
+			if (!seen.has(id)) {
+				seen.add(id);
+				return true;
+			}
+			dropped = true;
+			return false;
+		});
+		return dropped ? { messages } : undefined;
 	});
 	pi.on("session_shutdown", () => {
 		queued.clear();
+		restored.clear();
 		context = undefined;
 	});
 
