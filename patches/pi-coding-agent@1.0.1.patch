@@ -1,6 +1,6 @@
 --- a/dist/core/tools/bash.js
 +++ b/dist/core/tools/bash.js
-@@ -45,6 +45,10 @@
+@@ -58,6 +58,10 @@
              }
              catch {
                  throw new Error(`Working directory does not exist: ${cwd}\nCannot execute ${shellName} commands.`);

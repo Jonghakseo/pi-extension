@@ -2,4 +2,4 @@ packages:
   - packages/*
 
 patchedDependencies:
-  "@earendil-works/pi-coding-agent@1.0.0": patches/pi-coding-agent@1.0.0.patch
+  "@earendil-works/pi-coding-agent@1.0.1": patches/pi-coding-agent@1.0.1.patch

@@ -2,6 +2,23 @@
 
 이 문서는 `pi-extension` 모노레포를 Pi 본체의 다음 릴리스에 맞춰 업데이트할 때 같은 조사를 반복하지 않기 위한 기준 문서다.
 
+## 1.0.1 업데이트 조사 (2026-10-04)
+
+전역 CLI와 npm `pi-coding-agent` 최신은 모두 `1.0.1`이다. `pi-ai`, `pi-agent-core`, `pi-tui`는 `1.0.2`가 있지만 `coding-agent 1.0.2`가 미배포라 4개 모두 `1.0.1`로 맞췄다.
+
+주요 영향:
+- `pi.registerToolRenderer()` 추가: 사용처 없음. 이번 범위에서 도입하지 않음.
+- pi-ai `hasToolRedefinitions()` deprecated: 사용처 없음.
+- pi-tui `setImageTranscoder()` 추가, 비 PNG `Image` 폴백 수정: 저장소에서 `Image` 사용 없음.
+- "Selected model is at capacity" 재시도: Pi 내부 재시도. `subagent/retry.ts`의 child run 재시도 패턴은 다른 계층이라 유지.
+- `npm-shrinkwrap.json` 제거: lockfile로 전이 의존성 고정, 영향 없음.
+- `bash.js` 중단 패치는 1.0.1에도 필요해 hunk 위치(`-45` → `-58`)만 갱신.
+
+적용:
+- 루트 `devDependencies` 3개와 `pnpm.overrides` 4개를 `1.0.1`로 변경.
+- `patches/pi-coding-agent@1.0.1.patch`, `pnpm-workspace.yaml` `patchedDependencies` 갱신.
+- peer 범위 유지.
+
 ## 1.0.0 업데이트 조사 (2026-10-01)
 
 전역 CLI는 `0.99.2`이고 npm 최신은 `1.0.0`이다. 저장소 SDK를 `0.99.1 → 1.0.0`으로 올렸으며 전역 설치는 변경하지 않았다.
