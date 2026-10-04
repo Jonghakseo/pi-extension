@@ -30,6 +30,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SubagentAsyncTasks } from "./async-task-lifecycle.js";
 import { HANG_CHECK_INTERVAL_MS } from "./constants.js";
+import { guardQueuedDeliveries } from "./delivery-guard.js";
 import { SUBAGENT_COMMANDS, SUBAGENT_SHORTCUTS, type SubagentCommandName } from "./registration-manifest.js";
 import { handleRunningReminderContext, ReminderAnchors } from "./running-reminder.js";
 
@@ -41,7 +42,9 @@ interface SubagentCore {
 	lifecycle: typeof import("./lifecycle.js");
 }
 
-export default function (pi: ExtensionAPI) {
+export default function (host: ExtensionAPI) {
+	// Completions are queued while the agent is busy; the guard restores any the queue drops on Escape.
+	const pi = guardQueuedDeliveries(host);
 	const asyncTasks = new SubagentAsyncTasks(pi);
 	let core: SubagentCore | null = null;
 	let corePromise: Promise<SubagentCore> | null = null;

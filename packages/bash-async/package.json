@@ -21,6 +21,7 @@
 	"files": [
 		"index.ts",
 		"async-task-provider.ts",
+		"delivery-guard.ts",
 		"job-log.ts",
 		"job-manager.ts",
 		"notification-batcher.ts",

@@ -41,7 +41,7 @@ Equivalent AI tool call:
 { "command": "subagent run worker --isolated -- implement the requested change and run tests" }
 ```
 
-Tool launches are asynchronous. Wait for the automatic completion or failure follow-up instead of polling immediately.
+Tool launches are asynchronous. Wait for the automatic completion or failure follow-up instead of polling immediately. Pi drops queued messages when you press Escape; if a completion was still queued when the run stops, it is added to the session without starting a new turn, and the agent sees it with your next message.
 
 ## Agent definitions
 

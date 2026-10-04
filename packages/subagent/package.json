@@ -32,6 +32,7 @@
 		"config.ts",
 		"constants.ts",
 		"context-limits.ts",
+		"delivery-guard.ts",
 		"diagnostics.ts",
 		"display-task.ts",
 		"escalation.ts",

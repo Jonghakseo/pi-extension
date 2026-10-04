@@ -486,6 +486,41 @@ describe("bash_async start sync window", () => {
 		}
 	});
 
+	it("re-appends a failure the queue dropped once the run settles", async () => {
+		vi.stubEnv("PI_BASH_ASYNC_SYNC_WINDOW_MS", "0");
+		let tool: any;
+		const handlers = new Map<string, (event?: unknown, context?: unknown) => unknown>();
+		const sendMessage = vi.fn();
+		bashAsync({
+			registerTool: (definition: any) => (tool = definition),
+			on: (event: string, handler: (event?: unknown, context?: unknown) => unknown) => handlers.set(event, handler),
+			sendMessage,
+		} as any);
+		let idle = false;
+		const context = { ...(await makeContext()), isIdle: () => idle };
+		try {
+			handlers.get("agent_start")?.({ type: "agent_start" }, context);
+			const started = await tool.execute(
+				"call",
+				{ action: "start", command: "exit 2", timeout: 0 },
+				undefined,
+				undefined,
+				context,
+			);
+			await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1), { timeout: 3_000 });
+			expect(sendMessage.mock.calls[0]?.[1]).toEqual({ triggerTurn: true, deliverAs: "steer" });
+
+			// Escape cleared Pi's queue: the run settles without a message_end for the completion.
+			idle = true;
+			handlers.get("agent_settled")?.({ type: "agent_settled" }, context);
+			expect(sendMessage).toHaveBeenCalledTimes(2);
+			expect(sendMessage.mock.calls[1]?.[0].details.jobIds).toEqual([started.details.jobId]);
+			expect(sendMessage.mock.calls[1]?.[1]).toEqual({ triggerTurn: false });
+		} finally {
+			await (handlers.get("session_shutdown") as () => Promise<void>)?.();
+		}
+	});
+
 	it("does not spend the window on a job queued behind the concurrency limit", async () => {
 		vi.stubEnv("PI_BASH_ASYNC_SYNC_WINDOW_MS", "200");
 		vi.stubEnv("PI_BASH_ASYNC_MAX_CONCURRENCY", "1");

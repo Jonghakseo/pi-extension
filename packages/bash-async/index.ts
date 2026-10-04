@@ -1,6 +1,7 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { AsyncTaskProvider } from "./async-task-provider.js";
+import { guardQueuedDeliveries } from "./delivery-guard.js";
 import { JobManager } from "./job-manager.js";
 import { NotificationBatcher } from "./notification-batcher.js";
 import { PollGuard } from "./poll-guard.js";
@@ -92,7 +93,9 @@ function forgetJobPolls(pollGuard: PollGuard, jobId: string): void {
 	pollGuard.forget(`output:${jobId}`);
 }
 
-export default function bashAsync(pi: ExtensionAPI): void {
+export default function bashAsync(host: ExtensionAPI): void {
+	// Completions are queued while the agent is busy; the guard restores any the queue drops on Escape.
+	const pi = guardQueuedDeliveries(host);
 	const windowMs = syncWindowMs();
 	let manager: JobManager;
 	const pollGuard = new PollGuard();
