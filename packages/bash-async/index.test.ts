@@ -16,7 +16,6 @@ async function makeContext() {
 		cwd,
 		mode: "print",
 		hasUI: false,
-		isIdle: () => true,
 		model: undefined,
 		sessionManager: { getSessionId: () => "index-test", getSessionFile: () => undefined },
 	};
@@ -70,18 +69,17 @@ describe("bash_async extension registration", () => {
 		expect(tool.renderResult(invalid, { expanded: false }, theme).render(100).join("\n")).toContain("bash_async:");
 	});
 
-	it("does not re-report jobs that were killed or whose terminal result was already read", async () => {
+	it("does not re-report jobs that were killed or whose terminal output was already read", async () => {
 		let tool: any;
 		const handlers = new Map<string, (event?: unknown, context?: unknown) => unknown>();
 		const sendMessage = vi.fn();
-		let idle = false;
 		vi.stubEnv("PI_BASH_ASYNC_POLL_COOLDOWN_MS", "0");
 		bashAsync({
 			registerTool: (definition: any) => (tool = definition),
 			on: (event: string, handler: (event?: unknown, context?: unknown) => unknown) => handlers.set(event, handler),
 			sendMessage,
 		} as any);
-		const context = { ...(await makeContext()), isIdle: () => idle };
+		const context = await makeContext();
 		const run = (action: Record<string, unknown>) => tool.execute("call", action, undefined, undefined, context);
 		const waitTerminal = (jobId: string) =>
 			vi.waitFor(async () => {
@@ -93,64 +91,43 @@ describe("bash_async extension registration", () => {
 			const killed = await run({ action: "start", command: "sleep 30", timeout: 0 });
 			await run({ action: "kill", jobId: killed.details.jobId });
 
+			// A job that already finished on its own keeps its completion; the kill result has no output.
+			const finishedThenKilled = await run({ action: "start", command: "printf finished", timeout: 0 });
+			await waitTerminal(finishedThenKilled.details.jobId);
+			await run({ action: "kill", jobId: finishedThenKilled.details.jobId });
+
 			const statusRead = await run({ action: "start", command: "printf status", timeout: 0 });
 			await waitTerminal(statusRead.details.jobId);
 			await run({ action: "status", jobId: statusRead.details.jobId });
 
 			const outputRead = await run({ action: "start", command: "printf output; exit 3", timeout: 0 });
-			await vi.waitFor(async () => {
-				const output = await run({ action: "output", jobId: outputRead.details.jobId });
-				// The terminal read stands in for the follow-up, so it must carry the final status.
-				expect(output.content[0].text).toContain(`[${outputRead.details.jobId}] failed (exit 3)`);
-			});
+			await vi.waitFor(
+				async () => {
+					const output = await run({ action: "output", jobId: outputRead.details.jobId });
+					// The terminal read stands in for the follow-up, so it must carry the final status.
+					expect(output.content[0].text).toContain(`[${outputRead.details.jobId}] failed (exit 3)`);
+					// The read has to land inside the 500ms batch to replace the completion message.
+				},
+				{ interval: 10 },
+			);
 
 			const unread = await run({ action: "start", command: "printf unread", timeout: 0 });
 			await waitTerminal(unread.details.jobId);
 
-			await new Promise((resolve) => setTimeout(resolve, 600));
-			expect(sendMessage).not.toHaveBeenCalled();
-			handlers.get("turn_end")?.({ type: "turn_end", toolResults: [{}], message: {} }, context);
-			expect(sendMessage).not.toHaveBeenCalled();
-			handlers.get("turn_end")?.({ type: "turn_end", toolResults: [], message: {} }, context);
-			expect(sendMessage).toHaveBeenCalledTimes(1);
-			expect(sendMessage.mock.calls[0]?.[0].details.jobIds).toEqual([unread.details.jobId]);
-			expect(sendMessage.mock.calls[0]?.[1]).toEqual({ triggerTurn: true, deliverAs: "followUp" });
-
-			idle = true;
-			handlers.get("agent_end")?.({ type: "agent_end" }, context);
-			await new Promise((resolve) => setTimeout(resolve, 100));
-			expect(sendMessage).toHaveBeenCalledTimes(1);
+			// Completions go out after the batch delay even while the agent is busy; only reads inside it are dropped.
+			await vi.waitFor(() => {
+				const reported = sendMessage.mock.calls.flatMap((call) => call[0].details.jobIds);
+				expect(reported.sort()).toEqual(
+					[finishedThenKilled.details.jobId, statusRead.details.jobId, unread.details.jobId].sort(),
+				);
+			});
+			for (const call of sendMessage.mock.calls) {
+				expect(call[1]).toEqual({ triggerTurn: true, deliverAs: "followUp" });
+			}
 		} finally {
 			await (handlers.get("session_shutdown") as () => Promise<void>)?.();
 		}
-	});
-
-	it("delivers a completion that finishes during compaction without waiting for another turn", async () => {
-		let tool: any;
-		const handlers = new Map<string, (event?: unknown, context?: unknown) => unknown>();
-		const sendMessage = vi.fn();
-		bashAsync({
-			registerTool: (definition: any) => (tool = definition),
-			on: (event: string, handler: (event?: unknown, context?: unknown) => unknown) => handlers.set(event, handler),
-			sendMessage,
-		} as any);
-		// Pi reports compaction as not idle.
-		const context = { ...(await makeContext()), isIdle: () => false };
-		try {
-			handlers.get("session_before_compact")?.({ type: "session_before_compact" }, context);
-			const started = await tool.execute(
-				"call",
-				{ action: "start", command: "printf done", timeout: 0 },
-				undefined,
-				undefined,
-				context,
-			);
-			await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1), { timeout: 3_000 });
-			expect(sendMessage.mock.calls[0]?.[0].details.jobIds).toEqual([started.details.jobId]);
-		} finally {
-			await (handlers.get("session_shutdown") as () => Promise<void>)?.();
-		}
-	});
+	}, 15_000);
 
 	it("returns details for status, output, list, incremental output, and kill", async () => {
 		let tool: any;
@@ -401,13 +378,11 @@ describe("bash_async start sync window", () => {
 			on: (event: string, handler: (event?: unknown, context?: unknown) => unknown) => handlers.set(event, handler),
 			sendMessage,
 		} as any);
-		// A tool call runs while the agent is busy, which is when completions are held.
-		const context = { ...(await makeContext()), isIdle: () => false };
+		const context = await makeContext();
 		const start = (command: string, signal?: AbortSignal) =>
 			tool.execute("call", { action: "start", command, timeout: 0 }, signal, undefined, context);
-		const flushTurn = () => handlers.get("turn_end")?.({ type: "turn_end", toolResults: [], message: {} }, context);
 		const shutdown = () => (handlers.get("session_shutdown") as () => Promise<void>)?.();
-		return { start, flushTurn, shutdown, sendMessage };
+		return { start, shutdown, sendMessage };
 	}
 
 	it("falls back to the default window for an unset or invalid value and clamps large ones", () => {
@@ -442,7 +417,7 @@ describe("bash_async start sync window", () => {
 
 	it("returns a command that finishes within the window inline and never reports it again", async () => {
 		vi.stubEnv("PI_BASH_ASYNC_SYNC_WINDOW_MS", "3000");
-		const { start, flushTurn, shutdown, sendMessage } = await setup();
+		const { start, shutdown, sendMessage } = await setup();
 		try {
 			const done = await start("printf 'one\\ntwo\\n'; exit 3");
 			expect(done.content[0].text).toContain(`[${done.details.jobId}] failed (exit 3)`);
@@ -452,7 +427,6 @@ describe("bash_async start sync window", () => {
 			expect(done.details).toMatchObject({ status: "failed", exitCode: 3, runtimeMs: expect.any(Number) });
 
 			await new Promise((resolve) => setTimeout(resolve, 600));
-			flushTurn();
 			expect(sendMessage).not.toHaveBeenCalled();
 		} finally {
 			await shutdown();
@@ -461,7 +435,7 @@ describe("bash_async start sync window", () => {
 
 	it("keeps the final lines inline when the output exceeds the inline byte budget", async () => {
 		vi.stubEnv("PI_BASH_ASYNC_SYNC_WINDOW_MS", "10000");
-		const { start, flushTurn, shutdown, sendMessage } = await setup();
+		const { start, shutdown, sendMessage } = await setup();
 		try {
 			// ~65 bytes per line over 300 lines, well past both the inline byte budget and the line cap.
 			const done = await start(`seq 1 300 | awk '{printf "%s %060d\\n", $0, $0}'`);
@@ -477,7 +451,6 @@ describe("bash_async start sync window", () => {
 			expect(text).toContain(done.details.logPath);
 
 			await new Promise((resolve) => setTimeout(resolve, 600));
-			flushTurn();
 			expect(sendMessage).not.toHaveBeenCalled();
 		} finally {
 			await shutdown();
@@ -486,16 +459,28 @@ describe("bash_async start sync window", () => {
 
 	it("leaves a command that outlives the window in the background and reports it as a follow-up", async () => {
 		vi.stubEnv("PI_BASH_ASYNC_SYNC_WINDOW_MS", "200");
-		const { start, flushTurn, shutdown, sendMessage } = await setup();
+		const { start, shutdown, sendMessage } = await setup();
 		try {
 			const started = await start("sleep 1; printf late");
 			expect(started.details).toMatchObject({ jobId: expect.any(String), status: "running" });
 			expect(started.content[0].text).toContain("still running after");
 
 			await new Promise((resolve) => setTimeout(resolve, 1_800));
-			flushTurn();
 			expect(sendMessage).toHaveBeenCalledTimes(1);
 			expect(sendMessage.mock.calls[0]?.[0].details.jobIds).toEqual([started.details.jobId]);
+		} finally {
+			await shutdown();
+		}
+	});
+
+	it("interrupts with steer when a background job fails", async () => {
+		vi.stubEnv("PI_BASH_ASYNC_SYNC_WINDOW_MS", "200");
+		const { start, shutdown, sendMessage } = await setup();
+		try {
+			const started = await start("sleep 1; exit 2");
+			await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1), { timeout: 3_000 });
+			expect(sendMessage.mock.calls[0]?.[0].details.jobIds).toEqual([started.details.jobId]);
+			expect(sendMessage.mock.calls[0]?.[1]).toEqual({ triggerTurn: true, deliverAs: "steer" });
 		} finally {
 			await shutdown();
 		}
@@ -518,7 +503,7 @@ describe("bash_async start sync window", () => {
 
 	it("kills the job when the tool call is interrupted during the window", async () => {
 		vi.stubEnv("PI_BASH_ASYNC_SYNC_WINDOW_MS", "10000");
-		const { start, flushTurn, shutdown, sendMessage } = await setup();
+		const { start, shutdown, sendMessage } = await setup();
 		try {
 			const controller = new AbortController();
 			setTimeout(() => controller.abort(), 200);
@@ -528,7 +513,6 @@ describe("bash_async start sync window", () => {
 			expect(killed.details).toMatchObject({ status: "killed" });
 
 			await new Promise((resolve) => setTimeout(resolve, 600));
-			flushTurn();
 			expect(sendMessage).not.toHaveBeenCalled();
 		} finally {
 			await shutdown();
@@ -541,7 +525,6 @@ describe("bash_async still-running reminder", () => {
 
 	async function setup() {
 		let tool: any;
-		let idle = true;
 		const handlers = new Map<string, (event?: any, context?: any) => any>();
 		const sendMessage = vi.fn();
 		bashAsync({
@@ -549,7 +532,7 @@ describe("bash_async still-running reminder", () => {
 			on: (event: string, handler: (event?: any, context?: any) => any) => handlers.set(event, handler),
 			sendMessage,
 		} as any);
-		const context = { ...(await makeContext()), isIdle: () => idle };
+		const context = await makeContext();
 		const start = (command: string, title: string) =>
 			tool.execute("call", { action: "start", command, title, timeout: 0 }, undefined, undefined, context);
 		const turnContext = (messages: unknown[], ctx: unknown = context) =>
@@ -561,9 +544,6 @@ describe("bash_async still-running reminder", () => {
 			shutdown,
 			sendMessage,
 			context,
-			setIdle: (value: boolean) => {
-				idle = value;
-			},
 		};
 	}
 
@@ -679,36 +659,6 @@ describe("bash_async still-running reminder", () => {
 			expect(second.messages.slice(0, 2)).toEqual(first.messages);
 			expect(second.messages).toHaveLength(4);
 			expect(second.messages.at(-1).content).toContain('"Swift tests"');
-		} finally {
-			await shutdown();
-		}
-	});
-
-	it("keeps a finished job listed while its completion waits for a turn boundary", async () => {
-		const { start, turnContext, shutdown, sendMessage, setIdle } = await setup();
-		try {
-			setIdle(false);
-			const job = await start("printf done", "Quick print");
-			await vi.waitFor(
-				() => {
-					const held = turnContext(userTurn);
-					expect(held?.messages.at(-1).content).toContain(
-						`bash_async job ${job.details.jobId} "Quick print" finished, result not delivered yet`,
-					);
-				},
-				{ timeout: 3_000 },
-			);
-			expect(sendMessage).not.toHaveBeenCalled();
-
-			setIdle(true);
-			await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1), { timeout: 3_000 });
-			// The delivered job earns no new reminder; only the frozen one from before delivery remains.
-			const settled = turnContext([
-				...userTurn,
-				{ role: "user", content: [{ type: "text", text: "done?" }], timestamp: 9 },
-			]);
-			expect(settled.messages).toHaveLength(3);
-			expect(settled.messages.at(-1).role).toBe("user");
 		} finally {
 			await shutdown();
 		}

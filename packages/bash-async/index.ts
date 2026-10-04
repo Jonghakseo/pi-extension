@@ -37,7 +37,7 @@ function errorResult(message: string): AgentToolResult<BashAsyncResultDetails> {
 
 function pollBlockedResult(action: string, retryInMs: number): AgentToolResult<BashAsyncResultDetails> {
 	return errorResult(
-		`${action} is rate limited because nothing changed since the last identical query. Do not poll. Continue with work that does not depend on this job, or end the turn; success, failure, timeout, and kill results arrive automatically as a follow-up. Retry after ${Math.ceil(retryInMs / 1_000)}s if the user asks.`,
+		`${action} is rate limited because nothing changed since the last identical query. Do not poll. Continue with work that does not depend on this job, or end the turn; results arrive automatically. Retry after ${Math.ceil(retryInMs / 1_000)}s if the user asks.`,
 	);
 }
 
@@ -97,10 +97,6 @@ export default function bashAsync(pi: ExtensionAPI): void {
 	let manager: JobManager;
 	const pollGuard = new PollGuard();
 	let uiContext: ExtensionContext | undefined;
-	let latestContext: ExtensionContext | undefined;
-	// Pi reports compaction as busy, but the model cannot read status or output until it ends, so
-	// holding a completion then only delays it. Deliver during compaction like any idle moment.
-	let compacting = false;
 	let runningJobsWidget: RunningJobsWidget | undefined;
 	let widgetInstalled = false;
 	// Jobs carry no session, and a hosted runtime can switch sessions while an earlier session's jobs run on.
@@ -162,15 +158,14 @@ export default function bashAsync(pi: ExtensionAPI): void {
 		reopen: () => {
 			notifications.resume();
 			manager.reopenAdmission();
+			notifications.flush();
 		},
 	});
 	pi.on("session_start", (_event, context) => {
-		latestContext = context;
 		reminderAnchors.clear();
 		provider.bind(context.sessionManager.getSessionId());
 	});
 	const notifications = new NotificationBatcher({
-		isAgentIdle: () => compacting || (latestContext?.isIdle() ?? true),
 		deliveryState: (id) => provider.deliveryState(id),
 		send: (message, options) => {
 			provider.deliver(message.details.jobIds, message, (annotated) => pi.sendMessage(annotated, options));
@@ -196,7 +191,7 @@ export default function bashAsync(pi: ExtensionAPI): void {
 			windowMs > 0
 				? `Use bash_async start for finite non-interactive commands. If the command finishes within ${formatSyncWindow(windowMs)}, start returns its final status and output inline; otherwise it keeps running in the background.`
 				: "Use bash_async start only for finite non-interactive commands whose result is not needed immediately.",
-			"Do not call sleep or poll status, output, or list to wait. Continue only with independent work; otherwise end the turn. Every terminal result arrives automatically as a follow-up; jobs you kill and results already read via status or output are not re-reported.",
+			"Do not call sleep or poll status, output, or list to wait. Continue only with independent work; otherwise end the turn. Results arrive automatically: success after your current run ends, failure or timeout at the next tool boundary. Jobs you kill are not reported.",
 			"Repeated status, output, or list queries that return no new information are rate limited and fail with an error.",
 			"bash_async does not support TUI, REPL, stdin, or interactive terminal programs.",
 		],
@@ -212,7 +207,6 @@ export default function bashAsync(pi: ExtensionAPI): void {
 			return new Text(text ? theme.fg("toolOutput", text) : "", 0, 0);
 		},
 		async execute(_toolCallId, args, signal, _onUpdate, context) {
-			latestContext = context;
 			if (context.mode === "tui") uiContext = context;
 			else {
 				clearRunningJobsWidget();
@@ -250,27 +244,6 @@ export default function bashAsync(pi: ExtensionAPI): void {
 		for (const id of jobSessions.keys()) if (!trackedIds.has(id)) jobSessions.delete(id);
 		const pending = tracked.filter((job) => jobSessions.get(job.id) === sessionId);
 		return handleRunningReminderContext(reminderAnchors, sessionId, event.messages, pending, Date.now());
-	});
-
-	// Held completions go out with the final turn so the follow-up is picked up in the same agent run.
-	pi.on("turn_end", (event, context) => {
-		latestContext = context;
-		if (event.toolResults.length === 0) notifications.flush({ force: true });
-	});
-
-	pi.on("session_before_compact", () => {
-		compacting = true;
-	});
-	pi.on("session_compact", () => {
-		compacting = false;
-	});
-	pi.on("agent_start", () => {
-		compacting = false;
-	});
-
-	pi.on("agent_end", (_event, context) => {
-		latestContext = context;
-		notifications.flushWhenIdle();
 	});
 
 	pi.on("session_shutdown", async () => {
@@ -318,7 +291,7 @@ async function execute(
 			}
 			const status = manager.status(jobId);
 			if (status && isTerminalJobStatus(status.status)) {
-				// The inline result replaces the follow-up, exactly like a terminal status or output read.
+				// The inline result replaces the follow-up, exactly like a terminal output read.
 				forgetJobPolls(pollGuard, jobId);
 				acknowledge(jobId);
 				return terminalOutputResult(manager, status);
@@ -328,7 +301,7 @@ async function execute(
 				// so it must not be acknowledged here: the follow-up is now the only way to learn the result.
 				forgetJobPolls(pollGuard, jobId);
 				return result(
-					`Job ${jobId} finished while start was waiting and is no longer retained, so its final status is not in this result. It arrives as a follow-up; the log holds the full output.\nLog: ${started.details.logPath}`,
+					`Job ${jobId} finished while start was waiting and is no longer retained, so its final status is not in this result. It still arrives automatically; the log holds the full output.\nLog: ${started.details.logPath}`,
 					{ jobId, logPath: started.details.logPath },
 				);
 			}
@@ -348,10 +321,9 @@ async function execute(
 	if (params.action === "status") {
 		const details = manager.status(params.jobId);
 		if (!details) return errorResult(`job not found: ${params.jobId}`);
-		if (isTerminalJobStatus(details.status)) {
-			forgetJobPolls(pollGuard, params.jobId);
-			acknowledge(params.jobId);
-		} else {
+		// status carries no output or error summary, so it never replaces the completion follow-up.
+		if (isTerminalJobStatus(details.status)) forgetJobPolls(pollGuard, params.jobId);
+		else {
 			const decision = pollGuard.check(`status:${params.jobId}`, details.status);
 			if (!decision.allowed) return pollBlockedResult("status", decision.retryInMs);
 		}
@@ -371,7 +343,7 @@ async function execute(
 			const consumed = params.incremental === true && output.nextOffset > output.startOffset;
 			if (!decision.allowed && !consumed) return pollBlockedResult("output", decision.retryInMs);
 		}
-		// A terminal read replaces the follow-up, so it must carry the final status the follow-up would have.
+		// A terminal read within the batch delay replaces the completion message, so it must carry the final status.
 		const text = [
 			terminal ? renderStatusLine(output.job) : undefined,
 			output.warning,
@@ -393,7 +365,9 @@ async function execute(
 	forgetJobPolls(pollGuard, params.jobId);
 	const killed = await manager.kill(params.jobId);
 	if (!killed) return errorResult(`job not found: ${params.jobId}`);
-	if (isTerminalJobStatus(killed.status)) acknowledge(killed.id);
+	// Only a job this kill stopped is replaced by the kill result. A job that already finished on its own
+	// keeps its completion, since the kill result carries no output or error summary.
+	if (killed.status === "killed") acknowledge(killed.id);
 	const details = manager.status(killed.id);
 	return details ? result(renderStatus(details), details) : errorResult(`job not found: ${params.jobId}`);
 }

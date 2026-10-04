@@ -4,7 +4,7 @@ import type { BashAsyncJob, StartResultDetails, StatusResultDetails } from "./ty
 
 export function renderStart(details: StartResultDetails, syncWindowMs = 0): string {
 	const still = syncWindowMs > 0 ? ` and is still ${details.status} after ${formatSyncWindow(syncWindowMs)}` : "";
-	return `Started background job ${details.jobId} (${details.status})${still}: ${details.title}\nDo not call sleep or poll status, output, or list to wait. Continue only with work that does not depend on this job; otherwise end the turn. Success, failure, and timeout results arrive automatically as a follow-up; jobs you kill or whose final result you already read via status or output are not re-reported.`;
+	return `Started background job ${details.jobId} (${details.status})${still}: ${details.title}\nDo not call sleep or poll status, output, or list to wait. Continue only with work that does not depend on this job; otherwise end the turn. Results arrive automatically: success after your current run ends, failure or timeout at the next tool boundary. Jobs you kill are not reported.`;
 }
 
 export function renderStatusLine(job: BashAsyncJob): string {

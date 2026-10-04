@@ -37,71 +37,70 @@ describe("NotificationBatcher", () => {
 		vi.useRealTimers();
 	});
 
-	it("holds completions while the agent is busy and delivers them as one message once idle", () => {
+	it("interrupts with steer when any job in the batch failed or timed out", () => {
 		vi.useFakeTimers();
 		const send = vi.fn();
-		let idle = false;
-		const batcher = new NotificationBatcher({ send, isAgentIdle: () => idle });
-		batcher.enqueue(job("a"));
+		const batcher = new NotificationBatcher({ send });
+		batcher.enqueue(job("ok"));
+		batcher.enqueue({ ...job("broken"), status: "failed", exitCode: 1 });
 		vi.advanceTimersByTime(500);
-		batcher.enqueue(job("b"));
-		vi.advanceTimersByTime(500);
-		expect(send).not.toHaveBeenCalled();
+		expect(send.mock.calls[0]?.[0].details.jobIds).toEqual(["ok", "broken"]);
+		expect(send.mock.calls[0]?.[1]).toEqual({ triggerTurn: true, deliverAs: "steer" });
 
-		batcher.flushWhenIdle();
-		vi.advanceTimersByTime(100);
-		expect(send).not.toHaveBeenCalled();
-		idle = true;
-		vi.advanceTimersByTime(50);
-		expect(send).toHaveBeenCalledTimes(1);
-		expect(send.mock.calls[0]?.[0].details.jobIds).toEqual(["a", "b"]);
+		batcher.enqueue({ ...job("slow"), status: "timed_out" });
+		vi.advanceTimersByTime(500);
+		expect(send.mock.calls[1]?.[1]).toEqual({ triggerTurn: true, deliverAs: "steer" });
 		vi.useRealTimers();
 	});
 
-	it("delivers a held completion once the agent is idle again without another turn boundary", () => {
+	it("drops jobs acknowledged within the batch delay", () => {
 		vi.useFakeTimers();
 		const send = vi.fn();
-		let idle = false;
-		const batcher = new NotificationBatcher({ send, isAgentIdle: () => idle });
-		batcher.enqueue(job("a"));
-		vi.advanceTimersByTime(5_000);
-		expect(send).not.toHaveBeenCalled();
-
-		// Compaction ends: no turn_end or agent_end follows.
-		idle = true;
-		vi.advanceTimersByTime(500);
-		expect(send).toHaveBeenCalledTimes(1);
-		expect(send.mock.calls[0]?.[0].details.jobIds).toEqual(["a"]);
-		vi.useRealTimers();
-	});
-
-	it("drops acknowledged jobs from the pending batch", () => {
-		vi.useFakeTimers();
-		const send = vi.fn();
-		const batcher = new NotificationBatcher({ send, isAgentIdle: () => false });
+		const batcher = new NotificationBatcher({ send });
 		batcher.enqueue(job("read"));
 		batcher.enqueue(job("unread"));
 		batcher.acknowledge("read");
-		batcher.flush({ force: true });
+		vi.advanceTimersByTime(500);
 		expect(send).toHaveBeenCalledTimes(1);
 		expect(send.mock.calls[0]?.[0].details.jobIds).toEqual(["unread"]);
-
-		batcher.acknowledge("unread");
-		batcher.flushWhenIdle();
-		vi.runAllTimers();
-		expect(send).toHaveBeenCalledTimes(1);
 		vi.useRealTimers();
 	});
 
-	it("falls back to sending after the idle wait times out", () => {
+	it("stops retrying held completions until a delivery hook flushes, and purges discarded ones", () => {
 		vi.useFakeTimers();
 		const send = vi.fn();
-		const batcher = new NotificationBatcher({ send, isAgentIdle: () => false });
-		batcher.enqueue(job("stuck"));
-		batcher.flushWhenIdle();
-		vi.advanceTimersByTime(9_900);
+		const states = new Map<string, "send" | "hold" | "discard">([
+			["held", "hold"],
+			["stale", "hold"],
+		]);
+		const batcher = new NotificationBatcher({ send, deliveryState: (id) => states.get(id) ?? "send" });
+		batcher.enqueue(job("held"));
+		batcher.enqueue(job("stale"));
+		vi.advanceTimersByTime(500);
 		expect(send).not.toHaveBeenCalled();
-		vi.advanceTimersByTime(200);
+		expect(vi.getTimerCount()).toBe(0);
+
+		states.set("held", "send");
+		states.set("stale", "discard");
+		batcher.flush();
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(send.mock.calls[0]?.[0].details.jobIds).toEqual(["held"]);
+		expect(batcher.pendingJobs()).toEqual([]);
+		vi.useRealTimers();
+	});
+
+	it("gives every job its own grace period to be acknowledged", () => {
+		vi.useFakeTimers();
+		const send = vi.fn();
+		const batcher = new NotificationBatcher({ send });
+		batcher.enqueue(job("early"));
+		vi.advanceTimersByTime(450);
+		batcher.enqueue(job("late"));
+		vi.advanceTimersByTime(50);
+		expect(send.mock.calls.map(([message]) => message.details.jobIds)).toEqual([["early"]]);
+
+		batcher.acknowledge("late");
+		vi.advanceTimersByTime(500);
 		expect(send).toHaveBeenCalledTimes(1);
 		vi.useRealTimers();
 	});

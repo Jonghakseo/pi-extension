@@ -53,7 +53,7 @@
 | `0.86.0` provider 입력의 `TranscriptContext` 정규화, 도구 메시지 JSON 제한 | `codex-fast-mode`는 context를 공개 `/compat` adapter에 그대로 위임한다. 사용자 provider context를 직접 분해하지 않는다. 타입 검사와 provider payload 테스트를 통과했다. |
 | `0.86.0` `pi.on()` unsubscribe, `modelRegistry.stream()`, 네이티브 클립보드 | 새 API로 단순화할 수 있는지 검토했다. 기존 peer가 구버전을 허용하므로 새 API만으로 대체하지 않는다. |
 | `0.86.1` 클립보드 fallback, provider 오류 처리 수정 | upstream 수정 혜택을 받는다. 별도 copy/paste 도구를 제공하는 `clipboard`는 유지한다. |
-| `0.87.0` canonical session context, `turn_end` 경계, `context_with_system` | `headroom`, `until`, `vcc-ko`는 custom 메시지를 필터링하며 system 메시지 존재를 전제하지 않는다. `bash-async`는 기존 `toolResults`를 읽는다. 제거된 `shouldStopAfterTurn`, 메시지 직접 대입, exhaustive event switch 사용은 없다. |
+| `0.87.0` canonical session context, `turn_end` 경계, `context_with_system` | `headroom`, `until`, `vcc-ko`는 custom 메시지를 필터링하며 system 메시지 존재를 전제하지 않는다. `bash-async`는 당시 `toolResults`를 읽었고, 이후 완료 알림 보류를 없애면서 `turn_end` 훅도 제거했다. 제거된 `shouldStopAfterTurn`, 메시지 직접 대입, exhaustive event switch 사용은 없다. |
 | `0.87.1` 모델 카탈로그, 압축·CLI 오류 처리 수정 | SDK 갱신으로 반영한다. 별도의 CLI/parser 호환 수정은 없다. |
 | `0.99.0` 내장 MCP/codemode, tool exposure·중첩 호출 API | `claude-mcp-bridge`와 `.pi/mcp.json`, 도구 이름이 겹칠 수 있다. README에 내장 MCP 비활성화 또는 브리지 제거 선택을 안내했다. 구현은 자동 전환하지 않는다. |
 | `0.99.0` system 테마, TUI 색상 query API 교체, 이미지·분류 모델 통합 | 제거된 색상 query/이미지 API 사용은 없다. `claude-spinner`, `subagent`의 실제 테마·편집기 조합은 수동 확인 대상으로 남긴다. |

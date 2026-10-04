@@ -2,8 +2,6 @@ import { truncateUtf8 } from "./job-log.js";
 import type { BashAsyncJob } from "./types.js";
 
 export const COMPLETION_DELAY_MS = 500;
-export const IDLE_POLL_INTERVAL_MS = 50;
-export const IDLE_POLL_TIMEOUT_MS = 10_000;
 export const MAX_COMPLETION_MESSAGE_BYTES = 8 * 1024;
 export const MAX_COMPLETION_TAIL_BYTES = 2 * 1024;
 export const MAX_COMPLETION_TAIL_LINES = 20;
@@ -15,13 +13,16 @@ export interface CompletionNotification {
 	details: { jobIds: string[] };
 }
 
+export type CompletionDelivery = "steer" | "followUp";
+
 export interface CompletionBatcherOptions {
-	send: (message: CompletionNotification, options: { triggerTurn: true; deliverAs: "followUp" }) => void;
+	send: (message: CompletionNotification, options: { triggerTurn: true; deliverAs: CompletionDelivery }) => void;
 	delayMs?: number;
-	/** Completions stay pending while the agent is busy so a later status/output read can acknowledge them. */
-	isAgentIdle?: () => boolean;
 	deliveryState?: (jobId: string) => "send" | "hold" | "discard";
 }
+
+/** A failure can invalidate the work the agent is doing now, so it interrupts at the next tool boundary. */
+const INTERRUPTING_STATUSES: ReadonlySet<BashAsyncJob["status"]> = new Set(["failed", "timed_out"]);
 
 export interface CompletedJob extends BashAsyncJob {
 	tail: string[];
@@ -47,32 +48,28 @@ function formatCompletion(job: CompletedJob): string {
 export class NotificationBatcher {
 	private readonly delayMs: number;
 	private readonly pending = new Map<string, CompletedJob>();
+	/** Each job gets its own grace period, so a kill or output read right after it finishes still counts. */
+	private readonly readyAt = new Map<string, number>();
 	private timer: ReturnType<typeof setTimeout> | undefined;
-	private idleTimer: ReturnType<typeof setTimeout> | undefined;
 	private suppressed = false;
 
 	constructor(private readonly options: CompletionBatcherOptions) {
 		this.delayMs = options.delayMs ?? COMPLETION_DELAY_MS;
 	}
 
-	private agentIdle(): boolean {
-		try {
-			return this.options.isAgentIdle?.() ?? true;
-		} catch {
-			return true;
-		}
-	}
-
 	enqueue(job: CompletedJob): void {
 		if (this.suppressed || this.pending.has(job.id)) return;
 		this.pending.set(job.id, job);
-		this.timer ??= setTimeout(() => this.flush(), this.delayMs);
-		this.timer.unref?.();
+		this.readyAt.set(job.id, Date.now() + this.delayMs);
+		this.schedule(this.delayMs);
 	}
 
-	/** Drops a completion the agent already learned about through status, output, or kill. */
+	/**
+	 * Drops a completion the agent already learned about through a terminal output read, an inline start
+	 * result, or kill. Only effective inside the job's grace period: Pi cannot recall a message once it is sent.
+	 */
 	acknowledge(jobId: string): void {
-		this.pending.delete(jobId);
+		this.remove(jobId);
 	}
 
 	/** Jobs that already finished but whose completion has not reached the model yet. */
@@ -80,54 +77,40 @@ export class NotificationBatcher {
 		return [...this.pending.values()];
 	}
 
-	/** Delivers held completions once the agent becomes idle, or after a bounded wait. */
-	flushWhenIdle(): void {
-		if (this.idleTimer) clearTimeout(this.idleTimer);
-		this.idleTimer = undefined;
-		if (this.suppressed || this.pending.size === 0) return;
-		const deadline = Date.now() + IDLE_POLL_TIMEOUT_MS;
-		const poll = () => {
-			this.idleTimer = undefined;
-			if (this.suppressed || this.pending.size === 0) return;
-			if (this.agentIdle() || Date.now() >= deadline) {
-				this.flush({ force: true });
-				return;
-			}
-			this.idleTimer = setTimeout(poll, IDLE_POLL_INTERVAL_MS);
-			this.idleTimer.unref?.();
-		};
-		poll();
-	}
-
-	flush(options?: { force?: boolean }): void {
+	/** Sends every job past its grace period. Held jobs wait for the next flush from a delivery hook. */
+	flush(): void {
 		if (this.timer) clearTimeout(this.timer);
 		this.timer = undefined;
-		if (this.suppressed || this.pending.size === 0) {
-			this.pending.clear();
-			return;
-		}
-		if (!options?.force && !this.agentIdle()) {
-			// Busy without a turn boundary ahead (for example, compaction) would otherwise strand
-			// the completion. Keep holding, and deliver as soon as the agent is idle again.
-			this.timer = setTimeout(() => this.flush(), this.delayMs);
-			this.timer.unref?.();
-			return;
-		}
+		if (this.suppressed) return;
 
+		const now = Date.now();
 		const included: CompletedJob[] = [];
 		let content = "";
-		for (const job of this.pending.values()) {
+		let full = false;
+		let nextReady = Number.POSITIVE_INFINITY;
+		for (const job of [...this.pending.values()]) {
+			const readyAt = this.readyAt.get(job.id) ?? now;
+			if (readyAt > now) {
+				nextReady = Math.min(nextReady, readyAt);
+				continue;
+			}
 			const state = this.options.deliveryState?.(job.id) ?? "send";
-			if (state === "discard") this.pending.delete(job.id);
-			if (state !== "send") continue;
+			if (state === "discard") this.remove(job.id);
+			if (state !== "send" || full) continue;
 			const entry = formatCompletion(job);
 			const separator = content ? "\n\n" : "";
-			if (Buffer.byteLength(content + separator + entry) > MAX_COMPLETION_MESSAGE_BYTES) break;
+			if (Buffer.byteLength(content + separator + entry) > MAX_COMPLETION_MESSAGE_BYTES) {
+				// The rest goes in the next message, after this one is queued.
+				full = true;
+				nextReady = Math.min(nextReady, now + this.delayMs);
+				continue;
+			}
 			included.push(job);
 			content += separator + entry;
 		}
-		for (const job of included) this.pending.delete(job.id);
+		for (const job of included) this.remove(job.id);
 		if (included.length > 0) {
+			const interrupting = included.some((job) => INTERRUPTING_STATUSES.has(job.status));
 			this.options.send(
 				{
 					customType: "bash-async-completion",
@@ -135,16 +118,10 @@ export class NotificationBatcher {
 					display: true,
 					details: { jobIds: included.map((job) => job.id) },
 				},
-				{ triggerTurn: true, deliverAs: "followUp" },
+				{ triggerTurn: true, deliverAs: interrupting ? "steer" : "followUp" },
 			);
 		}
-		if (
-			!this.suppressed &&
-			[...this.pending.keys()].some((id) => (this.options.deliveryState?.(id) ?? "send") === "send")
-		) {
-			this.timer = setTimeout(() => this.flush({ force: true }), this.delayMs);
-			this.timer.unref?.();
-		}
+		if (Number.isFinite(nextReady)) this.schedule(Math.max(0, nextReady - now));
 	}
 
 	resume(): void {
@@ -154,9 +131,19 @@ export class NotificationBatcher {
 	suppress(): void {
 		this.suppressed = true;
 		if (this.timer) clearTimeout(this.timer);
-		if (this.idleTimer) clearTimeout(this.idleTimer);
 		this.timer = undefined;
-		this.idleTimer = undefined;
 		this.pending.clear();
+		this.readyAt.clear();
+	}
+
+	private remove(jobId: string): void {
+		this.pending.delete(jobId);
+		this.readyAt.delete(jobId);
+	}
+
+	private schedule(delayMs: number): void {
+		if (this.timer) return;
+		this.timer = setTimeout(() => this.flush(), delayMs);
+		this.timer.unref?.();
 	}
 }
