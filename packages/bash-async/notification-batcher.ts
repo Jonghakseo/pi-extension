@@ -13,16 +13,13 @@ export interface CompletionNotification {
 	details: { jobIds: string[] };
 }
 
-export type CompletionDelivery = "steer" | "followUp";
+export type CompletionDelivery = "steer";
 
 export interface CompletionBatcherOptions {
 	send: (message: CompletionNotification, options: { triggerTurn: true; deliverAs: CompletionDelivery }) => void;
 	delayMs?: number;
 	deliveryState?: (jobId: string) => "send" | "hold" | "discard";
 }
-
-/** A failure can invalidate the work the agent is doing now, so it interrupts at the next tool boundary. */
-const INTERRUPTING_STATUSES: ReadonlySet<BashAsyncJob["status"]> = new Set(["failed", "timed_out"]);
 
 export interface CompletedJob extends BashAsyncJob {
 	tail: string[];
@@ -110,7 +107,6 @@ export class NotificationBatcher {
 		}
 		for (const job of included) this.remove(job.id);
 		if (included.length > 0) {
-			const interrupting = included.some((job) => INTERRUPTING_STATUSES.has(job.status));
 			this.options.send(
 				{
 					customType: "bash-async-completion",
@@ -118,7 +114,7 @@ export class NotificationBatcher {
 					display: true,
 					details: { jobIds: included.map((job) => job.id) },
 				},
-				{ triggerTurn: true, deliverAs: interrupting ? "steer" : "followUp" },
+				{ triggerTurn: true, deliverAs: "steer" },
 			);
 		}
 		if (Number.isFinite(nextReady)) this.schedule(Math.max(0, nextReady - now));

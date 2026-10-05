@@ -40,9 +40,9 @@ export const SUBAGENT_CLI_HELP_TEXT = [
 	"   • chain:    Launch MULTIPLE dependent steps sequentially; previous output is passed as reference",
 	"              Each block must be exactly: --agent <agent> --task <task>",
 	"",
-	"4. Follow-up policy:",
+	"4. Completion policy:",
 	"   • After a launch, do NOT call `subagent status/detail` to poll right away.",
-	"   • Stop making subagent calls and wait for the automatic completion/failure follow-up.",
+	"   • Stop making subagent calls and wait for the automatic completion/failure notification.",
 	"   • Use `status/detail` only when the USER explicitly asks (or for one-off manual inspection).",
 	"",
 	"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
@@ -96,7 +96,7 @@ export const SUBAGENT_CLI_HELP_TEXT = [
 	"💡 Tips:",
 	"  • Runs notify you when done automatically.",
 	"  • Batch waits for the whole group; chain waits for the whole pipeline.",
-	"  • After launch, end the turn and wait for follow-up (no status/detail polling loops).",
+	"  • After launch, keep doing independent work; end the turn only once everything left needs the result (no status/detail polling loops).",
 	"  • Use `--main` to share context with the main agent; `--isolated` for a fresh scope.",
 	"  • When using `continue`, the main context is NOT auto-synced. Include recent changes in the task text.",
 	"  • Long task? Write context to a temp file and reference it in the task:",
@@ -243,7 +243,7 @@ function parseRunLike(
 		}
 		if (token === "--async" || token === "--sync") {
 			return {
-				error: `❌ ${token} is no longer supported\n\nSubagent run/continue commands are async-only, so you should omit execution-mode flags entirely. Wait for the automatic follow-up message after launch.\n\n✓ Correct: ${verb === "continue" ? "subagent continue 22 -- <task>" : "subagent run worker -- <task>"}`,
+				error: `❌ ${token} is no longer supported\n\nSubagent run/continue commands are async-only, so you should omit execution-mode flags entirely. Wait for the automatic completion notification after launch.\n\n✓ Correct: ${verb === "continue" ? "subagent continue 22 -- <task>" : "subagent run worker -- <task>"}`,
 			};
 		}
 		if (token === "--agent") {

@@ -10,7 +10,7 @@ export const DEFAULT_TIMEOUT_SECONDS = 1_800;
 export const DEFAULT_OUTPUT_LINES = 50;
 export const MAX_OUTPUT_LINES = 200;
 
-const TOOL_DESCRIPTION_REST = `Do not call sleep or poll status, output, or list to wait. Continue only with work that does not depend on the job; otherwise end the turn. Results arrive automatically: success after your current run ends, failure or timeout at the next tool boundary. Jobs you kill are not reported. Query output only when early output is needed or the user asks; repeated queries that return no new information are rate limited and fail. TUI, REPL, and commands requiring stdin are unsupported.`;
+const TOOL_DESCRIPTION_REST = `Do not call sleep or poll status, output, or list to wait. Continue only with work that does not depend on the job; otherwise end the turn. Results arrive automatically once your current response and its tool calls finish, whether the job succeeded, failed, or timed out. Jobs you kill are not reported. Query output only when early output is needed or the user asks; repeated queries that return no new information are rate limited and fail. TUI, REPL, and commands requiring stdin are unsupported.`;
 
 /** Formats the sync window the way both the tool description and start results state it. */
 export function formatSyncWindow(windowMs: number): string {

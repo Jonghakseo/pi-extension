@@ -802,7 +802,7 @@ function buildRunAnalyticsSummary(
 function makePendingCompletion(message: PendingCompletion["message"], triggerTurn = true): PendingCompletion {
 	return {
 		message,
-		options: { deliverAs: "followUp", triggerTurn },
+		options: { deliverAs: "steer", triggerTurn },
 		createdAt: Date.now(),
 	};
 }
@@ -1706,7 +1706,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						const escalationMsg = finalized.rawOutput.replace(/^\[ESCALATION\]\s*/, "");
 						const message = buildEscalationMessage(runState, escalationMsg, finalized.result);
 						if (isInOriginSession(ctx, originSessionFile)) {
-							pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
+							pi.sendMessage(message, { deliverAs: "steer", triggerTurn: true });
 							cleanupRunAfterFinalDelivery(runState.id);
 						} else {
 							const entry = store.globalLiveRuns.get(runState.id);
@@ -1718,7 +1718,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 					const terminalLabel = getFinalizedRunLabel(finalized);
 					const completionMessage = buildRunCompletionMessage(finalized);
 					if (isInOriginSession(ctx, originSessionFile)) {
-						pi.sendMessage(completionMessage, { deliverAs: "followUp", triggerTurn: true });
+						pi.sendMessage(completionMessage, { deliverAs: "steer", triggerTurn: true });
 						cleanupRunAfterFinalDelivery(runState.id);
 					} else {
 						const entry = store.globalLiveRuns.get(runState.id);
@@ -1739,7 +1739,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 					const terminalLabel = getFinalizedRunLabel(finalized);
 					const errorMessage = buildRunCompletionMessage(finalized);
 					if (isInOriginSession(ctx, originSessionFile)) {
-						pi.sendMessage(errorMessage, { deliverAs: "followUp", triggerTurn: true });
+						pi.sendMessage(errorMessage, { deliverAs: "steer", triggerTurn: true });
 						cleanupRunAfterFinalDelivery(runState.id);
 					} else {
 						const entry = store.globalLiveRuns.get(runState.id);
@@ -1908,7 +1908,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 							retainAsyncCompletion(message);
 							retireFinishedGroup(store, snapshotBatchGroup(store, batch, batchTerminalStatus));
 							if (isInOriginSession(ctx, batch.originSessionFile)) {
-								pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
+								pi.sendMessage(message, { deliverAs: "steer", triggerTurn: true });
 								clearPendingGroupCompletion("batch", batchId);
 								for (const runId of batch.runIds) cleanupGroupRunAfterFinalDelivery(runId, batchId, "batch");
 								store.batchGroups.delete(batchId);
@@ -1962,7 +1962,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 							retainAsyncCompletion(message);
 							retireFinishedGroup(store, snapshotBatchGroup(store, batch, batchTerminalStatus));
 							if (isInOriginSession(ctx, batch.originSessionFile)) {
-								pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
+								pi.sendMessage(message, { deliverAs: "steer", triggerTurn: true });
 								clearPendingGroupCompletion("batch", batchId);
 								for (const runId of batch.runIds) cleanupGroupRunAfterFinalDelivery(runId, batchId, "batch");
 								store.batchGroups.delete(batchId);
@@ -2288,7 +2288,7 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						retainAsyncCompletion(message);
 						retireFinishedGroup(store, snapshotPipeline(pipeline, terminalStatus));
 						if (isInOriginSession(ctx, pipeline.originSessionFile)) {
-							pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: true });
+							pi.sendMessage(message, { deliverAs: "steer", triggerTurn: true });
 							clearPendingGroupCompletion("chain", pipelineId);
 							for (const runId of pipeline.stepRunIds) cleanupGroupRunAfterFinalDelivery(runId, pipelineId, "chain");
 							store.pipelines.delete(pipelineId);

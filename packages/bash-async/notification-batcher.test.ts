@@ -19,7 +19,7 @@ function job(id: string, tail = ["one", "two"]): CompletedJob {
 }
 
 describe("NotificationBatcher", () => {
-	it("coalesces one completion per job into a follow-up message", () => {
+	it("coalesces successful completions into one steering message", () => {
 		vi.useFakeTimers();
 		const send = vi.fn();
 		const batcher = new NotificationBatcher({ send });
@@ -33,7 +33,7 @@ describe("NotificationBatcher", () => {
 			customType: "bash-async-completion",
 			details: { jobIds: ["a", "b"] },
 		});
-		expect(send.mock.calls[0]?.[1]).toEqual({ triggerTurn: true, deliverAs: "followUp" });
+		expect(send.mock.calls[0]?.[1]).toEqual({ triggerTurn: true, deliverAs: "steer" });
 		vi.useRealTimers();
 	});
 

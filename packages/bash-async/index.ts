@@ -194,7 +194,7 @@ export default function bashAsync(host: ExtensionAPI): void {
 			windowMs > 0
 				? `Use bash_async start for finite non-interactive commands. If the command finishes within ${formatSyncWindow(windowMs)}, start returns its final status and output inline; otherwise it keeps running in the background.`
 				: "Use bash_async start only for finite non-interactive commands whose result is not needed immediately.",
-			"Do not call sleep or poll status, output, or list to wait. Continue only with independent work; otherwise end the turn. Results arrive automatically: success after your current run ends, failure or timeout at the next tool boundary. Jobs you kill are not reported.",
+			"Do not call sleep or poll status, output, or list to wait. Continue only with independent work; otherwise end the turn. Results arrive automatically once your current response and its tool calls finish, whether the job succeeded, failed, or timed out. Jobs you kill are not reported.",
 			"Repeated status, output, or list queries that return no new information are rate limited and fail with an error.",
 			"bash_async does not support TUI, REPL, stdin, or interactive terminal programs.",
 		],

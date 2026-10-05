@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { SubagentAsyncTasks } from "./async-task-lifecycle.js";
 import { handleSessionStart, registerAll } from "./commands.js";
 import { STALE_PENDING_COMPLETION_MS } from "./constants.js";
+import { guardQueuedDeliveries } from "./delivery-guard.js";
 import { consumePendingGroupCompletionsForSession, upsertPendingGroupCompletion } from "./group-pending.js";
 import extension from "./index.js";
 import { createStore } from "./store.js";
@@ -182,6 +183,44 @@ function setup() {
 }
 
 describe("hosted subagent production execution", () => {
+	it.each([
+		["run", "subagent run worker -- one", 1],
+		["batch", 'subagent batch --agent worker --task "one" --agent worker --task "two"', 2],
+		["chain", 'subagent chain --agent worker --task "one" --agent worker --task "two"', 2],
+	] as const)("steers a busy parent on %s completion and restores it after Escape", async (_kind, command, count) => {
+		const { pi, store, context } = setup();
+		const guarded = guardQueuedDeliveries(pi as any);
+		const execute = createSubagentToolExecute(guarded, store);
+		let idle = false;
+		const ctx = { ...context, isIdle: () => idle };
+		const emit = (name: string, event = {}) => {
+			for (const [registered, handler] of pi.on.mock.calls) {
+				if (registered === name) handler(event, ctx);
+			}
+		};
+		emit("agent_start");
+		const children = Array.from({ length: count }, () => child());
+		for (const proc of children) spawn.mockReturnValueOnce(proc);
+		await execute("completion", { command }, undefined, undefined, ctx);
+		for (let index = 0; index < count; index++) {
+			await vi.advanceTimersByTimeAsync(1001);
+			expect(spawn).toHaveBeenCalledTimes(index + 1);
+			expect(pi.sendMessage).not.toHaveBeenCalled();
+			children[index].finish();
+			await vi.advanceTimersByTimeAsync(0);
+		}
+		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+		const [completion, options] = pi.sendMessage.mock.calls[0];
+		expect(options).toEqual({ deliverAs: "steer", triggerTurn: true });
+		expect(completion.content).toContain("DONE");
+		// No message_end: Escape discarded the steering queue before the model received it.
+		idle = true;
+		emit("agent_settled");
+		expect(pi.sendMessage.mock.calls[1]).toEqual([completion, { triggerTurn: false }]);
+		emit("agent_settled");
+		expect(pi.sendMessage).toHaveBeenCalledTimes(2);
+	});
+
 	it("restores only the latest session when the first lifecycle is still queued", async () => {
 		const { host, pi, context } = setup();
 		lifecycle.shutdown();
@@ -437,6 +476,7 @@ describe("hosted subagent production execution", () => {
 		expect(host.detail.tasks.find((task: any) => task.taskId === rootId).execution).toBe("cancelled");
 		expect(host.detail.tickets).toMatchObject([{ state: "submitted" }]);
 		expect(pi.sendMessage.mock.calls.filter(([message]) => message.details?.asyncTasks)).toHaveLength(1);
+		expect(pi.sendMessage.mock.calls.at(-1)?.[1]).toEqual({ deliverAs: "steer", triggerTurn: true });
 		expect(pi.sendMessage.mock.calls.at(-1)?.[0].content).toContain("Outcomes: 2 aborted");
 	});
 
@@ -531,6 +571,7 @@ describe("hosted subagent production execution", () => {
 		).toBe(true);
 		expect(host.detail.tasks.find((task: any) => task.taskId === task.rootTaskId).execution).toBe("failed");
 		expect(pi.sendMessage.mock.calls.at(-1)?.[0].content).toContain("failed");
+		expect(pi.sendMessage.mock.calls.at(-1)?.[1]).toEqual({ deliverAs: "steer", triggerTurn: true });
 
 		store.asyncTasks = undefined;
 		const stdinTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
@@ -663,6 +704,7 @@ describe("hosted subagent production execution", () => {
 		handleSessionStart(lifecycle.wrap(pi as any), store, context as any);
 		expect(host.detail.tickets).toMatchObject([{ state: "submitted" }]);
 		expect(pi.sendMessage.mock.calls.at(-1)?.[0].details.asyncTasks.completionIds).toHaveLength(1);
+		expect(pi.sendMessage.mock.calls.at(-1)?.[1]).toEqual({ deliverAs: "steer", triggerTurn: true });
 	});
 
 	it("retains a shutdown root until the actual child exits", async () => {
@@ -715,6 +757,7 @@ describe("hosted subagent production execution", () => {
 		expect(root()).toMatchObject({ execution: "failed", presence: "settled" });
 		expect(host.detail.tickets).toMatchObject([{ state: "submitted" }]);
 		expect(pi.sendMessage.mock.calls.filter(([message]) => message.details?.asyncTasks)).toHaveLength(1);
+		expect(pi.sendMessage.mock.calls.at(-1)?.[1]).toEqual({ deliverAs: "steer", triggerTurn: true });
 	});
 
 	it("delivers a run started by the turn that a finished batch completion triggered", async () => {

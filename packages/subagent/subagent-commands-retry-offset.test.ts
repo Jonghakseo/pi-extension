@@ -214,7 +214,7 @@ describe("commands retry persisted-session offset refresh", () => {
 				content: expect.stringContaining("[subagent:worker#1] aborted"),
 				details: expect.objectContaining({ errorClass: "aborted", stopReason: "aborted" }),
 			}),
-			expect.objectContaining({ deliverAs: "followUp" }),
+			expect.objectContaining({ deliverAs: "steer" }),
 		);
 	});
 
@@ -252,7 +252,7 @@ describe("commands retry persisted-session offset refresh", () => {
 				content: expect.stringContaining("[subagent:worker#1] aborted"),
 				details: expect.objectContaining({ errorClass: "aborted", stopReason: "aborted" }),
 			}),
-			expect.objectContaining({ deliverAs: "followUp" }),
+			expect.objectContaining({ deliverAs: "steer" }),
 		);
 	});
 

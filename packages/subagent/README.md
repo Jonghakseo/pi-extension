@@ -1,6 +1,6 @@
 # subagent
 
-Asynchronous subagent delegation for [pi](https://github.com/earendil-works/pi). Run specialist agents in dedicated child sessions, share main-session context when needed, and receive results as follow-up messages.
+Asynchronous subagent delegation for [pi](https://github.com/earendil-works/pi). Run specialist agents in dedicated child sessions, share main-session context when needed, and receive results as completion notifications.
 
 > [!WARNING]
 > Subagents run headlessly without approval prompts. Claude-runtime agents bypass permissions, and pi-runtime agents can use every tool declared by their agent definition. This extension is not a sandbox. Use trusted repositories, prompts, and agent definitions only.
@@ -41,7 +41,7 @@ Equivalent AI tool call:
 { "command": "subagent run worker --isolated -- implement the requested change and run tests" }
 ```
 
-Tool launches are asynchronous. Wait for the automatic completion or failure follow-up instead of polling immediately. Pi drops queued messages when you press Escape; if a completion was still queued when the run stops, it is added to the session without starting a new turn, and the agent sees it with your next message.
+Tool launches are asynchronous. Wait for the automatic completion or failure notification instead of polling immediately. Both are sent as steer messages, so the agent can use the results after its current response and tool batch finish, without waiting for the whole agent run to end. Pi drops queued messages when you press Escape; if a completion was still queued when the run stops, it is added to the session without starting a new turn, and the agent sees it with your next message.
 
 ## Agent definitions
 

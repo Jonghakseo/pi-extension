@@ -122,7 +122,7 @@ describe("bash_async extension registration", () => {
 				);
 			});
 			for (const call of sendMessage.mock.calls) {
-				expect(call[1]).toEqual({ triggerTurn: true, deliverAs: "followUp" });
+				expect(call[1]).toEqual({ triggerTurn: true, deliverAs: "steer" });
 			}
 		} finally {
 			await (handlers.get("session_shutdown") as () => Promise<void>)?.();
@@ -473,11 +473,11 @@ describe("bash_async start sync window", () => {
 		}
 	});
 
-	it("interrupts with steer when a background job fails", async () => {
+	it.each([0, 2])("steers when a background job exits with %s", async (exitCode) => {
 		vi.stubEnv("PI_BASH_ASYNC_SYNC_WINDOW_MS", "200");
 		const { start, shutdown, sendMessage } = await setup();
 		try {
-			const started = await start("sleep 1; exit 2");
+			const started = await start(`sleep 1; exit ${exitCode}`);
 			await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1), { timeout: 3_000 });
 			expect(sendMessage.mock.calls[0]?.[0].details.jobIds).toEqual([started.details.jobId]);
 			expect(sendMessage.mock.calls[0]?.[1]).toEqual({ triggerTurn: true, deliverAs: "steer" });
@@ -486,7 +486,7 @@ describe("bash_async start sync window", () => {
 		}
 	});
 
-	it("re-appends a failure the queue dropped once the run settles", async () => {
+	it.each([0, 2])("restores a dropped completion after exit %s", async (exitCode) => {
 		vi.stubEnv("PI_BASH_ASYNC_SYNC_WINDOW_MS", "0");
 		let tool: any;
 		const handlers = new Map<string, (event?: unknown, context?: unknown) => unknown>();
@@ -502,7 +502,7 @@ describe("bash_async start sync window", () => {
 			handlers.get("agent_start")?.({ type: "agent_start" }, context);
 			const started = await tool.execute(
 				"call",
-				{ action: "start", command: "exit 2", timeout: 0 },
+				{ action: "start", command: `exit ${exitCode}`, timeout: 0 },
 				undefined,
 				undefined,
 				context,

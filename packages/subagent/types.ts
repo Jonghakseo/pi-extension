@@ -154,7 +154,8 @@ export interface PendingCompletion {
 		details: Record<string, unknown>;
 	};
 	options: {
-		deliverAs: "followUp";
+		// Accept older persisted completions as well as newly queued steering messages.
+		deliverAs: "steer" | "followUp";
 		triggerTurn?: boolean;
 	};
 	createdAt: number;

@@ -46,7 +46,7 @@ type SentMessage = {
 };
 
 type SentOptions = {
-	deliverAs?: "followUp";
+	deliverAs?: "steer" | "followUp";
 	triggerTurn?: boolean;
 };
 

@@ -940,7 +940,7 @@ function deliverOrQueueCompletion(
 	completeAsyncInvocation(String(message.details.status ?? "completed"));
 	message.details = { ...message.details, ...asyncInvocationDetails() };
 	retainAsyncCompletion(message);
-	const options = { deliverAs: "followUp" as const };
+	const options = { deliverAs: "steer" as const };
 	const globalEntry = store.globalLiveRuns.get(runId);
 	let currentSessionFile: string | null = null;
 	try {
