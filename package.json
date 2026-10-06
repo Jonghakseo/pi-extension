@@ -10,10 +10,10 @@
 	],
 	"pnpm": {
 		"overrides": {
-			"@earendil-works/pi-agent-core": "1.0.1",
-			"@earendil-works/pi-ai": "1.0.1",
-			"@earendil-works/pi-coding-agent": "1.0.1",
-			"@earendil-works/pi-tui": "1.0.1"
+			"@earendil-works/pi-agent-core": "1.0.4",
+			"@earendil-works/pi-ai": "1.0.4",
+			"@earendil-works/pi-coding-agent": "1.0.4",
+			"@earendil-works/pi-tui": "1.0.4"
 		}
 	},
 	"scripts": {
@@ -70,9 +70,9 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.0",
-		"@earendil-works/pi-ai": "^1.0.1",
-		"@earendil-works/pi-coding-agent": "^1.0.1",
-		"@earendil-works/pi-tui": "^1.0.1",
+		"@earendil-works/pi-ai": "^1.0.4",
+		"@earendil-works/pi-coding-agent": "^1.0.4",
+		"@earendil-works/pi-tui": "^1.0.4",
 		"@sinclair/typebox": "^0.34.49",
 		"@types/node": "^25.7.0",
 		"@vitest/coverage-v8": "^4.1.6",

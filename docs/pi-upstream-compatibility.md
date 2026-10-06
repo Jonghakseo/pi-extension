@@ -2,6 +2,25 @@
 
 이 문서는 `pi-extension` 모노레포를 Pi 본체의 다음 릴리스에 맞춰 업데이트할 때 같은 조사를 반복하지 않기 위한 기준 문서다.
 
+## 1.0.4 업데이트 조사 (2026-10-05)
+
+전역 CLI는 `1.0.2`, npm 최신은 `1.0.4`다. 저장소 SDK를 `1.0.1 → 1.0.4`로 올렸고 전역 설치는 바꾸지 않았다. 공식 coding-agent, pi-ai, pi-tui, agent CHANGELOG의 `1.0.2`~`1.0.4`를 확인했다.
+
+| 변경 내역 | 저장소 영향과 조치 |
+| --- | --- |
+| `1.0.2` `samplingParamsByThinkingLevel` 추가 | `models.json` 설정 기능이다. 사용처 없음. |
+| `1.0.3` Azure provider `azure-openai-responses` → `azure`, `providers/azure` import 경로 변경 | 저장소에 `azure` provider id나 import 사용 없음. |
+| `1.0.3` `Home`/`End`는 편집기 커서 전용, transcript 이동은 `Ctrl+Home`/`Ctrl+End` | extension 키 처리에 `Home`/`End` 사용 없음(`skill-tmux-terminal`의 tmux 키 이름만 해당, 무관). |
+| `1.0.3`~`1.0.4` codemode `image()` 파일 저장, `tools.read()` 이미지 블록, built-in freeze | 저장소 extension은 codemode 런타임을 건드리지 않는다. 영향 없음. |
+| `1.0.4` `--tools` 패턴, `--no-mcp`, `ToolLoadout.getPromptGuidelines()` | `prepareLoadout`/`ToolLoadout` 사용 없음. `claude-mcp-bridge`는 내장 MCP와 별개라 영향 없음. |
+| agent `1.0.2`~`1.0.4` | 변경 항목 없음. |
+
+적용:
+- 루트 `devDependencies` 3개와 `pnpm.overrides` 4개를 `1.0.4`로 변경. peer 범위 유지.
+- `1.0.4` `bash.js`에도 `fsAccess()`와 `spawn()` 사이 중단 확인이 없어 patch를 내용 변경 없이 `patches/pi-coding-agent@1.0.4.patch`로 옮기고 `pnpm-workspace.yaml`을 갱신.
+- lockfile(`.gitignore` 대상)에서 Pi 계열 외 전이 의존성 변화 없음.
+- 검증: `pnpm run verify:strict` 통과(145개 파일, 1,773개 테스트, 지정 소스 coverage 100%). `env -i` 격리 환경에서 `discoverAndLoadExtensions()`로 26개 entrypoint 로드, errors 0건.
+
 ## 1.0.1 업데이트 조사 (2026-10-04)
 
 전역 CLI와 npm `pi-coding-agent` 최신은 모두 `1.0.1`이다. `pi-ai`, `pi-agent-core`, `pi-tui`는 `1.0.2`가 있지만 `coding-agent 1.0.2`가 미배포라 4개 모두 `1.0.1`로 맞췄다.
