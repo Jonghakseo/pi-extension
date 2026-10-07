@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 import { parseDelayArgs, parseDurationMs } from "./parse.ts";
 import { loadPersistedTasks, savePersistedTasks } from "./storage.ts";
 
@@ -40,6 +41,21 @@ const DelayParamsSchema = Type.Object({
 	prompt: Type.String({ description: "Prompt text to submit to the agent after the delay (triggers a turn)." }),
 	id: Type.Optional(Type.String({ description: "Optional task id. Auto-generated when omitted." })),
 });
+
+const DelayManageParamsSchema = Type.Object(
+	{
+		action: Type.Union([Type.Literal("list"), Type.Literal("cancel")], {
+			description: "List scheduled delays or cancel one delay by id.",
+		}),
+		id: Type.Optional(
+			Type.String({
+				pattern: "^[a-zA-Z0-9._-]+$",
+				description: "Required for cancel. Use the exact id returned by delay or list. Omit for list.",
+			}),
+		),
+	},
+	{ additionalProperties: false },
+);
 
 interface DelayToolParams {
 	delay: string;
@@ -419,6 +435,16 @@ function createDelayController(pi: ExtensionAPI) {
 
 	return {
 		clearAllTimers,
+		cancelTask,
+		getTaskSummaries: () => {
+			const now = Date.now();
+			return sortedTasks().map((task) => ({
+				id: task.id,
+				prompt: task.prompt,
+				dueAt: new Date(task.dueAt).toISOString(),
+				remainingMs: Math.max(0, task.dueAt - now),
+			}));
+		},
 		getTaskIds: () => [...tasks.keys()],
 		handleDelayCancelCommand,
 		handleDelayCommand,
@@ -484,13 +510,13 @@ export default function (pi: ExtensionAPI) {
 		name: "delay",
 		label: "Delay",
 		description:
-			"Schedule a prompt to be submitted to the agent after a short delay, triggering a new turn when it fires. Use for one-shot reminders like 5m, 1h, or 2시간. The user can manage scheduled prompts with /delay-list or cancel directly with /delay-cancel <id>.",
+			"Schedule a prompt to be submitted to the agent after a short delay, triggering a new turn when it fires. Use for one-shot reminders like 5m, 1h, or 2시간. Use delay-manage to list scheduled prompts or cancel one by id. The user can also use /delay-list or /delay-cancel <id>.",
 		promptSnippet: "Submit a prompt to the agent after a delay, e.g. delay=5m prompt='check status'.",
 		promptGuidelines: [
 			"Use delay only when the user explicitly asks to run a prompt later in the same interactive session.",
 			"When the delay fires the prompt is submitted as a user message and triggers a turn (followUp-queued if the agent is busy), not just inserted into the editor.",
 			"For recurring or persistent headless scheduled jobs, use cron instead of delay.",
-			"Tell the user the returned id. They can manage it interactively with `/delay-list`, cancel it with `/delay-cancel <id>`, or cancel all with `/delay-cancel`.",
+			"Use delay-manage to list scheduled delays or cancel one by its returned id. Tell the user the returned id. They can manage it interactively with `/delay-list`, cancel it with `/delay-cancel <id>`, or cancel all with `/delay-cancel`.",
 		],
 		parameters: DelayParamsSchema,
 		executionMode: "parallel",
@@ -535,6 +561,53 @@ export default function (pi: ExtensionAPI) {
 			const raw = result.content[0];
 			const text = raw?.type === "text" ? raw.text : "(no output)";
 			return new Text(context.isError ? theme.fg("error", text) : text, 0, 0);
+		},
+	});
+
+	pi.registerTool({
+		name: "delay-manage",
+		label: "Delay Manage",
+		description:
+			"List scheduled delays in the current session or cancel one by its exact id. Cancellation requires an id; bulk cancellation is not supported.",
+		promptSnippet: "List scheduled delays or cancel one by id with delay-manage.",
+		promptGuidelines: [
+			"Use action='list' to retrieve ids, prompts, due times, and remaining milliseconds.",
+			"Use action='cancel' with an exact id from delay or the list. Never omit the id or request bulk cancellation.",
+		],
+		parameters: DelayManageParamsSchema,
+		executionMode: "parallel",
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			if (
+				!Value.Check(DelayManageParamsSchema, params) ||
+				(params.action === "cancel" ? !params.id : params.id !== undefined)
+			) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: "Use {action: 'list'} or {action: 'cancel', id: '<delay-id>'}. Cancellation requires an id; bulk cancellation is not supported.",
+						},
+					],
+					details: {},
+					isError: true,
+				};
+			}
+			if (params.action === "list") {
+				const tasks = controller.getTaskSummaries();
+				return {
+					content: [{ type: "text" as const, text: JSON.stringify({ tasks }) }],
+					details: { tasks },
+				};
+			}
+			const id = params.id ?? "";
+			const cancelled = controller.cancelTask(id);
+			return {
+				content: [
+					{ type: "text" as const, text: cancelled ? `✓ ${id} 예약을 취소했어요.` : `예약을 찾을 수 없어요: ${id}` },
+				],
+				details: { id, cancelled },
+				...(cancelled ? {} : { isError: true }),
+			};
 		},
 	});
 

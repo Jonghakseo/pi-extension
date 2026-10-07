@@ -2,7 +2,7 @@
 
 지정한 시간 뒤에 프롬프트를 다시 제출해 Pi 턴을 트리거하는 delay 익스텐션입니다.
 
-이 패키지는 `/delay` 명령어와 `delay` tool을 제공합니다. 시간이 되면 예약한 프롬프트를 사용자 메시지처럼 제출하며, 에이전트가 작업 중이면 follow-up으로 큐잉합니다.
+이 패키지는 `/delay` 명령어와 `delay`, `delay-manage` tool을 제공합니다. 시간이 되면 예약한 프롬프트를 사용자 메시지처럼 제출하며, 에이전트가 작업 중이면 follow-up으로 큐잉합니다.
 
 예약은 세션별로 디스크(`~/.pi/delayed-action/<sessionId>.json`)에 저장되어 **compaction, `/reload`, pi 재시작이나 세션 resume 이후에도 유지**됩니다. 세션을 다시 열면 남은 예약이 자동으로 복원되고, pi가 꺼져 있는 동안 시간이 지난 예약은 세션이 준비된 직후 실행됩니다.
 
@@ -58,5 +58,19 @@ pi install npm:@ryan_nookpi/pi-extension-delayed-action
   "id": "optional-id"
 }
 ```
+
+`delay-manage` tool로 현재 세션의 예약을 조회하거나 ID를 지정해 하나씩 취소할 수 있습니다.
+
+```json
+{ "action": "list" }
+```
+
+목록은 실행 예정 시간순으로 정렬되며, 각 예약의 `id`, `prompt`, `dueAt`(ISO 8601), `remainingMs`를 반환합니다. 예약이 없으면 빈 목록을 반환합니다.
+
+```json
+{ "action": "cancel", "id": "optional-id" }
+```
+
+취소에는 ID가 반드시 필요합니다. ID 누락, 존재하지 않는 ID, 전체 취소 요청은 오류로 반환합니다. `list`에는 ID를 지정하지 않습니다. 사용자용 `/delay-cancel` 명령어의 전체 취소 동작은 그대로 유지됩니다.
 
 예약은 세션별 파일로 영속화되어 compaction·재시작·resume 이후에도 유지됩니다. 저장 위치는 `~/.pi/delayed-action/<sessionId>.json`이며, `PI_DELAYED_ACTION_DIR` 환경 변수로 바꿀 수 있습니다. 반복/영구 스케줄링이 필요하면 cron 계열 기능을 사용하세요.

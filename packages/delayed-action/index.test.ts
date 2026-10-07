@@ -65,6 +65,7 @@ describe("delayed-action delay extension", () => {
 		expect(apiMock.getCommand("delay-list")).toBeDefined();
 		expect(apiMock.getCommand("delay-cancel")).toBeDefined();
 		expect(apiMock.getTool("delay")).toBeDefined();
+		expect(apiMock.getTool("delay-manage")).toBeDefined();
 		expect(apiMock.getHandlers("input")).toHaveLength(0);
 	});
 
@@ -92,6 +93,60 @@ describe("delayed-action delay extension", () => {
 
 		expect(apiMock.userMessages).toEqual([{ message: "배포 로그 확인해", options: undefined }]);
 		expect(ctx.ui.notify).toHaveBeenCalledWith("⏰ deploy-log 시간이 되어 프롬프트를 실행했어요.", "info");
+	});
+
+	it("lists delays with full prompts and due times, then cancels only the requested id", async () => {
+		const apiMock = createExtensionApiMock();
+		delayedActionExtension(apiMock.api);
+		const delay = apiMock.getTool("delay");
+		const manage = apiMock.getTool("delay-manage");
+		const ctx = createCtx();
+		const now = Date.now();
+		const prompt = "전체 프롬프트 ".repeat(30);
+		await delay.execute?.("create-1", { delay: "10s", prompt, id: "later" }, undefined, undefined, ctx);
+		await delay.execute?.("create-2", { delay: "5s", prompt: "실행할 예약", id: "earlier" }, undefined, undefined, ctx);
+		const tasks = [
+			{ id: "earlier", prompt: "실행할 예약", dueAt: new Date(now + 5000).toISOString(), remainingMs: 5000 },
+			{ id: "later", prompt: prompt.trim(), dueAt: new Date(now + 10000).toISOString(), remainingMs: 10000 },
+		];
+		expect(await manage.execute?.("list", { action: "list" }, undefined, undefined, ctx)).toMatchObject({
+			content: [{ type: "text", text: JSON.stringify({ tasks }) }],
+			details: { tasks },
+		});
+		expect(
+			await manage.execute?.("cancel", { action: "cancel", id: "later" }, undefined, undefined, ctx),
+		).toMatchObject({
+			details: { id: "later", cancelled: true },
+		});
+		await vi.advanceTimersByTimeAsync(10000);
+		expect(apiMock.userMessages).toEqual([{ message: "실행할 예약", options: undefined }]);
+		expect(await manage.execute?.("empty", { action: "list" }, undefined, undefined, ctx)).toMatchObject({
+			content: [{ type: "text", text: JSON.stringify({ tasks: [] }) }],
+			details: { tasks: [] },
+		});
+	});
+
+	it.each([
+		{ action: "cancel" },
+		{ action: "cancel", id: "" },
+		{ action: "cancel", id: " " },
+		{ action: "cancel", all: true },
+		{ action: "cancel", id: "protected", all: true },
+		{ action: "cancel", id: "missing" },
+		{ action: "list", id: "protected" },
+		{ action: "unknown" },
+	])("rejects invalid management requests without cancelling existing delays: %j", async (params) => {
+		const apiMock = createExtensionApiMock();
+		delayedActionExtension(apiMock.api);
+		const ctx = createCtx();
+		await apiMock
+			.getTool("delay")
+			.execute?.("create", { delay: "1s", prompt: "남겨둘 예약", id: "protected" }, undefined, undefined, ctx);
+		expect(await apiMock.getTool("delay-manage").execute?.("manage", params, undefined, undefined, ctx)).toMatchObject({
+			isError: true,
+		});
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(apiMock.userMessages).toEqual([{ message: "남겨둘 예약", options: undefined }]);
 	});
 
 	it("keeps delayed prompts bound to the runtime that scheduled them", async () => {
@@ -422,6 +477,36 @@ describe("delayed-action persistence", () => {
 		await cancelCommand.handler("deploy-check", ctx);
 		await settleWrites();
 		expect(await loadPersistedTasks("session-persist", storeDir)).toEqual([]);
+	});
+
+	it.each([
+		"persistent",
+		"without-session",
+		"without-ui",
+	])("persists tool cancellation without changing the owning session: %s", async (contextKind) => {
+		const apiMock = createExtensionApiMock();
+		delayedActionExtension(apiMock.api);
+		const ctx = createPersistentCtx("tool-cancel-session");
+		const manage = apiMock.getTool("delay-manage");
+		await apiMock
+			.getTool("delay")
+			.execute?.("create", { delay: "1h", prompt: "취소할 예약", id: "tool-cancel" }, undefined, undefined, ctx);
+		await settleWrites();
+		expect(await loadPersistedTasks("tool-cancel-session", storeDir)).toHaveLength(1);
+		await manage.execute?.("list", { action: "list" }, undefined, undefined, createCtx({ hasUI: false }));
+		const manageCtx = contextKind === "persistent" ? ctx : createCtx({ hasUI: contextKind !== "without-ui" });
+		expect(
+			await manage.execute?.("cancel", { action: "cancel", id: "tool-cancel" }, undefined, undefined, manageCtx),
+		).toMatchObject({ details: { cancelled: true } });
+		await settleWrites();
+		expect(await loadPersistedTasks("tool-cancel-session", storeDir)).toEqual([]);
+		expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("delay", undefined);
+		const resumed = createExtensionApiMock();
+		delayedActionExtension(resumed.api);
+		await resumed.getHandlers("session_start")[0]({ type: "session_start", reason: "resume" }, ctx);
+		expect(
+			await resumed.getTool("delay-manage").execute?.("list", { action: "list" }, undefined, undefined, ctx),
+		).toMatchObject({ details: { tasks: [] } });
 	});
 
 	it("does not persist when the session is not backed by a file", async () => {
