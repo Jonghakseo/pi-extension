@@ -2,6 +2,24 @@
 
 이 문서는 `pi-extension` 모노레포를 Pi 본체의 다음 릴리스에 맞춰 업데이트할 때 같은 조사를 반복하지 않기 위한 기준 문서다.
 
+## 1.1.0 업데이트 조사 (2026-10-08)
+
+전역 CLI와 npm 최신이 모두 `1.1.0`이다. 저장소 SDK를 `1.0.4 → 1.1.0`으로 올렸고 전역 설치는 바꾸지 않았다. 공식 coding-agent, pi-ai, pi-tui, agent CHANGELOG의 `1.1.0`을 확인했다.
+
+| 변경 내역 | 저장소 영향과 조치 |
+| --- | --- |
+| pi-tui `Terminal` 구현에 `setProgramStatus()` 필수(Breaking) | 저장소에 `Terminal` 직접 구현 없음. 영향 없음. |
+| pi-ai stream 함수는 `AssistantMessageEventStream` 반환 필수(Breaking) | `codex-fast-mode`는 upstream `openAICodexResponsesApi().streamSimple` 결과를 그대로 반환. 직접 만든 `EventStream` 서브클래스 없음. 영향 없음. |
+| `agent_settled` 이벤트에 `aborted` 추가 | `until`은 보고 전 중단된 회차를 경고하고 최근 상태에 기록, `cron` daemon은 재개한 RPC 실행이 중단되면 `lastDeliveryOutcome: aborted`로 기록. 필드가 없는 구버전 호스트는 기존 동작 유지. `bash-async`, `delayed-action`은 변경 없음. |
+| `tool_execution_end`·tool render context에 `durationMs`, `outputPad` 추가 | 사용처 없음. `web-search-tool`의 `durationMs`는 자체 details 필드라 무관. |
+| `--tools` `+name`/`-name`, OSC 7501 program status, Haiku 5.5, classifier 이미지 | 저장소 코드와 무관. |
+| agent `streamProxy()`가 `AssistantMessageEventStream` 반환 | 사용처 없음. |
+
+적용:
+- 루트 `devDependencies` 3개와 `pnpm.overrides` 4개를 `1.1.0`으로 변경. peer 범위 유지.
+- `1.1.0` `bash.js`에도 `fsAccess()`와 `spawn()` 사이 중단 확인이 없어 patch를 내용 변경 없이 `patches/pi-coding-agent@1.1.0.patch`로 옮기고 `pnpm-workspace.yaml`을 갱신. 설치본에 hunk 적용 확인.
+- 검증: `pnpm run verify:strict` 통과(145개 파일, 1,785개 테스트, 지정 소스 coverage 100%). `env -i` 격리 환경에서 `discoverAndLoadExtensions()`로 26개 entrypoint 로드, errors 0건.
+
 ## 1.0.4 업데이트 조사 (2026-10-05)
 
 전역 CLI는 `1.0.2`, npm 최신은 `1.0.4`다. 저장소 SDK를 `1.0.1 → 1.0.4`로 올렸고 전역 설치는 바꾸지 않았다. 공식 coding-agent, pi-ai, pi-tui, agent CHANGELOG의 `1.0.2`~`1.0.4`를 확인했다.
