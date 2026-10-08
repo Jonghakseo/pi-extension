@@ -1,6 +1,7 @@
 ---
 name: excalidraw
 description: "플로우차트·아키텍처도·개념도 같은 다이어그램을 그려 달라는 요청에 사용한다."
+compatibility: macOS/Linux only (no Windows support). Needs Google Chrome on macOS, Chrome or Chromium on PATH for Linux. Runtime Node 18+; rebuilding app/ via `build` needs Node ^20.19 || >=22.12 (vite 8). Verified on macOS.
 ---
 
 # excalidraw
@@ -9,18 +10,29 @@ description: "플로우차트·아키텍처도·개념도 같은 다이어그램
 
 ```bash
 EXCAL="node <이 스킬 디렉터리>/scripts/excal.mjs"
-$EXCAL open <file> [--from-mermaid <file.mmd>]   # 창 열기(없으면 빈 파일 생성). 이미 열려 있으면 재사용. --from-mermaid는 파일 내용을 mermaid 결과로 교체
+$EXCAL open <file> [--from-mermaid <file.mmd>]   # 창 열기(없으면 빈 파일 생성). 이미 열려 있으면 재사용. --from-mermaid는 창이 떠 있어야 변환된다
 $EXCAL lint <file>        # JSON·참조·겹침·라벨 넘침 검사 (브라우저 불필요)
 $EXCAL inspect <file>     # id/좌표/라벨/연결 요약. 큰 정식 파일을 통째로 읽지 말고 이걸 본다
 $EXCAL snapshot <file> [-o out.png]  # 창에서 PNG를 내보내고 경로 출력 → read로 확인. 기본 경로는 파일마다 하나라 다시 찍으면 덮어쓴다
-$EXCAL history <file>     # 외부 변경 직전 백업 목록 (최근 50개)
+$EXCAL history <file>     # 백업 목록 (최근 50개). 파일 외부 변경 직전 + 사용자 창 편집 5분마다
 $EXCAL status | stop
 $EXCAL build             # app/ 소스를 고친 뒤 재빌드
 ```
 
-패키지에 빌드된 앱(`app/dist`)이 들어 있어 바로 열린다. `build`는 `app/` 소스를 고쳤을 때만 쓴다(첫 실행 시 의존성을 설치하므로 약 30초). 서버는 연결된 창 없이 30분이 지나면 스스로 꺼지고, 다음 명령에서 자동으로 다시 뜬다.
+`<이 스킬 디렉터리>`는 이 SKILL.md가 있는 디렉터리의 절대 경로다. 현재 작업 디렉터리 기준 상대 경로로 부르면 안 된다.
 
-창은 Google Chrome 앱 창으로 열린다(Linux는 Chrome 또는 Chromium). `open`이 브라우저를 찾지 못하면 [references/setup.md](references/setup.md)의 최초 설치 방법을 사용자에게 안내한다. `lint`, `inspect`는 브라우저 없이 동작한다.
+패키지에 빌드된 앱(`app/dist`)이 들어 있어 바로 열린다. `build`는 `app/` 소스를 고쳤을 때만 쓴다(첫 실행 시 의존성을 내려받으므로 약 30초, 네트워크 필요). 서버는 연결된 창 없이 30분이 지나면 스스로 꺼지고, 다음 명령에서 자동으로 다시 뜬다.
+
+창은 Google Chrome 앱 창으로 열린다(Linux는 Chrome 또는 Chromium). `lint`, `inspect`는 브라우저 없이 동작한다. `open`이 출력하는 `window` 값으로 창 상태를 판단한다.
+
+| `window` | 뜻과 대응 |
+| --- | --- |
+| `opened` | 창을 새로 열어 연결됨 |
+| `already-open` | 이미 열려 있던 창을 재사용 |
+| `not-opened` | `--no-window`를 줬으므로 창을 열지 않음 |
+| `browser-disabled` | `EXCAL_BROWSER=none`. 출력된 URL을 사용자가 직접 연다 |
+| `no-browser` | Chrome을 찾지 못함. [references/setup.md](references/setup.md)의 설치 방법을 사용자에게 안내한다 |
+| `not-connected` | 브라우저는 띄웠지만 20초 안에 연결되지 않음. 창이 떴는지 사용자에게 확인하고, 안 떴으면 setup.md를 안내한다 |
 
 ## 파일 위치
 
@@ -29,10 +41,10 @@ $EXCAL build             # app/ 소스를 고친 뒤 재빌드
 
 ## 새 다이어그램
 
-1. 노드·연결·그룹 목록을 먼저 정하고, `references/style.md`에서 레이아웃 레시피를 고른다.
+1. 노드·연결·그룹 목록을 먼저 정하고, `references/style.md`에서 레이아웃 레시피를 고른다. 형식이 헷갈리면 `assets/examples/flowchart.excalidraw`가 완성된 최소 예제다.
 2. 작성 방식을 고른다.
    - 기본: 스켈레톤 JSON을 직접 쓴다(`references/skeleton.md`). 배치와 색을 통제할 수 있다.
-   - 노드가 15개를 넘는 흐름, 시퀀스·클래스 다이어그램: Mermaid로 쓰고 `open --from-mermaid`로 가져온다. 자동 레이아웃이 붙는 대신 스타일 통제는 약하고, 긴 한글 라벨은 단어 중간에서 줄이 바뀔 수 있다. `.mmd`를 고쳐 다시 가져오면 같은 노드 id가 제자리에서 갱신된다. 가져온 뒤 파일을 직접 고쳤다면 다시 가져올 때 그 수정은 사라진다.
+   - 노드가 15개를 넘는 흐름, 시퀀스·클래스 다이어그램: Mermaid로 쓰고 `open --from-mermaid`로 가져온다. 변환은 창 안에서 일어나므로 창이 떠야 결과가 파일에 쓰인다. 창이 없으면 `pendingMermaid`만 남은 파일이 디스크에 남는다. 자동 레이아웃이 붙는 대신 스타일 통제는 약하고, 긴 한글 라벨은 단어 중간에서 줄이 바뀔 수 있다. `.mmd`를 고쳐 다시 가져오면 같은 노드 id가 제자리에서 갱신된다. 가져온 뒤 파일을 직접 고쳤다면 다시 가져올 때 그 수정은 사라진다.
 3. 파일 쓰기 도구로 `.excalidraw` 파일 작성 → `lint` → 오류를 고친 뒤 `open`.
 4. `snapshot` → PNG를 `read`로 보고 겹침·잘린 라벨·어색한 화살표를 확인한다. 고칠 게 있으면 수정 후 한 번 더 확인한다(최대 2회).
 5. 파일 경로와 한 줄 요약을 보고한다. 창은 이미 열려 있으니 URL은 붙이지 않아도 된다.

@@ -42,7 +42,15 @@ function ensureBuilt(force = false) {
 	const pm = spawnSync("pnpm", ["--version"]).status === 0 ? "pnpm" : "npm";
 	if (!fs.existsSync(path.join(APP_DIR, "node_modules"))) {
 		console.error(`[excal] 첫 실행: ${pm} install (1회만)`);
-		const r = spawnSync(pm, ["install"], { cwd: APP_DIR, stdio: ["ignore", 2, 2] });
+		const run = (args) => spawnSync(pm, args, { cwd: APP_DIR, stdio: ["ignore", 2, 2] });
+		// In the source repo app/ sits inside a pnpm workspace without being a member, so a plain
+		// `pnpm install` installs the workspace instead and leaves app/node_modules empty.
+		const pnpmArgs = ["install", "--ignore-workspace"];
+		let r = run(pm === "pnpm" ? [...pnpmArgs, "--frozen-lockfile"] : ["install"]);
+		if (r.status !== 0 && pm === "pnpm") {
+			console.error("[excal] frozen-lockfile 설치 실패(잠금 파일 불일치). 잠금 파일을 갱신해 재시도합니다");
+			r = run(pnpmArgs);
+		}
 		if (r.status !== 0) die("[excal] install 실패");
 	}
 	console.error("[excal] 앱 빌드 중");
@@ -101,22 +109,29 @@ function chromeCommand(url) {
 		"--window-size=1440,960",
 		...(process.env.EXCAL_CHROME_ARGS ? process.env.EXCAL_CHROME_ARGS.split(/\s+/).filter(Boolean) : []),
 	];
-	if (process.platform === "darwin") return ["open", ["-na", "Google Chrome", "--args", ...args]];
+	if (process.platform === "darwin") {
+		// `open -na` succeeds silently even when the app is missing, so probe first.
+		if (spawnSync("open", ["-Ra", "Google Chrome"]).status !== 0) return null;
+		return ["open", ["-na", "Google Chrome", "--args", ...args]];
+	}
 	for (const bin of ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]) {
 		if (spawnSync("which", [bin]).status === 0) return [bin, args];
 	}
 	return null;
 }
 
+/** @returns {"opened"|"not-connected"|"no-browser"|"browser-disabled"} */
 async function openWindow(srv, info) {
-	if (process.env.EXCAL_BROWSER === "none") return false;
+	if (process.env.EXCAL_BROWSER === "none") return "browser-disabled";
 	const cmd = chromeCommand(info.url);
 	if (!cmd) {
-		console.error(`[excal] Chrome을 찾지 못했습니다. 직접 여세요: ${info.url}`);
-		return false;
+		console.error(
+			`[excal] Chrome을 찾지 못했습니다. references/setup.md의 설치 방법을 사용자에게 안내하세요. 직접 열려면: ${info.url}`,
+		);
+		return "no-browser";
 	}
 	spawn(cmd[0], cmd[1], { detached: true, stdio: "ignore" }).unref();
-	return waitForClient(srv, info.id, 20_000);
+	return (await waitForClient(srv, info.id, 20_000)) ? "opened" : "not-connected";
 }
 
 async function waitForClient(srv, id, timeoutMs) {
@@ -169,6 +184,23 @@ function textWidthEstimate(text, fontSize = 20) {
 	return max;
 }
 
+/** Bounding box of an element, estimating text size the window has not measured yet. */
+function measuredBox(e) {
+	if (typeof e.x !== "number" || typeof e.y !== "number") return null;
+	const text = String(e.text ?? "");
+	const fontSize = e.fontSize ?? 20;
+	const w =
+		typeof e.width === "number" ? Math.abs(e.width) : e.type === "text" ? textWidthEstimate(text, fontSize) : undefined;
+	const h =
+		typeof e.height === "number"
+			? Math.abs(e.height)
+			: e.type === "text"
+				? fontSize * 1.25 * text.split("\n").length
+				: undefined;
+	if (w === undefined && h === undefined) return null;
+	return { x: e.x, y: e.y, w: w ?? 0, h: h ?? 0 };
+}
+
 function labelOf(el, byId) {
 	if (el.label?.text) return el.label.text;
 	if (el.type === "text") return el.text;
@@ -188,11 +220,11 @@ function inspect(file) {
 	const byId = new Map(elements.map((e) => [e.id, e]));
 	const visible = elements.filter((e) => !(e.type === "text" && e.containerId));
 	const count = (pred) => visible.filter(pred).length;
-	const boxes = visible.filter((e) => typeof e.x === "number" && typeof e.width === "number");
-	const minX = Math.min(...boxes.map((e) => e.x));
-	const minY = Math.min(...boxes.map((e) => e.y));
-	const maxX = Math.max(...boxes.map((e) => e.x + Math.abs(e.width)));
-	const maxY = Math.max(...boxes.map((e) => e.y + Math.abs(e.height ?? 0)));
+	const boxes = visible.map(measuredBox).filter(Boolean);
+	const minX = Math.min(...boxes.map((b) => b.x));
+	const minY = Math.min(...boxes.map((b) => b.y));
+	const maxX = Math.max(...boxes.map((b) => b.x + b.w));
+	const maxY = Math.max(...boxes.map((b) => b.y + b.h));
 	console.log(
 		`${path.basename(file)}  요소 ${visible.length}개 (도형 ${count((e) => SHAPES.has(e.type))}, 화살표/선 ${count((e) => LINEAR.has(e.type))}, 텍스트 ${count((e) => e.type === "text")})` +
 			(boxes.length ? `  범위 x ${round(minX)}~${round(maxX)}, y ${round(minY)}~${round(maxY)}` : "") +
@@ -276,23 +308,10 @@ function lint(file) {
 		}
 		// partial overlaps between top-level boxes (containment is treated as intentional grouping)
 		const boxes = elements
-			.filter((e) => (SHAPES.has(e.type) || (e.type === "text" && !e.containerId)) && typeof e.x === "number")
+			.filter((e) => SHAPES.has(e.type) || (e.type === "text" && !e.containerId))
 			.map((e) => {
-				const w =
-					typeof e.width === "number"
-						? e.width
-						: e.type === "text"
-							? textWidthEstimate(e.text, e.fontSize ?? 20)
-							: undefined;
-				const h =
-					typeof e.height === "number"
-						? e.height
-						: e.type === "text"
-							? (e.fontSize ?? 20) * 1.25 * String(e.text).split("\n").length
-							: undefined;
-				return w === undefined || h === undefined
-					? null
-					: { id: e.id ?? e.type, x1: e.x, y1: e.y, x2: e.x + w, y2: e.y + h };
+				const b = measuredBox(e);
+				return b && { id: e.id ?? e.type, x1: b.x, y1: b.y, x2: b.x + b.w, y2: b.y + b.h };
 			})
 			.filter(Boolean);
 		const contains = (a, b) => a.x1 <= b.x1 && a.y1 <= b.y1 && a.x2 >= b.x2 && a.y2 >= b.y2;
@@ -338,22 +357,34 @@ switch (cmd) {
 	case "open": {
 		const mermaid = flag("--from-mermaid");
 		const noWindow = bool("--no-window");
-		const file = resolveFile(rest[0], { create: true });
+		// Read the mermaid source before resolveFile(create) so a typo does not leave an empty diagram behind.
+		let mermaidSrc;
 		if (mermaid) {
-			const src = fs.readFileSync(path.resolve(mermaid), "utf8");
+			const src = path.resolve(mermaid);
+			if (!fs.existsSync(src)) die(`[excal] mermaid 파일이 없습니다: ${src}`);
+			try {
+				mermaidSrc = fs.readFileSync(src, "utf8");
+			} catch (err) {
+				die(`[excal] mermaid 파일을 읽지 못했습니다: ${src} (${err.message})`);
+			}
+		}
+		const file = resolveFile(rest[0], { create: true });
+		if (mermaidSrc !== undefined) {
 			const data = JSON.parse(fs.readFileSync(file, "utf8"));
-			data.pendingMermaid = src;
+			data.pendingMermaid = mermaidSrc;
 			writeFileAtomic(file, JSON.stringify(data, null, 2) + "\n");
 		}
 		const srv = await ensureServer();
 		const info = await register(srv, file);
 		let windowState = "already-open";
-		if (info.clients === 0) {
-			windowState = noWindow ? "not-opened" : (await openWindow(srv, info)) ? "opened" : "not-connected";
-		}
+		if (info.clients === 0) windowState = noWindow ? "not-opened" : await openWindow(srv, info);
 		console.log(JSON.stringify({ file, url: info.url, window: windowState }, null, 2));
-		if (mermaid && windowState !== "not-opened")
-			console.error("[excal] mermaid 변환은 창에서 수행됩니다. 변환 후 파일이 정식 포맷으로 다시 저장됩니다.");
+		if (mermaid)
+			console.error(
+				windowState === "opened" || windowState === "already-open"
+					? "[excal] mermaid 변환은 창에서 수행됩니다. 변환 후 파일이 정식 포맷으로 다시 저장됩니다."
+					: `[excal] 창이 없어 mermaid 변환이 보류됩니다 (window: ${windowState}). 파일에는 pendingMermaid만 남습니다.`,
+			);
 		break;
 	}
 	case "inspect":
@@ -367,8 +398,11 @@ switch (cmd) {
 		const file = resolveFile(rest[0]);
 		const srv = await ensureServer();
 		const info = await register(srv, file);
-		if (info.clients === 0 && !(await openWindow(srv, info)))
-			die("[excal] 창에 연결하지 못해 스냅샷을 찍을 수 없습니다");
+		if (info.clients === 0) {
+			const windowState = await openWindow(srv, info);
+			if (windowState !== "opened")
+				die(`[excal] 창에 연결하지 못해 스냅샷을 찍을 수 없습니다 (window: ${windowState})`);
+		}
 		const r = await call(srv.port, srv.token, `/api/files/${info.id}/snapshot`, { method: "POST" });
 		if (!r.ok) die(`[excal] 스냅샷 실패: ${await r.text()}`);
 		const target = out

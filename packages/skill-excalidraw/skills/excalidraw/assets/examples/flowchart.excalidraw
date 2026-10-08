@@ -6,7 +6,7 @@
     { "type": "text", "id": "title", "x": 200, "y": 20, "text": "주문 처리 흐름", "fontSize": 28 },
     { "type": "ellipse", "id": "start", "x": 240, "y": 90, "width": 160, "height": 64, "backgroundColor": "#b2f2bb", "fillStyle": "solid", "label": { "text": "시작" } },
     { "type": "rectangle", "id": "order", "x": 220, "y": 214, "width": 200, "height": 72, "backgroundColor": "#a5d8ff", "fillStyle": "solid", "roundness": { "type": 3 }, "label": { "text": "주문 접수" } },
-    { "type": "diamond", "id": "stock", "x": 210, "y": 346, "width": 220, "height": 120, "backgroundColor": "#ffec99", "fillStyle": "solid", "label": { "text": "재고 있음?" } },
+    { "type": "diamond", "id": "stock", "x": 200, "y": 346, "width": 240, "height": 120, "backgroundColor": "#ffec99", "fillStyle": "solid", "label": { "text": "재고 있음?" } },
     { "type": "rectangle", "id": "ship", "x": 220, "y": 526, "width": 200, "height": 72, "backgroundColor": "#a5d8ff", "fillStyle": "solid", "roundness": { "type": 3 }, "label": { "text": "배송 준비" } },
     { "type": "rectangle", "id": "backorder", "x": 520, "y": 370, "width": 200, "height": 72, "backgroundColor": "#ffc9c9", "fillStyle": "solid", "roundness": { "type": 3 }, "label": { "text": "입고 대기 알림" } },
     { "type": "arrow", "id": "a1", "start": { "id": "start" }, "end": { "id": "order" } },
