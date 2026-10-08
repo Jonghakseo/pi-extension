@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-skill-chrome-cdp",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Pi skill for inspecting and driving the user's real Chrome session through chrome-devtools CLI or raw CDP.",
 	"license": "MIT",
 	"repository": {

@@ -886,6 +886,11 @@ const NEEDS_TARGET = new Set([
 ]);
 
 async function main() {
+	if (typeof WebSocket === "undefined") {
+		throw new Error(
+			`cdp.mjs requires Node 22+ (built-in WebSocket). Current: ${process.version}. Upgrade Node or use the chrome-devtools CLI instead.`,
+		);
+	}
 	const [cmd, ...args] = process.argv.slice(2);
 
 	// Daemon mode (internal)
@@ -1006,7 +1011,7 @@ async function main() {
 main().catch((e) => {
 	console.error(e.message);
 	if (e.message.includes("No DevToolsActivePort found")) {
-		console.error("Chrome 144+ current-profile mode: use scripts/cdp-mcp.mjs list after explicit user approval.");
+		console.error("For a custom profile, set CDP_PORT_FILE=<user-data-dir>/DevToolsActivePort.");
 	}
 	process.exit(1);
 });
