@@ -8,8 +8,15 @@ import sys
 import zipfile
 from pathlib import Path
 
-from docx import Document
-from lxml import etree as ET
+try:
+    from docx import Document
+    from lxml import etree as ET
+except Exception as exc:  # pragma: no cover - user-facing dependency guard
+    print('Missing dependency: python-docx', file=sys.stderr)
+    print('Install once with: python3 -m pip install --user python-docx', file=sys.stderr)
+    print('If that fails with externally-managed-environment, see references/setup.md', file=sys.stderr)
+    print(f'Original error: {exc}', file=sys.stderr)
+    sys.exit(2)
 
 from ooxml_order import order_error
 
@@ -122,6 +129,10 @@ def main():
         parser.error('--sizes must contain numbers separated by commas')
     if '' in args.fonts or not 1 <= len(args.sizes) <= 3 or any(not math.isfinite(s) or s <= 0 for s in args.sizes | {args.min_size}):
         parser.error('Provide nonempty fonts and 1–3 positive finite sizes and min-size')
+    for label, path in (('DOCX', args.input), ('source Markdown', args.source)):
+        if path is not None and not path.is_file():
+            print(f'Input {label} not found: {path}', file=sys.stderr)
+            return 2
     try:
         errors, fonts, sizes = audit(args)
     except Exception as exc:

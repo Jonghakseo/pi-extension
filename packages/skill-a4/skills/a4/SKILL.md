@@ -1,6 +1,8 @@
 ---
 name: a4
 description: Markdown 문서를 A4 인쇄용 Word(.docx)로 변환할 때 사용한다.
+license: MIT (see LICENSE)
+compatibility: macOS + Microsoft Word 기준으로 검증했다. Requires python3 with python-docx. The default style profile expects the Noto Sans CJK KR font; the optional HTML converter needs Node and the bundled markdown-it.
 ---
 
 # A4 Markdown to Microsoft Word DOCX
@@ -13,14 +15,26 @@ Do **not** summarize, rewrite, translate, add claims, remove sections, reorder s
 
 ## Setup
 
-`<skill-dir>` is the directory containing this `SKILL.md`. The DOCX scripts need `python3` and the `python-docx` library. Before the first conversion, run `python3 -c "import docx"`. If it fails, follow [references/setup.md](references/setup.md) and tell the user the one-time install command instead of guessing another method.
+`<skill-dir>` is the directory containing this `SKILL.md`. Always run the bundled scripts through `python3` (or `node` for the `.mjs` one) with an absolute path built from the skill directory, not the current working directory. Installed copies have no execute bit, so calling a script path directly fails with `Permission denied`.
+
+The DOCX scripts need `python3` and the `python-docx` library. Before the first conversion, run `python3 -c "import docx"`. If it fails, follow [references/setup.md](references/setup.md) and tell the user the one-time install command instead of guessing another method.
+
+Tell the user what is missing instead of silently working around it:
+
+| Symptom | What to tell the user |
+| --- | --- |
+| `Missing dependency: python-docx` (exit 2) | Give the one-time command `python3 -m pip install --user python-docx`, and mention that Homebrew Python may need `--break-system-packages` (see [references/setup.md](references/setup.md)). |
+| `Permission denied` on a script path | Re-run the same command prefixed with `python3` or `node`. Do not `chmod` files inside an installed package. |
+| `Input ... not found` (exit 2) | Confirm the path with the user; do not guess a nearby file. |
+| Default profile requested but Noto Sans CJK KR is missing | Say that Word will substitute another face, and offer `brew install --cask font-noto-sans-cjk-kr` or a different font choice. |
+| Requested custom font is not installed | Report it and stop. Never substitute a different face silently. |
 
 ## Output rule
 
 - Default output is **DOCX**, not HTML.
-- If the user says `/a4 input.md` without an output path, write `input.a4.docx` next to the input file.
+- If the user says `/skill:a4 input.md` without an output path, write `input.a4.docx` next to the input file.
 - If the user casually says `.doc`, still generate `.docx` unless they explicitly require legacy binary `.doc`.
-- Do not use the HTML converter unless the user explicitly asks for HTML.
+- Do not use the HTML converter unless the user explicitly asks for HTML. When they do, run `node <skill-dir>/scripts/md-to-a4-html.mjs input.md -o output.html`. It prints a source SHA-256 and a heading-count check; there is no DOCX-style full-text checker for HTML.
 
 ## Workflow
 
@@ -38,10 +52,12 @@ If no output path is needed:
 python3 <skill-dir>/scripts/md-to-a4-docx.py input.md
 ```
 
+Useful converter options: `--title` sets only the DOCX core-properties title (visible content is untouched), `--accent` overrides the accent color hex (default `#1f4e79`), and `--no-cover` drops the extra spacing after the first H1.
+
 4. Verify with the bundled checker:
 
 ```bash
-<skill-dir>/scripts/check-a4-docx.py output.docx input.md
+python3 <skill-dir>/scripts/check-a4-docx.py output.docx input.md
 ```
 
 5. For custom font, weight or size requests, apply the custom typography workflow below. Then perform the visual verification below. Do not rely only on HTML previews.
@@ -53,7 +69,8 @@ Use a restrained Korean business document style:
 
 - A4 page size.
 - Margins: top 3.0cm, bottom/left/right 2.54cm.
-- Font: **Noto Sans CJK KR** for body, headings, tables, lists, Latin slots, and East Asian slots.
+- Font: **Noto Sans CJK KR** for body, headings, tables, lists, Latin slots, and East Asian slots. Fenced code blocks and inline code are the one exception, and use Courier New.
+- Noto Sans CJK KR is not bundled with macOS. Check it with `system_profiler SPFontsDataType | grep -i "Noto Sans CJK KR"` before promising the default look; if missing, say so (see [references/setup.md](references/setup.md)) because Word silently falls back to another face.
 - Body text around 10pt.
 - H1 around 18pt bold.
 - H2 around 12pt bold.
@@ -147,7 +164,7 @@ Before saying complete:
 
 User-specified fonts and sizes override the default style profile. If `python-docx` is missing, use the install steps in [references/setup.md](references/setup.md). Resolve script paths relative to this skill directory.
 
-1. Confirm the exact named faces are installed with `fc-list` or `system_profiler SPFontsDataType` on macOS. XML names alone do not prove Word can render the font. If unavailable, report it rather than silently substituting.
+1. Confirm the exact named faces are installed. On macOS use `system_profiler SPFontsDataType | grep -i pretendard`; `fc-list | grep -i pretendard` works only when fontconfig is installed (`brew install fontconfig`), which macOS does not ship by default. XML names alone do not prove Word can render the font. If unavailable, report it rather than silently substituting.
 2. Run the base converter and `check-a4-docx.py` first.
 3. Apply named faces with the bundled postprocessor. Preserve the original DOCX by choosing a different output path.
 
@@ -205,4 +222,12 @@ For design requirements, open the final file in Microsoft Word and inspect the a
 
 ## Skill regression checks
 
-Test a normal Markdown conversion, a Pretendard three-weight/three-size contract, and a document requesting one shared size. Verify the restricted checker rejects a disallowed font or enabled bold flag. Use a sibling workspace for generated test files and remove that workspace after validation; never overwrite the real contract.
+The bundled harness covers this automatically, but it ships only in the git checkout. `package.json` excludes `skills/a4/scripts/test-*.py` from the published package, so an installed copy has no test file.
+
+```bash
+python3 <repo>/packages/skill-a4/skills/a4/scripts/test-a4-regressions.py [contract.md]
+```
+
+It prints eight `PASS` lines and exits 0. The optional argument runs the same pipeline against a real contract Markdown. The harness builds everything in a system temp directory, so the repo stays clean.
+
+Without the checkout, reproduce manually: a normal Markdown conversion, a Pretendard three-weight/three-size contract, and a document requesting one shared size. Verify the restricted checker rejects a disallowed font or enabled bold flag. Use a sibling workspace for generated test files and remove that workspace after validation; never overwrite the real contract.

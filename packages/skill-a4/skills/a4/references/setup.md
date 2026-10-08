@@ -29,6 +29,32 @@ If this prints `python-docx ok`, nothing else is needed.
 
 4. Run the check above again.
 
+## Smoke test
+
+`import docx` only proves the library loads. Convert a throwaway file end to end once. `<skill-dir>` is the directory holding `SKILL.md`; always call the scripts through `python3` because installed copies have no execute bit.
+
+```bash
+cd "$(mktemp -d)"
+printf '# Smoke title\n\n## Section\n\nPlain paragraph.\n' > smoke.md
+python3 <skill-dir>/scripts/md-to-a4-docx.py smoke.md -o smoke.docx
+python3 <skill-dir>/scripts/check-a4-docx.py smoke.docx smoke.md
+```
+
+The checker must print `A4 DOCX check: OK` and `Full ordered text: OK` and exit 0. Delete the temp directory afterwards.
+
 ## Fonts
 
-Custom fonts such as Pretendard must be installed in macOS before Word can render them. Check with `fc-list | grep -i pretendard` or `system_profiler SPFontsDataType`.
+The default style profile asks Word for **Noto Sans CJK KR**, which macOS does not ship. Without it Word silently substitutes another face, so the printed result differs from the spec.
+
+```bash
+system_profiler SPFontsDataType | grep -i "Noto Sans CJK KR"   # prints matches when installed
+brew install --cask font-noto-sans-cjk-kr                      # install once
+```
+
+Custom fonts such as Pretendard must also be installed in macOS before Word can render them. Check them the same way:
+
+```bash
+system_profiler SPFontsDataType | grep -i pretendard
+```
+
+`fc-list | grep -i pretendard` is shorter, but `fc-list` comes from fontconfig and is not part of macOS. Use it only if `brew install fontconfig` is already done.

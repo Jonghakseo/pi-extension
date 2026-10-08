@@ -7,9 +7,16 @@ import sys
 import zipfile
 from pathlib import Path
 
-from docx import Document
-from docx.opc.exceptions import PackageNotFoundError
-from lxml import etree as ET
+try:
+    from docx import Document
+    from docx.opc.exceptions import PackageNotFoundError
+    from lxml import etree as ET
+except Exception as exc:  # pragma: no cover - user-facing dependency guard
+    print('Missing dependency: python-docx', file=sys.stderr)
+    print('Install once with: python3 -m pip install --user python-docx', file=sys.stderr)
+    print('If that fails with externally-managed-environment, see references/setup.md', file=sys.stderr)
+    print(f'Original error: {exc}', file=sys.stderr)
+    sys.exit(2)
 
 from ooxml_order import ORDERS, normalize_order, ordered_property
 
@@ -158,6 +165,9 @@ def main():
         parser.error('Sizes must be positive finite multiples of 0.5 pt (OOXML half-points).')
     if min(sizes) < args.body_size:
         parser.error('Title and section sizes must not be below body size.')
+    if not args.input.is_file():
+        print(f'Input DOCX not found: {args.input}', file=sys.stderr)
+        return 2
     try:
         doc = Document(args.input)
         headings = {}

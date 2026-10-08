@@ -29,7 +29,8 @@ try:
     from docx.shared import Cm, Pt, RGBColor
 except Exception as exc:  # pragma: no cover - user-facing dependency guard
     print("Missing dependency: python-docx", file=sys.stderr)
-    print("Install once with: python3 -m pip install python-docx", file=sys.stderr)
+    print("Install once with: python3 -m pip install --user python-docx", file=sys.stderr)
+    print("If that fails with externally-managed-environment, see references/setup.md", file=sys.stderr)
     print(f"Original error: {exc}", file=sys.stderr)
     sys.exit(2)
 
@@ -559,6 +560,9 @@ def strip_heading_keep_marks(docx_path: Path):
 def main() -> int:
     args = parse_args()
     input_path = Path(args.input).expanduser().resolve()
+    if not input_path.is_file():
+        print(f"Input Markdown not found: {input_path}", file=sys.stderr)
+        return 2
     output_path = Path(args.output).expanduser().resolve()
     markdown = input_path.read_text(encoding="utf-8")
     accent = normalize_hex(args.accent)

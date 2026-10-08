@@ -107,9 +107,36 @@ def reject_bad_order(final, workspace):
         print(f'PASS: reversed {prop} order rejected by typography checker (exit 1)')
 
 
+def reject_missing_inputs(workspace):
+    """A missing path must end with one message and exit 2, never a traceback."""
+    missing_md = workspace / 'does-not-exist.md'
+    missing_docx = workspace / 'does-not-exist.docx'
+    faces = ['--regular-face', 'Pretendard', '--medium-face', 'Pretendard Medium',
+             '--semibold-face', 'Pretendard SemiBold']
+    contract = ['--fonts', 'Pretendard', '--sizes', '10.5', '--min-size', '10.5']
+    cases = (
+        ('md-to-a4-docx.py', [missing_md, '-o', workspace / 'never.docx']),
+        ('check-a4-docx.py', [missing_docx, missing_md]),
+        ('check-docx-typography.py', [missing_docx, *contract]),
+        ('apply-docx-typography.py', [missing_docx, '-o', workspace / 'never.docx', *faces]),
+    )
+    for script, args in cases:
+        result = subprocess.run([sys.executable, str(SCRIPTS / script), *map(str, args)],
+                                capture_output=True, text=True)
+        output = result.stdout + result.stderr
+        assert result.returncode == 2, (script, result.returncode, output)
+        assert 'not found' in result.stderr, (script, output)
+        assert 'Traceback' not in output, (script, output)
+    print('PASS: missing input paths exit 2 with a single message, no traceback')
+
+
 def main():
-    with tempfile.TemporaryDirectory(prefix='a4-regressions-', dir=SCRIPTS.parent.parent) as tmp:
+    # System temp dir, never inside the repo checkout, so a failed run cannot dirty git status.
+    with tempfile.TemporaryDirectory(prefix='a4-regressions-') as tmp:
         workspace = Path(tmp)
+        package = SCRIPTS.parents[2]
+        assert package not in workspace.resolve().parents, f'workspace inside repo: {workspace}'
+        reject_missing_inputs(workspace)
         source = workspace / 'synthetic.md'
         source.write_text('# Real title\n\n## Real section\n\n```md\n# Fake title\n'
                           '| Fake | Table |\n| --- | --- |\n| a | b |\n```\n\n'

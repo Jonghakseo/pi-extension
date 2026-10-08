@@ -10,7 +10,14 @@ from pathlib import Path
 
 from markdown_structure import outside_code_fences
 
-from docx import Document
+try:
+    from docx import Document
+except Exception as exc:  # pragma: no cover - user-facing dependency guard
+    print("Missing dependency: python-docx", file=sys.stderr)
+    print("Install once with: python3 -m pip install --user python-docx", file=sys.stderr)
+    print("If that fails with externally-managed-environment, see references/setup.md", file=sys.stderr)
+    print(f"Original error: {exc}", file=sys.stderr)
+    sys.exit(2)
 
 
 def markdown_table_count(markdown: str) -> int:
@@ -129,6 +136,10 @@ def main() -> int:
 
     docx_path = Path(sys.argv[1]).expanduser().resolve()
     md_path = Path(sys.argv[2]).expanduser().resolve() if len(sys.argv) == 3 else None
+    for label, path in (("DOCX", docx_path), ("source Markdown", md_path)):
+        if path is not None and not path.is_file():
+            print(f"Input {label} not found: {path}", file=sys.stderr)
+            return 2
     errors: list[str] = []
 
     doc = Document(docx_path)
