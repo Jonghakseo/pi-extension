@@ -92,9 +92,14 @@ export function newPasteBuffer(owner) {
 }
 
 export function truncateCapture(value, maxLines = MAX_CAPTURE_LINES, maxBytes = MAX_CAPTURE_BYTES) {
-	const lines = String(value)
-		.split("\n")
-		.slice(-Math.max(1, Math.min(MAX_CAPTURE_LINES, maxLines)));
+	const limit = Math.max(1, Math.min(MAX_CAPTURE_LINES, maxLines));
+	// tmux always returns the full pane height and `-S -N` prepends scrollback on top
+	// of it, so the tail of the capture is the pane's unused bottom rows. Drop those
+	// before slicing, otherwise a small maxLines yields a screen of blank lines.
+	const all = String(value).split("\n");
+	let end = all.length;
+	while (end > 0 && all[end - 1].trim() === "") end -= 1;
+	const lines = all.slice(Math.max(0, end - limit), end);
 	const text = lines.join("\n");
 	if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
 
@@ -232,16 +237,26 @@ export async function doctor(options = {}) {
 
 async function statusUnchecked(session, options = {}) {
 	const target = `${session}:0.0`;
-	const result = await runTmux(
-		[
-			"display-message",
-			"-p",
-			"-t",
-			target,
-			"#{session_name}\t#{@pi_owner}\t#{@pi_helper_id}\t#{@pi_temp_path}\t#{@pi_original_title}\t#{@pi_created_at}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_pid}\t#{pane_current_command}",
-		],
-		options,
-	);
+	let result;
+	try {
+		result = await runTmux(
+			[
+				"display-message",
+				"-p",
+				"-t",
+				target,
+				"#{session_name}\t#{@pi_owner}\t#{@pi_helper_id}\t#{@pi_temp_path}\t#{@pi_original_title}\t#{@pi_created_at}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_pid}\t#{pane_current_command}",
+			],
+			options,
+		);
+	} catch (error) {
+		// The dedicated server exits once its last session is killed.
+		if (error instanceof TerminalError && /no server running|no sessions|failed to connect/i.test(error.message))
+			throw new TerminalError("session_not_found", `no session named ${session}`);
+		throw error;
+	}
+	// tmux exits 0 with empty stdout when the target session no longer exists.
+	if (!result.stdout.trim()) throw new TerminalError("session_not_found", `no session named ${session}`);
 	return parseTmuxStatus(result.stdout);
 }
 
@@ -421,7 +436,33 @@ export async function cleanupOwner({ owner: inputOwner, tmuxBin } = {}) {
 }
 
 function usage() {
-	return "usage: tmux-terminal.mjs <doctor|start|capture|status|send-keys|paste|list|kill|cleanup> [--owner OWNER]";
+	return [
+		"usage: tmux-terminal.mjs <action> [options]",
+		"",
+		"actions:",
+		"  doctor                 report tmux availability for this environment",
+		"  start                  launch --command in a new owned session",
+		"  capture                read the current screen text",
+		"  status                 report pane liveness and exit status",
+		"  send-keys              send named keys (Enter, Down, C-c, ...)",
+		"  paste                  send literal text from --text, --file, or stdin",
+		"  list                   list sessions owned by this owner",
+		"  kill                   kill one owned session",
+		"  cleanup                kill every session owned by this owner",
+		"  help                   print this message",
+		"",
+		"options:",
+		"  --owner OWNER          required, defaults to $PI_SESSION_ID",
+		"  --session NAME         session returned by start",
+		"  --command CMD          start: the command line to run, passed through verbatim",
+		"  --title TEXT           start: human-readable label",
+		"  --shell PATH           start: interpreter for --command (default /bin/bash)",
+		`  --lines N              capture: screen lines to return, 1-${MAX_CAPTURE_LINES} (default ${MAX_CAPTURE_LINES})`,
+		"  --key NAME             send-keys: one named key, repeatable",
+		"  --keys A,B             send-keys: comma-separated named keys",
+		"  --text TEXT            paste: literal text",
+		"  --file PATH            paste: literal text read from a file",
+	].join("\n");
 }
 
 function parseCli(argv) {
@@ -478,6 +519,9 @@ export async function main(argv = process.argv.slice(2)) {
 	const options = parseCli(argv);
 	let result;
 	switch (options.action) {
+		case "help":
+			process.stdout.write(`${usage()}\n`);
+			return { usage: usage() };
 		case "doctor":
 			result = await doctor(options);
 			process.stdout.write(`${JSON.stringify({ ok: result.supported, ...result })}\n`);

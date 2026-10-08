@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-skill-tmux-terminal",
-	"version": "0.1.1",
+	"version": "0.1.3",
 	"description": "Pi skill for driving TUI, REPL, and stdin programs through an isolated tmux PTY helper.",
 	"license": "MIT",
 	"repository": {

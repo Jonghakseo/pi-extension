@@ -114,6 +114,15 @@ test("capture truncation is line-bounded, byte-bounded, and UTF-8 safe", () => {
 	assert.equal(output.includes("�"), false);
 });
 
+test("capture truncation keeps content when the pane's unused bottom rows are blank", () => {
+	// tmux pads every capture to the full pane height, so slicing before dropping the
+	// blank tail used to return an empty screen for any small line budget.
+	const padded = `one\ntwo\nthree${"\n   ".repeat(21)}`;
+	assert.equal(truncateCapture(padded, 2, 1024), "two\nthree");
+	assert.equal(truncateCapture(padded, 1, 1024), "three");
+	assert.equal(truncateCapture("\n\n\n", 5, 1024), "");
+});
+
 test("tmux format parsers retain metadata and dead status", () => {
 	assert.deepEqual(parseTmuxList("s\to\th\t/tmp/x\tt\t2026\n"), [
 		{ session: "s", owner: "o", helperId: "h", tempPath: "/tmp/x", title: "t", createdAt: "2026" },
@@ -154,6 +163,45 @@ test("CLI entrypoint works through a symlink and preserves doctor exit codes", a
 	const unavailableResult = JSON.parse(unavailable.stdout);
 	assert.equal(unavailableResult.ok, false);
 	assert.equal(unavailableResult.supported, false);
+
+	const help = spawnSync(process.execPath, [linkedScript, "help"], { encoding: "utf8" });
+	assert.equal(help.status, 0, help.stderr);
+	assert.match(help.stdout, /^usage: tmux-terminal\.mjs/);
+	assert.match(help.stdout, /--lines N/);
+});
+
+test("capture returns the newest screen lines even when --lines is below the pane height", async (t) => {
+	const currentOwner = owner("capture-lines");
+	t.after(() => cleanupOwner({ owner: currentOwner }));
+	const started = await start(currentOwner, "printf 'FIRST\\nSECOND\\nTHIRD\\n'; while :; do sleep 1; done");
+	for (let attempt = 0; attempt < 100; attempt += 1) {
+		if ((await captureSession({ owner: currentOwner, session: started.session })).text.includes("THIRD")) break;
+		await delay(10);
+	}
+	// A default pane is 24 rows tall; line budgets below that used to return only blank rows.
+	const narrow = await captureSession({ owner: currentOwner, session: started.session, lines: 3 });
+	assert.deepEqual(narrow.text.split("\n"), ["FIRST", "SECOND", "THIRD"]);
+	assert.equal((await captureSession({ owner: currentOwner, session: started.session, lines: 1 })).text, "THIRD");
+});
+
+test("a missing session reports session_not_found rather than a format failure", async (t) => {
+	const currentOwner = owner("missing-session");
+	t.after(() => cleanupOwner({ owner: currentOwner }));
+	// Keep the dedicated server alive: tmux then answers with empty stdout and exit 0.
+	await start(currentOwner, "sleep 30");
+	const missing = `pi-missing-${process.pid}`;
+	for (const operation of [
+		() => statusSession({ owner: currentOwner, session: missing }),
+		() => captureSession({ owner: currentOwner, session: missing }),
+		() => sendKeys({ owner: currentOwner, session: missing, keys: ["Enter"] }),
+		() => killSession({ owner: currentOwner, session: missing }),
+	]) {
+		await assert.rejects(
+			operation,
+			(error) =>
+				error instanceof TerminalError && error.code === "session_not_found" && error.message.includes(missing),
+		);
+	}
 });
 
 test("gated start preserves compound shell command semantics and immediate exit statuses", async (t) => {
