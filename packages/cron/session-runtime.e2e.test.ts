@@ -51,7 +51,7 @@ export default function (pi) {
       let stopReason = "stop";
       if (last?.role === "user" && marker !== "SMOKE_BUSY") {
         stopReason = "toolUse";
-        content = [{ type: "toolCall", id: "test-" + marker, name: marker === "SMOKE_SEED" ? "remember" : "recall",
+        content = [{ type: "toolCall", id: "test-" + marker, name: marker === "SMOKE_SEED" ? "memory_remember" : "memory_recall",
           arguments: marker === "SMOKE_SEED"
             ? { scope: "agent", tier: "log", title: "rpc sentinel", content: "SENTINEL_VALUE" }
             : { scope: "agent", tier: "log", query: "rpc sentinel" } }];

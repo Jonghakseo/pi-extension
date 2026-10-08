@@ -7,7 +7,7 @@ const MemoryScopeSchema = Type.Union([Type.Literal("agent"), Type.Literal("user"
 
 const MemoryTierSchema = Type.Union([Type.Literal("profile"), Type.Literal("log"), Type.Literal("note")], {
 	description:
-		"Importance tier. profile stores lasting facts, preferences, and rules; log stores decisions or history; note stores working or tentative context. Recall prioritizes profile, then log, then note. Defaults to profile; no automatic expiry.",
+		"Importance tier. profile stores lasting facts, preferences, and rules; log stores decisions or history; note stores working or tentative context. memory_recall prioritizes profile, then log, then note. Defaults to profile; no automatic expiry.",
 });
 
 // ── Memory Scope and Tier ───────────────────────────────────────────────────
@@ -52,7 +52,7 @@ export const RecallParams = Type.Object({
 export const ForgetParams = Type.Object(
 	{
 		id: Type.String({
-			description: "Memory entry ID from recall({ query }); identifies exactly which memory to remove.",
+			description: "Memory entry ID from memory_recall({ query }); identifies exactly which memory to remove.",
 		}),
 	},
 	{

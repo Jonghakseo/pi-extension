@@ -23,7 +23,7 @@ export async function buildMemoryPrompt(projectId?: string, agentEntries: Search
 	}
 	if (lines.length > MAX_LINES) {
 		lines.splice(MAX_LINES);
-		lines.push("... (truncated, use recall for full details)");
+		lines.push("... (truncated, use memory_recall for full details)");
 	}
 
 	return [
@@ -31,8 +31,8 @@ export async function buildMemoryPrompt(projectId?: string, agentEntries: Search
 		"",
 		"[Memory Layer]",
 		lines.join("\n"),
-		"Recall returns profile memories before log and note, while keeping only query matches.",
-		"Use recall({ query }) to search, then recall({ id }) for full content. Filters accept scope and tier.",
+		"memory_recall returns profile memories before log and note, while keeping only query matches.",
+		"Use memory_recall({ query }) to search, then memory_recall({ id }) for full content. Filters accept scope and tier.",
 		"When storing, reuse a listed topic where possible. New memories default to tier 'profile'.",
 	].join("\n");
 }

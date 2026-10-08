@@ -93,12 +93,12 @@ function renderCountSummary(details: MemoryCountDetails & { scope?: MemoryScope 
 }
 
 export function renderRememberCall(args: ToolRenderArgs, theme: RenderTheme, context: { expanded: boolean }): Text {
-	if (context.expanded) return renderExpandedFallback("remember", theme);
+	if (context.expanded) return renderExpandedFallback("memory_remember", theme);
 	const scope = stringArg(args, "scope") ?? "project";
 	const topic = stringArg(args, "topic") ?? "general";
 	const tier = stringArg(args, "tier") ?? "profile";
 	const title = stringArg(args, "title") ?? stringArg(args, "content") ?? "(empty)";
-	const text = `${renderTitle("remember", theme)} · ${memoryLocation(scope, topic)} · ${tier} · "${preview(title, CALL_PREVIEW_WIDTH)}"`;
+	const text = `${renderTitle("memory_remember", theme)} · ${memoryLocation(scope, topic)} · ${tier} · "${preview(title, CALL_PREVIEW_WIDTH)}"`;
 	return new Text(text, 0, 0);
 }
 
@@ -114,7 +114,7 @@ export function renderRecallCall(args: ToolRenderArgs, theme: RenderTheme, conte
 	const id = stringArg(args, "id");
 	const scope = stringArg(args, "scope");
 	const tier = stringArg(args, "tier");
-	let text = renderTitle("recall", theme);
+	let text = renderTitle("memory_recall", theme);
 
 	if (context.expanded) {
 		if (id) text += ` ${theme.fg("accent", `id:${id}`)}`;
@@ -155,9 +155,9 @@ export function renderRecallResult(result: ToolRenderResult, options: ToolResult
 }
 
 export function renderForgetCall(args: ToolRenderArgs, theme: RenderTheme, context: { expanded: boolean }): Text {
-	if (context.expanded) return renderExpandedFallback("forget", theme);
+	if (context.expanded) return renderExpandedFallback("memory_forget", theme);
 	const id = stringArg(args, "id") ?? "(empty)";
-	return new Text(`${renderTitle("forget", theme)} · ID ${id}`, 0, 0);
+	return new Text(`${renderTitle("memory_forget", theme)} · ID ${id}`, 0, 0);
 }
 
 export function renderForgetResult(

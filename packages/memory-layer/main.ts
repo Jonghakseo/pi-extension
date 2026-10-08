@@ -211,7 +211,10 @@ function executeRecallQuery(
 		results.length > shown
 			? `Found ${results.length} memories (showing top ${shown}):`
 			: `Found ${results.length} memories:`;
-	return buildTextResult(`${header}\n\n${lines.join("\n")}\n\nUse recall with id to view full content.`, resultDetails);
+	return buildTextResult(
+		`${header}\n\n${lines.join("\n")}\n\nUse memory_recall with id to view full content.`,
+		resultDetails,
+	);
 }
 
 function formatMemoryIndex(entries: SearchResult[]): string {
@@ -527,8 +530,8 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 	// ── remember Tool (LLM-callable, fully non-interactive) ───────────────
 
 	pi.registerTool({
-		name: "remember",
-		label: "Remember",
+		name: "memory_remember",
+		label: "Memory Remember",
 		description:
 			"Save a fact, rule, or lesson to the user's long-term memory. " +
 			"Call this when the user says '기억해', '앞으로 이렇게 해', '이 규칙 적용해', 'remember this', etc. " +
@@ -581,12 +584,12 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 	// ── recall Tool ───────────────────────────────────────────────────────
 
 	pi.registerTool({
-		name: "recall",
-		label: "Recall",
+		name: "memory_recall",
+		label: "Memory Recall",
 		description:
-			"Search accessible user, project, and current-session memories. " +
-			"Recall({ query }) returns matching summaries ordered profile, log, note. " +
-			"Recall({ id }) returns one entry, while scope and tier filters apply to every mode.",
+			"Search explicitly saved facts, preferences, and rules across user, project, and current-session memory scopes, not conversation history. " +
+			"memory_recall({ query }) returns matching summaries ordered profile, log, note. " +
+			"memory_recall({ id }) returns one entry, while scope and tier filters apply to every mode.",
 		parameters: RecallParams,
 		renderCall: renderRecallCall,
 		renderResult: renderRecallResult,
@@ -615,10 +618,10 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 	// ── forget Tool ──────────────────────────────────────────────────────────
 
 	pi.registerTool({
-		name: "forget",
-		label: "Forget",
+		name: "memory_forget",
+		label: "Memory Forget",
 		description:
-			"Remove a memory from active recall by its ID from recall({ query }). " +
+			"Remove a memory from active recall by its ID from memory_recall({ query }). " +
 			"User/project entries are deleted from storage; agent entries are logically deleted and remain in session history. " +
 			"Use when the user says '잊어줘', 'forget this', or a stored rule is no longer valid.",
 		parameters: ForgetParams,
@@ -627,7 +630,7 @@ export function registerMemoryLayer(pi: ExtensionAPI): MemoryLayerHandlers {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			try {
 				const { id } = params as { id: string };
-				if (!id?.trim()) throw new Error("forget requires a non-empty ID from recall.");
+				if (!id?.trim()) throw new Error("memory_forget requires a non-empty ID from memory_recall.");
 				currentProjectId = resolveCurrentProjectId(ctx.cwd);
 				const entries = await collectDisplayEntries(currentProjectId, ctx);
 				return await executeForgetById(id.trim(), entries, (entry) => removeStoredMemory(pi, ctx, entry));

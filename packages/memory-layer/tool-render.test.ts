@@ -35,12 +35,12 @@ describe("memory-layer compact tool rendering", () => {
 		const details = { kind: "remember", scope: "project", topic: "general", title: "배포 규칙" } as const;
 
 		expect(render(renderRememberCall(args, theme as never, { expanded: false }))).toBe(
-			'remember · project/general · profile · "배포 규칙"',
+			'memory_remember · project/general · profile · "배포 규칙"',
 		);
 		expect(render(renderRememberResult(result(fullResult, details), { expanded: false }, theme as never))).toBe(
 			"✓ saved",
 		);
-		expect(render(renderRememberCall(args, theme as never, { expanded: true }))).toBe("remember");
+		expect(render(renderRememberCall(args, theme as never, { expanded: true }))).toBe("memory_remember");
 		expect(render(renderRememberResult(result(fullResult, details), { expanded: true }, theme as never))).toBe(
 			fullResult,
 		);
@@ -58,11 +58,15 @@ describe("memory-layer compact tool rendering", () => {
 			],
 		} as const;
 
-		expect(render(renderRecallCall(args, theme as never, { expanded: false }))).toBe('recall · "npm publish" · user');
+		expect(render(renderRecallCall(args, theme as never, { expanded: false }))).toBe(
+			'memory_recall · "npm publish" · user',
+		);
 		expect(render(renderRecallResult(result(fullResult, details), { expanded: false }, theme as never))).toBe(
 			"✓ 3 matches · npm login 선행, OTP 처리, +1",
 		);
-		expect(render(renderRecallCall(args, theme as never, { expanded: true }))).toBe('recall "npm publish" scope:user');
+		expect(render(renderRecallCall(args, theme as never, { expanded: true }))).toBe(
+			'memory_recall "npm publish" scope:user',
+		);
 		expect(render(renderRecallResult(result(fullResult, details), { expanded: true }, theme as never))).toBe(
 			fullResult,
 		);
@@ -78,12 +82,12 @@ describe("memory-layer compact tool rendering", () => {
 		} as const;
 
 		expect(render(renderRecallCall({ id: "57cf723214aa" }, theme as never, { expanded: false }))).toBe(
-			"recall · id:57cf7...",
+			"memory_recall · id:57cf7...",
 		);
 		expect(render(renderRecallResult(result("full content", idDetails), { expanded: false }, theme as never))).toBe(
 			"✓ project/general · 배포 절차",
 		);
-		expect(render(renderRecallCall({}, theme as never, { expanded: false }))).toBe("recall · index · all");
+		expect(render(renderRecallCall({}, theme as never, { expanded: false }))).toBe("memory_recall · index · all");
 		expect(render(renderRecallResult(result("full index", indexDetails), { expanded: false }, theme as never))).toBe(
 			"✓ 27 memories · agent 0 / user 23 / project 4",
 		);
@@ -93,7 +97,9 @@ describe("memory-layer compact tool rendering", () => {
 		const details = { kind: "forget", scope: "user", topic: "general", title: "배포 규칙" } as const;
 		const fullResult = 'Deleted from user: general / "배포 규칙"';
 
-		expect(render(renderForgetCall({ id: "abc123" }, theme as never, { expanded: false }))).toBe("forget · ID abc123");
+		expect(render(renderForgetCall({ id: "abc123" }, theme as never, { expanded: false }))).toBe(
+			"memory_forget · ID abc123",
+		);
 		expect(
 			render(
 				renderForgetResult(result(fullResult, details), { expanded: false }, theme as never, {
