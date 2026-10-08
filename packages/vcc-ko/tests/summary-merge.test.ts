@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RECALL_NOTE, TUI_SAFE_LINE_CHARS, wrapLongLines } from "../src/core/format.ts";
+import { RECALL_NOTE, stripRecallNotes, TUI_SAFE_LINE_CHARS, wrapLongLines } from "../src/core/format.ts";
 import { type CompactionState, compileRanked, compileRankedWithState } from "../src/core/summarize.ts";
 import { parseFileActivitySection } from "../src/extract/files.ts";
 import { assistantText, assistantWithToolCall, userMsg } from "./fixtures.ts";
@@ -175,4 +175,11 @@ describe("merging with the previous summary", () => {
 		expect(files).toContain("~/.config/tool.json");
 		expect(files).toContain("/tmp/scratch.txt");
 	});
+});
+
+it("removes the previous vcc_recall pointer from old summaries", () => {
+	const oldNote =
+		"Use `vcc_recall` (search terms or #N refs) to recover details from before this summary. Do not redo completed work.";
+	expect(stripRecallNotes(`kept context\n\n---\n\n${oldNote}`)).toBe("kept context");
+	expect(RECALL_NOTE).toContain("`session_recall`");
 });

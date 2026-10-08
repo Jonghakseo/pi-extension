@@ -64,7 +64,7 @@ afterEach(() => {
 	rmSync(dir, { recursive: true, force: true });
 });
 
-describe("vcc_recall expand", () => {
+describe("session_recall expand", () => {
 	it("accepts custom and message refs together", async () => {
 		const text = await run({ expand: ["c0", "#1"] });
 		expect(text).toContain("#c0 [custom:subagent-tool]");
@@ -93,7 +93,7 @@ describe("vcc_recall expand", () => {
 	});
 });
 
-describe("vcc_recall search", () => {
+describe("session_recall search", () => {
 	it("finds text that only exists in a custom_message", async () => {
 		const text = await run({ query: "[subagent:worker#41]" });
 		expect(text).toContain("#c0 [custom:subagent-tool]");
@@ -107,7 +107,7 @@ describe("vcc_recall search", () => {
 	});
 });
 
-describe("vcc_recall browse", () => {
+describe("session_recall browse", () => {
 	it("lists customs and drops empty-bodied entries", async () => {
 		const text = await run({});
 		expect(text).toContain("#c0 [custom:subagent-tool]");
@@ -116,4 +116,8 @@ describe("vcc_recall browse", () => {
 		expect(text).not.toContain("#3 [assistant]");
 		expect(text).not.toContain("#0 [");
 	});
+});
+
+it("exposes only the descriptive session_recall tool name", () => {
+	expect(recallTool()).toMatchObject({ name: "session_recall", label: "Session Recall" });
 });

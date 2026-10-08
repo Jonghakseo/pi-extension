@@ -42,8 +42,8 @@ export const resolveExpandRefs = (
 
 export const registerRecallTool = (pi: ExtensionAPI) => {
 	pi.registerTool({
-		name: "vcc_recall",
-		label: "VCC Recall",
+		name: "session_recall",
+		label: "Session Recall",
 		description:
 			"Recall earlier parts of the current session — decisions made, files touched, commands run, " +
 			"including anything dropped by compaction. Reach for this before telling the user you no longer " +
@@ -54,10 +54,10 @@ export const registerRecallTool = (pi: ExtensionAPI) => {
 			"with refs (#N or #cN) to read full untruncated content. Use mode:'touched' to list files worked " +
 			"on in this session with their entry indices, and #N:path to drill into a file's content from an " +
 			"entry (#N:path:full for all lines). Note: apply_patch paths (inside the diff payload) and bash " +
-			"redirects do not appear in the touched index. Only the current session is searchable — earlier " +
+			"redirects do not appear in the touched index. This searches conversation history, not explicitly saved memories. Only the current session is searchable — earlier " +
 			"sessions are not.",
 		promptSnippet:
-			"vcc_recall: recall earlier parts of this session before saying the context is gone. " +
+			"session_recall: recall earlier parts of this session before saying the context is gone. " +
 			"Plain keywords work best; scope:'all' widens to other conversation branches, role:'user' " +
 			"narrows to the user's own instructions. Subagent results and background job completions have " +
 			"#cN refs. mode:'touched' lists files worked on; #N:path drills into a file's content from an entry.",

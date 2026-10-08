@@ -12,7 +12,7 @@
  *   - SELF_TALK_PREFIX_RE_KO / 한국어 불용어 — 브리프·검색 품질
  *
  * 커맨드/설정은 독립 식별자를 쓴다: /pi-vcc-ko, /pi-vcc-ko-recall,
- * vcc_recall 도구, ~/.pi/agent/pi-vcc-ko-config.json.
+ * session_recall 도구, ~/.pi/agent/pi-vcc-ko-config.json.
  *
  * 업스트림과의 차이: pi 0.87.x 타입 대응(isWordLike 옵셔널, bashExecution
  * 타입 가드), 설정 파일 경로·compactor 식별자 분리.
@@ -20,7 +20,7 @@
  * 커맨드:
  *   /pi-vcc-ko            — 즉시 압축 (keep:N, 후속 프롬프트 지원)
  *   /pi-vcc-ko-recall     — 세션 히스토리 검색 (scope:all, page:N)
- *   도구: vcc_recall      — 에이전트가 컨텍스트 복원용으로 호출
+ *   도구: session_recall      — 에이전트가 컨텍스트 복원용으로 호출
  *
  * 기본 동작: overrideDefaultCompaction=true면 /compact·자동 임계치 압축도
  * 이 확장이 처리한다. 설정은 ~/.pi/agent/pi-vcc-ko-config.json.

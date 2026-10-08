@@ -69,12 +69,12 @@ pi install npm:@ryan_nookpi/pi-extension-vcc-ko
 ### 식별자 분리
 
 - 커맨드: `/pi-vcc-ko`, `/pi-vcc-ko-recall`
-- 도구: `vcc_recall` (원본과 동일하므로 원본 pi-vcc와 동시에 활성화하면 도구 이름이 겹친다. 둘 중 하나만 켠다)
+- 도구: `session_recall` (기존 `vcc_recall`에서 변경. 원본 pi-vcc와는 압축 처리가 겹치므로 둘 중 하나만 켠다)
 - 설정: `~/.pi/agent/pi-vcc-ko-config.json` (`PI_VCC_KO_CONFIG_PATH`로 경로 재정의 가능)
 - 디버그 스냅숏: `/tmp/pi-vcc-ko-debug.json`
 - compaction `details.compactor`: `"pi-vcc-ko"`
 
-섹션 헤더(`[Session Goal]` 등)와 `vcc_recall` 도구 설명은 에이전트(LLM) 가독성을 위해 영어를 유지한다.
+섹션 헤더(`[Session Goal]` 등)와 `session_recall` 도구 설명은 에이전트(LLM) 가독성을 위해 영어를 유지한다.
 
 ## 디노이즈 규칙 주입
 
@@ -108,7 +108,7 @@ pi install npm:@ryan_nookpi/pi-extension-vcc-ko
 
 - `/pi-vcc-ko` — 즉시 압축. `keep:N` (마지막 N턴 유지)과 후속 프롬프트를 지원한다.
 - `/pi-vcc-ko-recall <쿼리> [scope:all] [role:user] [page:N]` — 세션 히스토리 검색.
-- `vcc_recall` 도구 — 에이전트가 압축으로 사라진 컨텍스트를 복원할 때 호출.
+- `session_recall` 도구 — 에이전트가 압축으로 사라진 컨텍스트를 복원할 때 호출.
 - `overrideDefaultCompaction` 설정(기본 true) 시 `/compact`·자동 임계치 압축도 이 확장이 처리한다.
 
 자세한 동작(스마트 keep, 토큰 캘리브레이션, 세션 전역 `#N` 인덱스 등)은 원본 README(https://github.com/sting8k/pi-vcc) 참고.

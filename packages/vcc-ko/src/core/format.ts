@@ -100,10 +100,11 @@ export const capBrief = (text: string): string => {
  * re-embedded the previous note mid-brief (the pre-fix 127-char note did this).
  */
 export const RECALL_NOTE =
-	"Use `vcc_recall` (search terms or #N refs) to recover details from before this summary. Do not redo completed work.";
+	"Use `session_recall` (search terms or #N refs) to recover details from before this summary. Do not redo completed work.";
 
 /** Notes emitted by earlier versions; still stripped from previous summaries. */
 const LEGACY_RECALL_NOTES = [
+	"Use `vcc_recall` (search terms or #N refs) to recover details from before this summary. Do not redo completed work.",
 	"Use `vcc_recall` to search for prior work, decisions, and context from before this summary. Do not redo work already completed.",
 ];
 

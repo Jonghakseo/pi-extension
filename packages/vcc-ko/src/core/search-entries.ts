@@ -387,7 +387,7 @@ const TOOL_ARGS_BUDGET = 2000;
 /**
  * Tool name of the recall tool itself (src/tools/recall.ts). A search
  * operation must not match its own query or its own prior output: the
- * vcc_recall invocation is persisted as an ordinary assistant toolCall (its
+ * session_recall invocation is persisted as an ordinary assistant toolCall (its
  * `{ query }` argument, excluded below in `toolCallArgsText`) followed by an
  * ordinary toolResult message (its `N matches for "<query>"` text, excluded
  * in `fullText`) — without both exclusions a repeated query keeps matching
@@ -395,16 +395,17 @@ const TOOL_ARGS_BUDGET = 2000;
  * This is a targeted introspection invariant for one named tool, not a
  * general allowlist/blocklist over tool names or tool results.
  */
-const RECALL_TOOL_NAME = "vcc_recall";
+// Keep excluding historical calls made before the tool was renamed.
+const RECALL_TOOL_NAMES = new Set(["session_recall", "vcc_recall"]);
 
 /** Text of every toolCall's arguments in a message's content, for search —
  *  bounded once, in aggregate, by TOOL_ARGS_BUDGET. Excludes the recall
- *  tool's own arguments (see RECALL_TOOL_NAME). */
+ *  tool's own arguments (see RECALL_TOOL_NAMES). */
 const toolCallArgsText = (content: Message["content"]): string => {
 	if (!content || typeof content === "string") return "";
 	const raw = content
 		.filter((part) => part.type === "toolCall")
-		.filter((part) => part.name?.toLowerCase() !== RECALL_TOOL_NAME)
+		.filter((part) => !RECALL_TOOL_NAMES.has(part.name?.toLowerCase()))
 		.map((part) => extractToolCallArgsText(part.arguments))
 		.filter(Boolean)
 		.join("\n");
@@ -432,7 +433,7 @@ const fullText = (msg: Message): string => {
 	if (bash) {
 		return `${bash.command ?? ""} ${bash.output ?? ""}`;
 	}
-	if (msg.role === "toolResult" && msg.toolName?.toLowerCase() === RECALL_TOOL_NAME) {
+	if (msg.role === "toolResult" && RECALL_TOOL_NAMES.has(msg.toolName?.toLowerCase())) {
 		return "";
 	}
 	const text = textOf(msg.content);

@@ -1,7 +1,7 @@
 {
 	"name": "@ryan_nookpi/pi-extension-vcc-ko",
-	"version": "0.1.0",
-	"description": "Korean-aware algorithmic conversation compactor for pi (fork of pi-vcc) with vcc_recall history search.",
+	"version": "0.2.0",
+	"description": "Korean-aware algorithmic conversation compactor for pi (fork of pi-vcc) with session_recall history search.",
 	"license": "MIT",
 	"repository": {
 		"type": "git",

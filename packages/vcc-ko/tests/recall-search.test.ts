@@ -176,3 +176,16 @@ describe("duplicate folding", () => {
 		expect(hits.map((h) => h.ref)).toEqual(["0", "1"]);
 	});
 });
+
+it.each(["session_recall", "vcc_recall"])("does not search its own query or output for %s", (name) => {
+	const file = writeSession([
+		messageEntry("m1", user("unrelated request")),
+		messageEntry("m2", {
+			role: "assistant",
+			content: [{ type: "toolCall", id: "tc_1", name, arguments: { query: "unique-recall-query" } }],
+			timestamp: 1,
+		}),
+		messageEntry("m3", toolResult(name, '0 matches for "unique-recall-query"')),
+	]);
+	expect(search(file, "unique-recall-query").hits).toHaveLength(0);
+});
