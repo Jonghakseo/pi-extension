@@ -26,12 +26,18 @@ packages/
   memory-layer/
   open-pr/
   setup-sh/
+  skill-a4/              (skill-only package)
+  skill-chrome-cdp/      (skill-only package)
+  skill-excalidraw/      (skill-only package)
+  skill-skill-creator/   (skill-only package)
+  skill-tmux-terminal/   (skill-only package)
   subagent/
   task/                  (persistent RPC delegation, PoC)
   todo-write/            (deprecated, use todo-write-overlay)
   todo-write-overlay/
   until/
   vcc-ko/
+  web-access/
 ```
 
 ## Workspace
