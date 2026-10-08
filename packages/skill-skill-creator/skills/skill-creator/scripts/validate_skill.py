@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Validate a Pi/Agent Skills skill directory.
 
-Stdlib-only so the skill runs without setup. Checks the constraints that most
-often break Pi skill loading, plus quality warnings (short descriptions,
-broken relative paths, absolute paths, unknown frontmatter fields, etc.).
+Runs on the standard library alone so the skill works without setup. PyYAML is
+used when it happens to be installed; otherwise a built-in parser covers the
+frontmatter shapes Pi accepts (quoted scalars, block scalars, nested mappings,
+sequences).
+
+Checks the constraints that break Pi skill loading, plus quality warnings
+(short descriptions, broken skill-relative paths, absolute paths, unknown
+frontmatter fields, etc.).
 
 Exit codes:
   0  no errors (warnings allowed)
@@ -16,7 +21,12 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
+
+try:  # Optional: a real YAML parser matches Pi more closely than the fallback.
+    import yaml as _yaml
+except ImportError:  # pragma: no cover - exercised on hosts without PyYAML
+    _yaml = None
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -34,7 +44,8 @@ KNOWN_FIELDS = {
 
 REQUIRED_FIELDS = {"name", "description"}
 
-# Hard-fail threshold (Pi refuses to load).
+# Agent Skills spec limits. Pi itself only emits a startup warning for these and
+# still loads the skill; other harnesses are stricter, so treat them as errors.
 MAX_DESCRIPTION = 1024
 MAX_NAME = 64
 MAX_COMPATIBILITY = 500
@@ -44,85 +55,247 @@ MIN_DESCRIPTION_LEN = 15
 SOFT_DESCRIPTION_MAX = 200
 SOFT_LINE_LIMIT = 500
 
-# Body link patterns: things that look like skill-relative resource refs.
-# We deliberately skip refs inside inline code (backticks) and fenced code
-# blocks because those are typically illustrative examples, not real paths.
-RELPATH_RE = re.compile(
-    r"(?<![\w/`])((?:scripts|references|assets)/[A-Za-z0-9_./-]+)"
-)
+# Body references to bundled resources. Only file-looking paths are checked:
+# bare `references/` or `scripts/...` are category mentions, not real targets.
+# Inline code and fenced blocks are scanned too, since `` `references/x.md` ``
+# is the most common way to point at a bundled file.
+RELPATH_RE = re.compile(r"(?<![\w/])((?:scripts|references|assets)/[A-Za-z0-9_.-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)")
 FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 # Absolute paths that pin the skill to one machine/user.
 ABS_PATH_RE = re.compile(r"(?<![\w`])(/Users/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+)")
 
+BLOCK_SCALAR_RE = re.compile(r"^([|>])([+-]?)(\d*)$")
 
-def parse_frontmatter(text: str) -> Tuple[Dict[str, object], List[str], List[str]]:
-    """Parse a tiny subset of YAML frontmatter.
 
-    Supports `key: value` (with optional surrounding quotes) and `key: true|false`.
-    Detects unsupported structures (multi-line scalars, nested mappings, sequences)
-    and reports them as warnings so authors know the value may not parse the way
-    they expect when Pi loads the skill.
-    """
-    errors: List[str] = []
-    warnings: List[str] = []
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}, ["SKILL.md must start with YAML frontmatter delimiter '---'"], warnings
+class FrontmatterError(Exception):
+    """Raised when the frontmatter block cannot be parsed at all."""
 
-    end = None
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            end = i
+
+def _indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _is_blank(line: str) -> bool:
+    stripped = line.strip()
+    return not stripped or stripped.startswith("#")
+
+
+def _strip_inline_comment(text: str) -> str:
+    """Drop a trailing `# comment`, which YAML only recognises after whitespace."""
+    out: List[str] = []
+    quote: str | None = None
+    for index, char in enumerate(text):
+        if quote:
+            out.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in "\"'":
+            quote = char
+            out.append(char)
+            continue
+        if char == "#" and (index == 0 or text[index - 1] in " \t"):
             break
-    if end is None:
-        return {}, ["SKILL.md frontmatter is missing closing '---'"], warnings
+        out.append(char)
+    return "".join(out).rstrip()
 
-    data: Dict[str, object] = {}
-    current_key: str | None = None
-    for raw in lines[1:end]:
-        if not raw.strip() or raw.strip().startswith("#"):
-            current_key = None
+
+def _scalar(raw: str) -> Any:
+    # Comments are stripped first; _strip_inline_comment ignores `#` inside quotes.
+    text = _strip_inline_comment(raw.strip())
+    if not text:
+        return None
+    if text[0] in "\"'" and len(text) >= 2 and text[-1] == text[0]:
+        inner = text[1:-1]
+        if text[0] == '"':
+            return inner.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+        return inner.replace("''", "'")
+    if text.startswith("[") and text.endswith("]"):
+        body = text[1:-1].strip()
+        return [_scalar(item) for item in body.split(",")] if body else []
+    if text in ("true", "True", "yes", "on"):
+        return True
+    if text in ("false", "False", "no", "off"):
+        return False
+    if text in ("null", "Null", "~"):
+        return None
+    return text
+
+
+def _read_block_scalar(lines: List[str], start: int, parent_indent: int, style: str, chomp: str) -> Tuple[str, int]:
+    """Collect an indented `|` or `>` block and return (value, next_index)."""
+    collected: List[str] = []
+    index = start
+    block_indent: int | None = None
+    while index < len(lines):
+        line = lines[index]
+        if not line.strip():
+            collected.append("")
+            index += 1
+            continue
+        indent = _indent_of(line)
+        if indent <= parent_indent:
+            break
+        if block_indent is None:
+            block_indent = indent
+        collected.append(line[block_indent:] if len(line) > block_indent else "")
+        index += 1
+
+    while collected and collected[-1] == "":
+        collected.pop()
+
+    if style == "|":
+        value = "\n".join(collected)
+    else:
+        # Folded: consecutive text lines join with a space, a blank line folds to a newline.
+        value = ""
+        buffer: List[str] = []
+        for line in collected:
+            if line.strip():
+                buffer.append(line.strip())
+                continue
+            if buffer:
+                value += (" " if value and not value.endswith("\n") else "") + " ".join(buffer)
+                buffer = []
+            value += "\n"
+        if buffer:
+            value += (" " if value and not value.endswith("\n") else "") + " ".join(buffer)
+
+    if chomp != "-" and collected:
+        value += "\n"
+    return value, index
+
+
+def _parse_block(lines: List[str], start: int, min_indent: int) -> Tuple[Any, int]:
+    """Parse the nested mapping or sequence that begins at or after `start`.
+
+    Sequence items are read as scalars; Pi's frontmatter fields never nest a
+    mapping inside a sequence.
+    """
+    index = start
+    while index < len(lines) and _is_blank(lines[index]):
+        index += 1
+    if index >= len(lines):
+        return None, index
+    actual = _indent_of(lines[index])
+    if actual < min_indent:
+        return None, index
+    if lines[index].strip().startswith("-"):
+        return _parse_sequence(lines, index, actual)
+    return _parse_mapping(lines, index, actual)
+
+
+def _parse_sequence(lines: List[str], start: int, indent: int) -> Tuple[List[Any], int]:
+    items: List[Any] = []
+    index = start
+    while index < len(lines):
+        line = lines[index]
+        if _is_blank(line):
+            index += 1
+            continue
+        if _indent_of(line) < indent:
+            break
+        stripped = line.strip()
+        if not stripped.startswith("-"):
+            break
+        items.append(_scalar(stripped[1:]))
+        index += 1
+    return items, index
+
+
+def _parse_mapping(lines: List[str], start: int, indent: int) -> Tuple[Dict[str, Any], int]:
+    data: Dict[str, Any] = {}
+    index = start
+    while index < len(lines):
+        line = lines[index]
+        if _is_blank(line):
+            index += 1
+            continue
+        current = _indent_of(line)
+        if current < indent:
+            break
+        if current > indent:
+            raise FrontmatterError(f"unexpected indentation in frontmatter: {line.strip()!r}")
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            break
+        if ":" not in stripped:
+            raise FrontmatterError(f"expected 'key: value' in frontmatter, found: {stripped!r}")
+        key, _, rest = stripped.partition(":")
+        key = key.strip().strip("\"'")
+        rest = rest.strip()
+        index += 1
+
+        block = BLOCK_SCALAR_RE.match(rest)
+        if block:
+            value, index = _read_block_scalar(lines, index, current, block.group(1), block.group(2))
+            data[key] = value
+            continue
+        if rest:
+            data[key] = _scalar(rest)
             continue
 
-        # Continuation line (leading whitespace) — flag as unsupported scalar.
-        if raw.startswith((" ", "\t")) and current_key is not None:
-            warnings.append(
-                f"frontmatter '{current_key}' uses multi-line/nested YAML; "
-                "Pi's parser may collapse this. Keep values on a single line."
-            )
-            continue
+        nested, next_index = _parse_block(lines, index, current + 1)
+        data[key] = nested
+        index = next_index
+    return data, index
 
-        if ":" not in raw:
-            errors.append(f"Unsupported frontmatter line (expected key: value): {raw}")
-            current_key = None
-            continue
 
-        key, value = raw.split(":", 1)
-        key = key.strip()
-        value = value.strip()
+def _extract_frontmatter(text: str) -> str:
+    """Return the raw YAML block, mirroring Pi's `--- ... ---` extraction."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    if not normalized.startswith("---"):
+        raise FrontmatterError("SKILL.md must start with YAML frontmatter delimiter '---'")
+    end = normalized.find("\n---", 3)
+    if end == -1:
+        raise FrontmatterError("SKILL.md frontmatter is missing closing '---'")
+    return normalized[4:end]
 
-        # Detect block scalars / sequences before stripping quotes.
-        if value in ("|", ">", ""):
-            warnings.append(
-                f"frontmatter '{key}' uses block scalar or empty value; "
-                "use a single-line string instead."
-            )
-        if value.startswith("["):
-            # Inline sequence — leave as-is, callers that need it (allowed-tools)
-            # will validate further.
-            pass
-        if value.startswith(("\"", "'")) and value[-1:] == value[:1] and len(value) >= 2:
-            value = value[1:-1]
 
-        data[key] = value
-        current_key = key
-    return data, errors, warnings
+def parse_frontmatter(text: str) -> Tuple[Dict[str, Any], List[str]]:
+    """Parse SKILL.md frontmatter the way Pi's YAML parser would.
+
+    Returns (frontmatter, errors). Pi refuses to load a SKILL.md whose
+    frontmatter does not parse, so failures are errors rather than warnings.
+    """
+    try:
+        yaml_text = _extract_frontmatter(text)
+    except FrontmatterError as error:
+        return {}, [str(error)]
+
+    if _yaml is not None:
+        try:
+            parsed = _yaml.safe_load(yaml_text)
+        except Exception as error:  # yaml.YAMLError and friends
+            return {}, [f"frontmatter is not valid YAML: {error}"]
+    else:
+        try:
+            parsed, _ = _parse_mapping(yaml_text.split("\n"), 0, 0)
+        except FrontmatterError as error:
+            return {}, [f"frontmatter is not valid YAML: {error}"]
+
+    if parsed is None:
+        return {}, []
+    if not isinstance(parsed, dict):
+        return {}, ["frontmatter must be a YAML mapping of key: value pairs"]
+    return {str(key): value for key, value in parsed.items()}, []
+
+
+def _as_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 def _check_name(name: str, skill_dir: Path, errors: List[str], warnings: List[str]) -> None:
     if not name:
-        errors.append("Missing required frontmatter field: name")
+        errors.append(
+            "Missing required frontmatter field: name "
+            "(Pi falls back to the directory name, but the Agent Skills standard requires it)"
+        )
         return
     if len(name) > MAX_NAME:
         errors.append(f"name exceeds {MAX_NAME} characters: {len(name)}")
@@ -132,7 +305,7 @@ def _check_name(name: str, skill_dir: Path, errors: List[str], warnings: List[st
             "(no leading/trailing or consecutive hyphens)"
         )
     if name != skill_dir.name:
-        # Pi accepts mismatched names (warning only); Agent Skills standard requires match.
+        # Pi neither requires nor warns about this; the Agent Skills standard does.
         warnings.append(
             f"name does not match parent directory (name={name!r}, dir={skill_dir.name!r}); "
             "Pi will still load, but other Agent Skills harnesses may reject this."
@@ -140,7 +313,7 @@ def _check_name(name: str, skill_dir: Path, errors: List[str], warnings: List[st
 
 
 def _check_description(desc: str, errors: List[str], warnings: List[str]) -> None:
-    if not desc:
+    if not desc.strip():
         errors.append(
             "Missing required frontmatter field: description "
             "(Pi will not load the skill at all without this)"
@@ -168,28 +341,26 @@ def _check_description(desc: str, errors: List[str], warnings: List[str]) -> Non
         )
 
 
-def _check_allowed_tools(value: object, warnings: List[str]) -> None:
+def _check_allowed_tools(value: Any, warnings: List[str]) -> None:
+    # Pi never reads allowed-tools; these checks are against the Agent Skills
+    # spec, which defines the field as a space-separated string.
+    if isinstance(value, list):
+        warnings.append("allowed-tools should be a plain space-delimited string, not a YAML list.")
+        return
     if not isinstance(value, str) or not value:
         return
     if "," in value:
-        warnings.append(
-            "allowed-tools should be space-delimited, not comma-delimited."
-        )
+        warnings.append("allowed-tools should be space-delimited, not comma-delimited.")
     if value.startswith("[") and value.endswith("]"):
-        warnings.append(
-            "allowed-tools should be a plain space-delimited string, not a YAML list."
-        )
+        warnings.append("allowed-tools should be a plain space-delimited string, not a YAML list.")
 
 
-def _check_body_references(
-    body: str, skill_dir: Path, warnings: List[str]
-) -> None:
+def _check_body_references(body: str, body_without_code: str, skill_dir: Path, warnings: List[str]) -> None:
     seen: set[str] = set()
     for match in RELPATH_RE.finditer(body):
         rel = match.group(1).rstrip(").,:;\"'")
-        # Strip markdown fragment/query if any.
         rel_clean = rel.split("#", 1)[0].split("?", 1)[0]
-        if rel_clean in seen:
+        if not rel_clean or rel_clean in seen:
             continue
         seen.add(rel_clean)
         target = (skill_dir / rel_clean).resolve()
@@ -202,7 +373,7 @@ def _check_body_references(
             warnings.append(f"referenced path does not exist: {rel_clean}")
 
     abs_hits: set[str] = set()
-    for match in ABS_PATH_RE.finditer(body):
+    for match in ABS_PATH_RE.finditer(body_without_code):
         hit = match.group(1)
         if hit in abs_hits:
             continue
@@ -230,28 +401,28 @@ def validate(path: Path) -> int:
         return report(skill_dir, errors, warnings, infos)
 
     text = skill_file.read_text(encoding="utf-8")
-    frontmatter, fm_errors, fm_warnings = parse_frontmatter(text)
+    frontmatter, fm_errors = parse_frontmatter(text)
     errors.extend(fm_errors)
-    warnings.extend(fm_warnings)
 
-    name = str(frontmatter.get("name", "") or "")
-    description = str(frontmatter.get("description", "") or "")
+    name = _as_text(frontmatter.get("name"))
+    description = _as_text(frontmatter.get("description"))
     compatibility = frontmatter.get("compatibility")
-    allowed_tools = frontmatter.get("allowed-tools")
 
     _check_name(name, skill_dir, errors, warnings)
     _check_description(description, errors, warnings)
-    _check_allowed_tools(allowed_tools, warnings)
+    if "allowed-tools" in frontmatter:
+        _check_allowed_tools(frontmatter["allowed-tools"], warnings)
 
-    if isinstance(compatibility, str) and len(compatibility) > MAX_COMPATIBILITY:
+    if compatibility is not None and len(_as_text(compatibility)) > MAX_COMPATIBILITY:
         errors.append(
-            f"compatibility exceeds {MAX_COMPATIBILITY} characters: {len(compatibility)}"
+            f"compatibility exceeds {MAX_COMPATIBILITY} characters: {len(_as_text(compatibility))}"
         )
 
-    missing = REQUIRED_FIELDS - frontmatter.keys()
-    for field in sorted(missing):
-        if not any(field in e for e in errors):
-            errors.append(f"Missing required frontmatter field: {field}")
+    if frontmatter:
+        missing = REQUIRED_FIELDS - frontmatter.keys()
+        for field in sorted(missing):
+            if not any(field in e for e in errors):
+                errors.append(f"Missing required frontmatter field: {field}")
 
     unknown = sorted(set(frontmatter.keys()) - KNOWN_FIELDS)
     for field in unknown:
@@ -266,15 +437,14 @@ def validate(path: Path) -> int:
             f"SKILL.md is {line_count} lines; consider moving detail to references/"
         )
 
-    # Body-only checks (skip frontmatter region and code blocks).
+    # Body-only checks: skip the frontmatter region.
     body_start = 0
     parts = text.split("---", 2)
     if len(parts) >= 3:
         body_start = len(parts[0]) + len("---") + len(parts[1]) + len("---")
     body = text[body_start:]
-    body_no_code = FENCED_CODE_RE.sub("", body)
-    body_no_code = INLINE_CODE_RE.sub("", body_no_code)
-    _check_body_references(body_no_code, skill_dir, warnings)
+    body_without_code = INLINE_CODE_RE.sub("", FENCED_CODE_RE.sub("", body))
+    _check_body_references(body, body_without_code, skill_dir, warnings)
 
     for directory in ("scripts", "references", "assets"):
         candidate = skill_dir / directory
@@ -304,6 +474,9 @@ def report(
         for error in errors:
             print(f"  - {error}")
         return 1
+    if warnings:
+        print(f"\nOK with warnings ({len(warnings)}): no blocking errors, review the warnings above")
+        return 0
     print("\nOK: skill passed validation checks")
     return 0
 

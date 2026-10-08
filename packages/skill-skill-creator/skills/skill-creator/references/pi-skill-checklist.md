@@ -13,11 +13,16 @@ standard.
       no leading/trailing or consecutive hyphens.
 - [ ] `description` exists and is **non-empty** — without it Pi refuses to load
       the skill at all.
-- [ ] `description` ≤ 1024 characters.
-- [ ] Optional `compatibility` ≤ 500 characters if present.
-- [ ] [Pi] Name and parent directory match. Pi does not enforce this, but the
-      Agent Skills standard does — keep them aligned unless you have a deliberate
-      reason (e.g. a shared directory consumed by multiple harnesses).
+- [ ] `description` ≤ 1024 characters. [Pi] Over the limit Pi logs a startup
+      warning and still loads the skill; other harnesses may reject it.
+- [ ] Optional `compatibility` ≤ 500 characters if present. [Pi] Pi does not
+      check the length at all, so this is a spec-only limit.
+- [ ] [Pi] Name and parent directory match. Pi neither requires this nor warns
+      about a mismatch, but the Agent Skills standard does. Keep them aligned
+      unless you have a deliberate reason (e.g. a shared directory consumed by
+      multiple harnesses).
+- [ ] [Pi] `name` is present. Pi falls back to the parent directory name when it
+      is missing, so a skill without `name` still loads but is not portable.
 
 ## Frontmatter fields Pi recognises
 
@@ -28,7 +33,7 @@ standard.
 | `license` | no | name or bundled-file reference |
 | `compatibility` | no | env requirements, ≤500 chars |
 | `metadata` | no | arbitrary key/value (ignored by Pi but kept) |
-| `allowed-tools` | no | space-delimited pre-approved tools (experimental) |
+| `allowed-tools` | no | space-delimited pre-approved tools (experimental). [Pi] Pi never reads this field. |
 | `disable-model-invocation` | no | `true` → only `/skill:<name>` can invoke |
 
 Anything else (e.g. Claude Code's `argument-hint`) is silently dropped by Pi.
@@ -43,8 +48,10 @@ Anything else (e.g. Claude Code's `argument-hint`) is silently dropped by Pi.
   - CLI: `pi --skill <path>` (repeatable, additive with `--no-skills`)
 - [ ] User knows to run `/reload` or start a new Pi session after adding a
       global skill.
-- [ ] In `.agents/` locations, the skill is a directory with `SKILL.md`
-      (root `.md` files are ignored there).
+- [ ] In `.agents/` locations, the skill is a directory with `SKILL.md`. Root
+      `.md` files are ignored there, but [Pi] every other `.md` in a
+      subdirectory is loaded as a skill, so stray notes under `.agents/skills/`
+      become skills. Exclude them via `.ignore` or move them out.
 - [ ] If multiple skills share the same `name`, the first one discovered wins —
       check for collisions via `rg --files -g SKILL.md` across all scan roots.
 - [ ] For isolated tests, use `pi --no-skills --skill /path/to/skill -p "..."`.

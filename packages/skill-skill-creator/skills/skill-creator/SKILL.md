@@ -1,6 +1,8 @@
 ---
 name: skill-creator
 description: "Pi 스킬을 새로 만들거나 수정·검증할 때 사용한다."
+license: MIT
+compatibility: 검증 스크립트 `scripts/validate_skill.py`는 python3가 필요하다(표준 라이브러리만 사용, PyYAML이 있으면 함께 쓴다). python3가 없으면 검증은 건너뛰고 `references/pi-skill-checklist.md`로 수동 점검한다. Pi 공식 문서를 읽는 단계는 pi CLI가 설치돼 있어야 한다.
 ---
 
 # skill-creator
@@ -20,9 +22,11 @@ Pi 환경에서 Agent Skills 표준을 따르는 스킬을 만들고, 작게 검
 
 ### Pi vs 표준 (자주 헷갈리는 지점)
 
-- 이름과 디렉터리명이 달라도 Pi는 경고만 한다(표준은 일치 요구). 여러 하네스가 공유하는 스킬 디렉터리에서는 일부러 다르게 두는 것이 합리적일 수 있다.
-- `description`이 없으면 Pi는 스킬을 **아예 로딩하지 않는다**. 다른 위반은 대부분 warning만 내고 로딩은 된다.
+- 이름과 디렉터리명이 달라도 Pi는 **경고조차 내지 않는다**(표준은 일치 요구). 여러 하네스가 공유하는 스킬 디렉터리에서는 일부러 다르게 두는 것이 합리적일 수 있다.
+- `name`을 아예 빼면 Pi는 부모 디렉터리명으로 대체한다. 그래도 표준은 필수 필드이므로 적는다.
+- `description`이 없거나 비어 있으면 Pi는 스킬을 **아예 로딩하지 않는다**. 다른 위반(이름 글자 규칙, description 1024자 초과)은 warning만 내고 로딩은 된다.
 - 같은 이름 스킬이 여러 위치에 있으면 **먼저 발견된 것만** 사용되고 나머지는 warning이 뜬다.
+- `allowed-tools`는 표준에만 있는 필드다. Pi는 읽지 않는다.
 
 ## 언제 어떤 작업을 하나
 
@@ -46,11 +50,15 @@ Pi 환경에서 Agent Skills 표준을 따르는 스킬을 만들고, 작게 검
 
 ### 1. 컨텍스트 수집
 
-1. 관련 공식 문서를 확인한다.
-   - Pi 스킬 문서: `/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/docs/skills.md`
-   - 필요 시 Pi 사용법: `/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/docs/usage.md`, `README.md`
+1. 관련 공식 문서를 확인한다. 설치된 pi 실행 파일에서 패키지 루트를 구한다. `npm root -g`는 다른 런타임의 경로를 뱉을 수 있으므로 쓰지 않는다.
+
+   ```bash
+   PI_ROOT="$(cd "$(dirname "$(realpath "$(which pi)")")/../.." && pwd)"
+   cat "$PI_ROOT/docs/skills.md"          # Pi 스킬 문서
+   cat "$PI_ROOT/docs/usage.md"           # 필요 시 Pi 사용법
+   ```
+
    - Agent Skills 표준: <https://agentskills.io/specification>
-   - 패키지 경로가 바뀌었을 수 있다면 `npm root -g`로 확인한다.
 2. 기존 스킬 패턴이 필요하면 `~/.pi/agent/skills/`, `~/.agents/skills/`, 프로젝트의 `.pi/skills/`, `.agents/skills/`를 살펴본다.
 3. 사용자의 현재 대화에서 다음을 먼저 추출한다.
    - 스킬이 가능하게 해야 하는 일
@@ -74,7 +82,7 @@ Pi 환경에서 Agent Skills 표준을 따르는 스킬을 만들고, 작게 검
 탐색 디테일:
 
 - `~/.pi/agent/skills/`, `.pi/skills/`에서는 루트의 단일 `.md` 파일도 스킬로 인식된다(디렉터리 없이 한 파일짜리 스킬 가능).
-- `~/.agents/skills/`, `.agents/skills/`에서는 루트의 `.md`는 무시되고 **`SKILL.md`가 있는 디렉터리만** 인식된다.
+- `~/.agents/skills/`, `.agents/skills/`에서는 루트의 `.md`는 무시되지만, **하위 디렉터리의 모든 `.md`** 가 스킬로 로딩된다(`SKILL.md`가 아니어도 된다). 메모 파일을 이 아래에 두면 의도치 않게 스킬이 되므로 `.ignore`로 제외하거나 다른 곳에 둔다.
 - 동일 이름이 여러 위치에 있으면 first-found wins. 충돌 시 워닝이 뜨므로 신규 스킬 이름은 미리 `rg --files -g 'SKILL.md' ~/.pi/agent/skills ~/.agents/skills .pi/skills .agents/skills 2>/dev/null` 정도로 확인.
 
 다른 하네스(Claude Code, Codex)의 스킬을 가져와 쓰려면 `.pi/settings.json`(또는 `~/.pi/settings.json`)에 추가:
@@ -116,15 +124,17 @@ description: 어떤 목적으로 어떤 상황에서 호출되는지 1~2문장�
 ---
 ```
 
-Pi가 인식하는 선택 필드:
+표준이 정의하는 선택 필드:
 
-| 필드 | 용도 |
-|---|---|
-| `license` | 라이선스 이름 또는 번들된 파일 참조 |
-| `compatibility` | 환경 요구사항(최대 500자) |
-| `metadata` | 자유 key-value(에이전트가 무시해도 됨) |
-| `allowed-tools` | 공백 구분 사전 승인 툴 목록(experimental) |
-| `disable-model-invocation` | `true`면 시스템 프롬프트에서 숨김. **자동 트리거 금지, `/skill:name`으로만 호출 가능** |
+| 필드 | 용도 | Pi 동작 |
+|---|---|---|
+| `license` | 라이선스 이름 또는 번들된 파일 참조 | 보존만 함 |
+| `compatibility` | 환경 요구사항(표준 상한 500자) | 보존만 함, 길이 검사 없음 |
+| `metadata` | 자유 key-value | 보존만 함 |
+| `allowed-tools` | 공백 구분 사전 승인 툴 목록(experimental) | **읽지 않음** |
+| `disable-model-invocation` | `true`면 시스템 프롬프트에서 숨김 | 적용됨. **자동 트리거 금지, `/skill:name`으로만 호출 가능** |
+
+프론트매터는 전체 YAML로 파싱된다. 블록 스칼라(`description: >`)와 중첩 매핑(`metadata:`)도 의도대로 읽히지만, `description`은 한 줄로 두는 쪽이 읽기 쉽다.
 
 자동 트리거가 위험하거나 사용자 명시 호출만 허용해야 하는 스킬(파괴적 동작, 외부 전송, 비용 큰 작업)은 `disable-model-invocation: true`로 두는 것을 검토한다.
 
@@ -166,11 +176,11 @@ Pi가 인식하는 선택 필드:
 - 모델이 따라야 하는 행동은 명령형으로 쓰되, 무조건적인 MUST 남발보다 이유를 설명한다.
 - 대형 레퍼런스는 본문에 붙이지 말고 `references/`로 분리한 뒤 언제 읽어야 하는지 명시한다.
 - 반복적·결정적 검증은 `scripts/`로 옮겨 매번 재발명하지 않게 한다.
-- 상대 경로는 스킬 루트 기준으로 쓴다. 예: `references/checklist.md`, `scripts/validate_skill.py`. 절대경로(`/Users/...`)는 다른 사용자/머신에서 깨지므로 피한다.
+- 상대 경로는 스킬 루트 기준으로 쓴다. 예: `references/pi-skill-checklist.md`, `scripts/validate_skill.py`. 절대경로(`/Users/...`)는 다른 사용자/머신에서 깨지므로 피한다.
 
 ### `/skill:name` 강제 호출
 
-Pi에서 사용자는 `/skill:<name>` 슬래시 명령으로 스킬을 명시 호출할 수 있다. 명령 뒤 인자는 `User: <args>` 형태로 스킬 본문 끝에 append된다.
+Pi에서 사용자는 `/skill:<name>` 슬래시 명령으로 스킬을 명시 호출할 수 있다. 명령 뒤 인자는 접두사 없이 스킬 본문 블록 뒤에 평문 그대로 append된다.
 
 ```text
 /skill:my-skill input.pdf --pages 1-3
@@ -178,15 +188,16 @@ Pi에서 사용자는 `/skill:<name>` 슬래시 명령으로 스킬을 명시 �
 
 - 트리거 description이 약하거나 모호한 도메인이면 본문에 "확실하지 않으면 `/skill:<name>`으로 호출하세요" 같은 안내를 둔다.
 - `disable-model-invocation: true`인 스킬은 이 경로로만 호출된다.
-- 사용자가 끄고 싶다면 설정의 `enableSkillCommands: false`로 비활성화 가능.
+- 설정의 `enableSkillCommands: false`는 명령 자동완성 목록에서만 스킬을 숨긴다. 직접 입력한 `/skill:name`은 그대로 동작하므로 자동 호출을 막는 수단이 아니다. 그 용도에는 `disable-model-invocation: true`를 쓴다.
 
 ### 5. Pi 친화적 평가 루프
 
 사용자가 평가를 원하거나 객관 결과가 중요한 스킬이면 아래를 적용한다.
 
 1. 현실적인 eval 프롬프트 2~3개를 정한다. 파일로 남기지 말고 대화 맥락에서 바로 사용한다.
-2. 작업 공간을 스킬 디렉터리의 sibling으로 둔다.
-   - 예: `~/.pi/agent/skills/<skill-name>-workspace/iteration-1/...`
+2. 작업 공간은 Pi가 스캔하는 스킬 경로 **밖**에 둔다. `~/.pi/agent/skills/` 하위는 재귀 스캔되므로 iteration 폴더의 `SKILL.md`까지 로딩돼 원본과 이름이 충돌한다.
+   - 예: `/tmp/skill-eval/<skill-name>/iteration-1/...`
+   - 꼭 스킬 경로 안에 둬야 한다면 해당 디렉터리를 `.ignore`에 넣어 스캔에서 제외한다.
 3. 가능한 경우 Pi CLI로 with-skill / baseline을 비교한다.
 
 ```bash
@@ -217,19 +228,22 @@ pi --no-skills -p "<same eval prompt>"
 
 ### 7. 검증
 
-스킬 작성/수정 후 반드시 아래를 확인한다.
+스킬 작성/수정 후 반드시 아래를 확인한다. 스크립트는 이 스킬이 로드된 디렉터리 기준 절대 경로로 실행한다.
 
 ```bash
-python3 <이 스킬 디렉터리>/scripts/validate_skill.py /path/to/skill
+python3 "<loaded-skill-dir>/scripts/validate_skill.py" /path/to/skill
 ```
 
-검증 스크립트는 다음을 본다(요약):
+검증 스크립트는 다음을 본다(요약).
 
-- 필수: `SKILL.md` 존재, frontmatter 형식, `name`/`description` 유무, `name` 글자 규칙, 길이 제한
-- 경고: `name`과 디렉터리명 불일치(Pi 허용, 표준 위반), `description`이 너무 짧음, 500줄 초과, 본문 내 깨진 상대 경로 참조, 절대 경로 사용, `allowed-tools` 형식, 알려지지 않은 frontmatter 필드
+- 에러(exit 1): `SKILL.md` 존재, frontmatter가 유효한 YAML 매핑인지, `name`/`description` 유무, `name` 글자 규칙, `name` 64자·`description` 1024자·`compatibility` 500자 초과
+- 경고(exit 0): `name`과 디렉터리명 불일치, `description`이 너무 짧거나 김, 500줄 초과, 본문에서 가리키는 `references/`·`scripts/`·`assets/` 파일이 없음(백틱 안도 검사), 사용자별 절대 경로, `allowed-tools` 형식, 알려지지 않은 frontmatter 필드
+
+경고가 있으면 `OK with warnings (N)`으로 끝나고 exit 0이다. "통과"라고만 보고하지 말고 경고를 읽고 처리하거나 왜 무시해도 되는지 적는다. `python3`가 없으면 검증을 건너뛰고 `references/pi-skill-checklist.md`로 수동 점검한 뒤 그 사실을 보고한다.
 
 추가 사람 검토:
 
+- `references/pi-skill-checklist.md`를 열어 구조·트리거·안전 항목을 훑는다
 - 본문이 너무 길면 `references/`로 분리했는가
 - 스킬이 위험한 행동을 암묵적으로 지시하지 않는가
 - 새 스킬을 글로벌에 추가했다면 사용자가 `/reload` 또는 새 세션을 시작해야 한다는 점을 안내했는가
@@ -243,7 +257,7 @@ python3 <이 스킬 디렉터리>/scripts/validate_skill.py /path/to/skill
 ```markdown
 완료했습니다.
 - 생성/수정: `path/to/SKILL.md`, ...
-- 검증: `python3 .../validate_skill.py ...` 통과
+- 검증: validate_skill.py 통과(경고 0건)
 ```
 
 사용자에게 다음 행동이 필요하면 한 줄로만 묻는다. 예: "트리거 eval까지 돌려볼까요?"
