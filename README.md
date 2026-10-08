@@ -27,6 +27,7 @@ packages/
   open-pr/
   setup-sh/
   subagent/
+  task/                  (persistent RPC delegation, PoC)
   todo-write/            (deprecated, use todo-write-overlay)
   todo-write-overlay/
   until/

@@ -1,0 +1,59 @@
+{
+	"name": "@ryan_nookpi/pi-extension-task",
+	"version": "0.0.1",
+	"description": "Persistent RPC task delegation with automatic model routing, steering, and explicit child reports for pi.",
+	"license": "MIT",
+	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/task"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/task#readme",
+	"keywords": [
+		"pi-package",
+		"task",
+		"delegation",
+		"rpc"
+	],
+	"files": [
+		"index.ts",
+		"types.ts",
+		"manager.ts",
+		"store.ts",
+		"routing",
+		"context",
+		"runtime",
+		"README.md",
+		"LICENSE",
+		"!**/*.test.ts",
+		"!runtime/fixtures"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": ">=1.1.0",
+		"@earendil-works/pi-coding-agent": ">=1.1.0",
+		"typebox": "^1.3.7"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-ai": {
+			"optional": true
+		},
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		},
+		"typebox": {
+			"optional": true
+		}
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
