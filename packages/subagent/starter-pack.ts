@@ -41,12 +41,21 @@ export interface StarterPackInstallResult {
 	settingsUpdated: boolean;
 }
 
-export type StarterPackOfferStatus = "not-needed" | "headless" | "declined" | "installed" | "failed";
+export type StarterPackOfferStatus =
+	| "not-needed"
+	| "headless"
+	| "declined"
+	| "installed"
+	| "failed"
+	| "skills-headless"
+	| "skills-declined"
+	| "skills-installed";
 
 export interface StarterPackOfferResult {
 	status: StarterPackOfferStatus;
 	discovery: AgentDiscoveryResult;
 	installResult?: StarterPackInstallResult;
+	missingSkills?: string[];
 	error?: string;
 }
 
@@ -67,6 +76,13 @@ interface StarterPackOptions {
 interface SettingsPlan {
 	settings: Record<string, unknown>;
 	updated: boolean;
+}
+
+type InstallScope = "all" | "skills";
+
+interface CreatedPaths {
+	files: string[];
+	dirs: string[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -111,27 +127,60 @@ function readSettingsPlan(settingsPath: string): SettingsPlan {
 	return { settings, updated };
 }
 
-function validateSeedFiles(seedRoot: string): void {
-	const expected = [
-		...STARTER_AGENT_NAMES.map((name) => path.join(seedRoot, "agents", `${name}.md`)),
-		...STARTER_SKILL_NAMES.map((name) => path.join(seedRoot, "skills", name, "SKILL.md")),
-	];
+function validateSeedFiles(seedRoot: string, scope: InstallScope): void {
+	const expected =
+		scope === "skills"
+			? STARTER_SKILL_NAMES.map((name) => path.join(seedRoot, "skills", name, "SKILL.md"))
+			: [
+					...STARTER_AGENT_NAMES.map((name) => path.join(seedRoot, "agents", `${name}.md`)),
+					...STARTER_SKILL_NAMES.map((name) => path.join(seedRoot, "skills", name, "SKILL.md")),
+				];
 	for (const filePath of expected) {
-		if (!fs.statSync(filePath).isFile()) {
+		if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
 			throw new Error(`Starter pack seed file is missing: ${filePath}`);
 		}
 	}
 }
 
-function copyWithoutOverwrite(source: string, destination: string): "created" | "skipped" {
-	fs.mkdirSync(path.dirname(destination), { recursive: true });
+function ensureDir(dir: string, created: CreatedPaths): void {
+	if (fs.existsSync(dir)) return;
+	const parent = path.dirname(dir);
+	if (parent !== dir) ensureDir(parent, created);
+	fs.mkdirSync(dir);
+	created.dirs.push(dir);
+}
+
+function copyWithoutOverwrite(source: string, destination: string, created: CreatedPaths): "created" | "skipped" {
+	ensureDir(path.dirname(destination), created);
 	try {
 		fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+		created.files.push(destination);
 		return "created";
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "EEXIST") return "skipped";
 		throw error;
 	}
+}
+
+/** Copies every seed file of one skill, so references and scripts added later are not silently dropped. */
+function copySkillWithoutOverwrite(sourceDir: string, destinationDir: string, created: CreatedPaths): void {
+	ensureDir(destinationDir, created);
+	for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+		const source = path.join(sourceDir, entry.name);
+		const destination = path.join(destinationDir, entry.name);
+		if (entry.isDirectory()) copySkillWithoutOverwrite(source, destination, created);
+		else if (entry.isFile()) copyWithoutOverwrite(source, destination, created);
+	}
+}
+
+function skillInstallPath(agentDir: string, name: string): string {
+	return path.join(agentDir, "skills", name, "SKILL.md");
+}
+
+/** Starter skills whose `SKILL.md` is absent, so an existing user skill of the same name is never touched. */
+export function findMissingStarterSkills(options: StarterPackOptions = {}): string[] {
+	const { agentDir } = resolvePaths(options);
+	return STARTER_SKILL_NAMES.filter((name) => !fs.existsSync(skillInstallPath(agentDir, name)));
 }
 
 function writeSettingsAtomically(settingsPath: string, settings: Record<string, unknown>): void {
@@ -159,50 +208,77 @@ function writeSettingsAtomically(settingsPath: string, settings: Record<string, 
 	}
 }
 
-export function installStarterPack(options: StarterPackOptions = {}): StarterPackInstallResult {
+function rollback(created: CreatedPaths): void {
+	for (const filePath of [...created.files].reverse()) {
+		try {
+			fs.unlinkSync(filePath);
+		} catch {
+			// Preserve the original error; only paths created by this attempt are rollback candidates.
+		}
+	}
+	for (const dirPath of [...created.dirs].reverse()) {
+		try {
+			fs.rmdirSync(dirPath);
+		} catch {
+			// A non-empty directory holds files this attempt did not create, so it stays.
+		}
+	}
+}
+
+function install(scope: InstallScope, options: StarterPackOptions): StarterPackInstallResult {
 	const paths = resolvePaths(options);
-	const settingsPlan = readSettingsPlan(paths.settingsPath);
-	validateSeedFiles(paths.seedRoot);
+	const settingsPlan = scope === "all" ? readSettingsPlan(paths.settingsPath) : undefined;
+	validateSeedFiles(paths.seedRoot, scope);
 
 	const result: StarterPackInstallResult = {
 		createdAgents: [],
 		skippedAgents: [],
 		createdSkills: [],
 		skippedSkills: [],
-		settingsUpdated: settingsPlan.updated,
+		settingsUpdated: settingsPlan?.updated ?? false,
 	};
-	const createdPaths: string[] = [];
+	const created: CreatedPaths = { files: [], dirs: [] };
 
 	try {
-		for (const name of STARTER_AGENT_NAMES) {
-			const destination = path.join(paths.agentDir, "agents", `${name}.md`);
-			const outcome = copyWithoutOverwrite(path.join(paths.seedRoot, "agents", `${name}.md`), destination);
-			result[outcome === "created" ? "createdAgents" : "skippedAgents"].push(name);
-			if (outcome === "created") createdPaths.push(destination);
+		if (scope === "all") {
+			for (const name of STARTER_AGENT_NAMES) {
+				const destination = path.join(paths.agentDir, "agents", `${name}.md`);
+				const outcome = copyWithoutOverwrite(path.join(paths.seedRoot, "agents", `${name}.md`), destination, created);
+				result[outcome === "created" ? "createdAgents" : "skippedAgents"].push(name);
+			}
 		}
 
 		for (const name of STARTER_SKILL_NAMES) {
-			const destination = path.join(paths.agentDir, "skills", name, "SKILL.md");
-			const outcome = copyWithoutOverwrite(path.join(paths.seedRoot, "skills", name, "SKILL.md"), destination);
-			result[outcome === "created" ? "createdSkills" : "skippedSkills"].push(name);
-			if (outcome === "created") createdPaths.push(destination);
+			if (fs.existsSync(skillInstallPath(paths.agentDir, name))) {
+				result.skippedSkills.push(name);
+				continue;
+			}
+			copySkillWithoutOverwrite(
+				path.join(paths.seedRoot, "skills", name),
+				path.join(paths.agentDir, "skills", name),
+				created,
+			);
+			result.createdSkills.push(name);
 		}
 
-		if (settingsPlan.updated) {
+		if (settingsPlan?.updated) {
 			writeSettingsAtomically(paths.settingsPath, settingsPlan.settings);
 		}
 	} catch (error) {
-		for (const filePath of createdPaths.reverse()) {
-			try {
-				fs.unlinkSync(filePath);
-			} catch {
-				// Preserve the original error; only files created by this attempt are rollback candidates.
-			}
-		}
+		rollback(created);
 		throw error;
 	}
 
 	return result;
+}
+
+export function installStarterPack(options: StarterPackOptions = {}): StarterPackInstallResult {
+	return install("all", options);
+}
+
+/** Installs only the starter skills, for users who already have their own agents. */
+export function installStarterSkills(options: StarterPackOptions = {}): StarterPackInstallResult {
+	return install("skills", options);
 }
 
 export async function offerStarterPackIfEmpty(
@@ -211,7 +287,7 @@ export async function offerStarterPackIfEmpty(
 ): Promise<StarterPackOfferResult> {
 	const discover = options.discover ?? discoverAgents;
 	let discovery = discover(ctx.cwd);
-	if (discovery.agents.length > 0) return { status: "not-needed", discovery };
+	if (discovery.agents.length > 0) return await offerMissingSkills(ctx, options, discovery);
 
 	if (!ctx.hasUI || !ctx.ui?.confirm) {
 		return { status: "headless", discovery };
@@ -244,8 +320,50 @@ export async function offerStarterPackIfEmpty(
 	}
 }
 
+/**
+ * Users who already defined agents never see the pack offer, so the starter skills alone stay unreachable.
+ * This offers just the missing ones and leaves existing agents and settings untouched.
+ */
+async function offerMissingSkills(
+	ctx: StarterPackPromptContext,
+	options: StarterPackOptions,
+	discovery: AgentDiscoveryResult,
+): Promise<StarterPackOfferResult> {
+	const missingSkills = findMissingStarterSkills(options);
+	if (missingSkills.length === 0) return { status: "not-needed", discovery };
+
+	if (!ctx.hasUI || !ctx.ui?.confirm) {
+		return { status: "skills-headless", discovery, missingSkills };
+	}
+
+	const accepted = await ctx.ui.confirm(
+		"Install missing subagent workflow skills?",
+		`Your agents are already set up, but these optional workflow skills are missing: ${missingSkills.join(", ")}. Install them? Existing files and settings will not be overwritten.`,
+	);
+	if (!accepted) return { status: "skills-declined", discovery, missingSkills };
+
+	try {
+		const installResult = installStarterSkills(options);
+		return { status: "skills-installed", discovery, installResult, missingSkills };
+	} catch (error) {
+		return {
+			status: "failed",
+			discovery,
+			missingSkills,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
 export function formatStarterPackNotice(result: StarterPackOfferResult): string | undefined {
+	const missing = result.missingSkills?.join(", ") ?? "";
 	switch (result.status) {
+		case "skills-installed":
+			return `Missing workflow skills installed: ${result.installResult?.createdSkills.join(", ") ?? missing}. Run /reload to activate them.`;
+		case "skills-declined":
+			return `Optional workflow skills are still missing: ${missing}. Installation was declined.`;
+		case "skills-headless":
+			return `Optional workflow skills are missing: ${missing}. Run /subagents in an interactive Pi session to install them.`;
 		case "installed":
 			return "Starter pack installed. Agents and subagent settings are ready now; run /reload to activate the stress-interview and self-healing skills.";
 		case "headless":

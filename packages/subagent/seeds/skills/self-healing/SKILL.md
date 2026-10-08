@@ -1,12 +1,12 @@
 ---
 name: self-healing
 description: Use when the user asks for self-healing, an automatic review-fix-recheck loop on a change.
-disable-model-invocation: false
+compatibility: Requires the subagent extension and the `verifier`, `reviewer`, `challenger`, and `worker` agents. Run `/subagents` to install the starter pack when they are missing.
 ---
 
 # self-healing
 
-Run at most two review-and-repair cycles for `$ARGUMENTS`.
+Run at most two review-and-repair cycles on the review target the user asked about.
 
 - Cycle 1: `stress-interview` -> targeted `worker` fixes
 - Cycle 2: `stress-interview` -> targeted `worker` fixes
@@ -21,26 +21,39 @@ Never continue indefinitely.
 
 ## Workflow
 
-1. Define the exact target scope in one or two sentences.
-2. Run the stress-interview workflow with one `subagent batch` containing `verifier`, `reviewer`, and `challenger`.
-3. Classify findings:
+1. Restate the review target in one or two sentences, such as "the staged diff in `packages/subagent`" or "PR #142". This restated sentence is what you paste into every `--task` below. There is no `$ARGUMENTS` substitution in skills; the user text, if any, arrives after the skill instructions.
+2. Confirm the prerequisites once, before the first batch:
+   - Call `subagent agents` and check that `verifier`, `reviewer`, `challenger`, and `worker` exist.
+   - If any are missing, tell the user to run `/subagents` and install the starter pack, then `/reload`. Do not fake the review with a single agent.
+3. Run the stress-interview workflow with one `subagent batch` containing `verifier`, `reviewer`, and `challenger`.
+4. Classify findings:
    - Fix now automatically: reproducible and narrowly actionable
    - Escalate: high-impact issue requiring a product, security, or architecture decision
    - Improve if safe: lower-severity clarity, maintainability, or test gap
    - Report only: weak evidence, intentional behavior, or out-of-scope redesign
-4. Send only approved actionable items to `worker` using the Pi `subagent` tool.
-5. Verify the worker's actual diff and validation output.
-6. Repeat the stress interview once more.
-7. Apply a second bounded worker pass only for remaining actionable items.
-8. Stop after Cycle 2 or earlier when no actionable findings remain.
+5. Send only approved actionable items to `worker`.
+6. Verify the worker's actual diff and validation output.
+7. Repeat the stress interview once more.
+8. Apply a second bounded worker pass only for remaining actionable items.
+9. Stop after Cycle 2 or earlier when no actionable findings remain.
 
 ## Subagent invocations
 
-Run each review pass with a command shaped like:
+`subagent` is a Pi tool, not a shell command. Never run these strings in Bash. The tool takes a single `command` string:
+
+```json
+{
+  "command": "subagent batch --main --agent verifier --task \"Verify the uncommitted diff in packages/subagent with executable evidence.\" --agent reviewer --task \"Review the uncommitted diff in packages/subagent for correctness and regressions.\" --agent challenger --task \"Pressure-test the uncommitted diff in packages/subagent with at most three high-impact questions.\""
+}
+```
+
+Replace the quoted target with the sentence from step 1. The shape of each review pass is:
 
 ```text
-subagent batch --main --agent verifier --task "Verify $ARGUMENTS with executable evidence." --agent reviewer --task "Review $ARGUMENTS for correctness and regressions." --agent challenger --task "Pressure-test $ARGUMENTS with at most three high-impact questions."
+subagent batch --main --agent verifier --task "Verify <target> with executable evidence." --agent reviewer --task "Review <target> for correctness and regressions." --agent challenger --task "Pressure-test <target> with at most three high-impact questions."
 ```
+
+`--main` is fixed for this workflow: every cycle depends on what was already decided, attempted, and rejected in this conversation, and an isolated child would re-litigate it. Place `--main` before the first `--agent`.
 
 Then send only verified findings to the worker:
 
@@ -77,8 +90,8 @@ Stop when any condition is met:
 
 Then include:
 
-1. `Cycle 1` — findings and applied changes
-2. `Cycle 2` — findings and applied changes
+1. `Cycle 1` - findings and applied changes
+2. `Cycle 2` - findings and applied changes
 3. `Remaining Risks`
 4. `Recommendation`
 

@@ -1,12 +1,12 @@
 ---
 name: stress-interview
 description: Use when the user wants a change pressure-tested from multiple angles before release.
-disable-model-invocation: false
+compatibility: Requires the subagent extension and the `verifier`, `reviewer`, and `challenger` agents. Run `/subagents` to install the starter pack when they are missing.
 ---
 
 # stress-interview
 
-Cross-review `$ARGUMENTS` with `verifier`, `reviewer`, and `challenger` in parallel.
+Cross-review one target with `verifier`, `reviewer`, and `challenger` in parallel.
 
 ## Purpose
 
@@ -16,33 +16,43 @@ Cross-review `$ARGUMENTS` with `verifier`, `reviewer`, and `challenger` in paral
 
 ## Workflow
 
-1. Restate the review target in one or two sentences.
-2. Use the Pi `subagent` tool, not a shell command.
-3. If the tool interface is unclear, call `subagent help` first.
-4. Launch one parallel batch:
+1. Restate the review target in one or two sentences, such as "the staged diff in `packages/subagent`" or "PR #142". This restated sentence is what you paste into every `--task` below. There is no `$ARGUMENTS` substitution in skills; the user text, if any, arrives after the skill instructions.
+2. Confirm the prerequisites once, before launching:
+   - Call `subagent agents` and check that `verifier`, `reviewer`, and `challenger` exist.
+   - If any are missing, tell the user to run `/subagents` and install the starter pack, then `/reload`. Do not substitute a single agent for the three-way review.
+   - If the tool interface is unclear, call `subagent help` first.
+3. Launch one parallel batch:
    - `verifier`: tests, type checking, builds, reproduction, and concrete evidence
    - `reviewer`: correctness, regressions, security, and maintainability
    - `challenger`: assumptions, failure scenarios, and weak decision points
-5. Wait for automatic completion messages. Do not poll immediately with `status` or `detail`.
-6. Compare the three results:
+4. Wait for automatic completion messages. Do not poll immediately with `status` or `detail`.
+5. Compare the three results:
    - Common findings: independently identified by at least two agents
    - Independent findings: identified by one agent but supported by evidence
    - Conflicts: materially different conclusions that require explanation
-7. Distinguish verified defects from challenger hypotheses.
+6. Distinguish verified defects from challenger hypotheses.
 
 ## Tool invocation
 
-Use a command shaped like this:
+`subagent` is a Pi tool, not a shell command. Never run these strings in Bash. The tool takes a single `command` string:
 
-```text
-subagent batch --main --agent verifier --task "Verify $ARGUMENTS with executable evidence." --agent reviewer --task "Review $ARGUMENTS for correctness, regressions, security, and maintainability." --agent challenger --task "Pressure-test $ARGUMENTS. Return at most three high-impact skeptical questions with evidence and impact."
+```json
+{
+  "command": "subagent batch --main --agent verifier --task \"Verify the staged diff in packages/subagent with executable evidence.\" --agent reviewer --task \"Review the staged diff in packages/subagent for correctness, regressions, security, and maintainability.\" --agent challenger --task \"Pressure-test the staged diff in packages/subagent. Return at most three high-impact skeptical questions with evidence and impact.\""
+}
 ```
 
-Use `--isolated` instead of `--main` when the tasks are fully self-contained and should not inherit the current conversation.
+Replace the quoted target with the sentence from step 1. The shape of the command is:
+
+```text
+subagent batch --main --agent verifier --task "Verify <target> with executable evidence." --agent reviewer --task "Review <target> for correctness, regressions, security, and maintainability." --agent challenger --task "Pressure-test <target>. Return at most three high-impact skeptical questions with evidence and impact."
+```
+
+Place the context flag before the first `--agent`. Use `--isolated` instead of `--main` when the tasks are fully self-contained, for example a named PR or a path the agents can read themselves. Use `--main` when the review depends on decisions made earlier in this conversation.
 
 ## Two-pass mode
 
-When `$ARGUMENTS` includes `--2pass` or explicitly requests a two-pass review:
+Run two passes when the user text that follows this skill contains `--2pass`, or when the user explicitly asks for a two-pass review. Skills receive that text as plain trailing input, so read it instead of expecting a substituted variable.
 
 ### Pass 1: specification compliance
 
@@ -65,7 +75,7 @@ When `$ARGUMENTS` includes `--2pass` or explicitly requests a two-pass review:
 
 ## Output format
 
-1. `Overall` — Ready | Needs changes | Blocked
+1. `Overall` - Ready | Needs changes | Blocked
 2. `Common Findings`
 3. `Verifier`
 4. `Reviewer`

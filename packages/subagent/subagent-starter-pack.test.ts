@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installStarterPack, offerStarterPackIfEmpty } from "./starter-pack.ts";
+import { findMissingStarterSkills, installStarterPack, offerStarterPackIfEmpty } from "./starter-pack.ts";
 
 const AGENT_NAMES = [
 	"browser",
@@ -112,6 +112,69 @@ describe("subagent starter pack", () => {
 
 		expect(() => installStarterPack()).toThrow(/settings\.json/i);
 		expect(fs.existsSync(path.join(tmpDir, "agents"))).toBe(false);
+		expect(fs.existsSync(path.join(tmpDir, "skills"))).toBe(false);
+	});
+
+	it("rolls back created files and leaves no empty directories when a copy fails", () => {
+		// A plain file where a skill directory belongs makes the second skill copy fail mid-install.
+		fs.mkdirSync(path.join(tmpDir, "skills"), { recursive: true });
+		fs.writeFileSync(path.join(tmpDir, "skills", "stress-interview"), "not a directory\n", "utf8");
+
+		expect(() => installStarterPack()).toThrow();
+		expect(fs.existsSync(path.join(tmpDir, "agents"))).toBe(false);
+		expect(fs.existsSync(path.join(tmpDir, "skills", "self-healing"))).toBe(false);
+		expect(fs.readFileSync(path.join(tmpDir, "skills", "stress-interview"), "utf8")).toBe("not a directory\n");
+		expect(fs.existsSync(path.join(tmpDir, "settings.json"))).toBe(false);
+	});
+
+	it("copies every file of a seed skill directory, not only SKILL.md", () => {
+		const seedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-rich-seeds-"));
+		const realSeedRoot = path.join(import.meta.dirname, "seeds");
+		fs.cpSync(realSeedRoot, seedRoot, { recursive: true });
+		fs.mkdirSync(path.join(seedRoot, "skills", "self-healing", "references"), { recursive: true });
+		fs.writeFileSync(path.join(seedRoot, "skills", "self-healing", "references", "policy.md"), "extra\n", "utf8");
+
+		installStarterPack({ seedRoot });
+
+		expect(fs.readFileSync(path.join(tmpDir, "skills", "self-healing", "references", "policy.md"), "utf8")).toBe(
+			"extra\n",
+		);
+
+		fs.rmSync(seedRoot, { recursive: true, force: true });
+	});
+
+	it("offers only the missing skills when agents already exist", async () => {
+		installStarterPack();
+		fs.rmSync(path.join(tmpDir, "skills", "self-healing"), { recursive: true, force: true });
+		const confirm = vi.fn().mockResolvedValue(true);
+
+		expect(findMissingStarterSkills()).toEqual(["self-healing"]);
+
+		const result = await offerStarterPackIfEmpty({ cwd: tmpDir, hasUI: true, ui: { confirm } });
+
+		expect(confirm).toHaveBeenCalledTimes(1);
+		expect(result.status).toBe("skills-installed");
+		expect(result.installResult?.createdSkills).toEqual(["self-healing"]);
+		expect(result.installResult?.createdAgents).toEqual([]);
+		expect(fs.existsSync(path.join(tmpDir, "skills", "self-healing", "SKILL.md"))).toBe(true);
+		expect(findMissingStarterSkills()).toEqual([]);
+	});
+
+	it("does not install missing skills without UI confirmation", async () => {
+		fs.mkdirSync(path.join(tmpDir, "agents"), { recursive: true });
+		fs.writeFileSync(
+			path.join(tmpDir, "agents", "custom.md"),
+			"---\nname: custom\ndescription: custom agent\n---\n\nDo work.\n",
+			"utf8",
+		);
+		const confirm = vi.fn().mockResolvedValue(false);
+
+		const headless = await offerStarterPackIfEmpty({ cwd: tmpDir, hasUI: false, ui: { confirm } });
+		const declined = await offerStarterPackIfEmpty({ cwd: tmpDir, hasUI: true, ui: { confirm } });
+
+		expect(headless.status).toBe("skills-headless");
+		expect(headless.missingSkills).toEqual(["self-healing", "stress-interview"]);
+		expect(declined.status).toBe("skills-declined");
 		expect(fs.existsSync(path.join(tmpDir, "skills"))).toBe(false);
 	});
 

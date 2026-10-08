@@ -68,7 +68,22 @@ Run `/subagents`, `subagent agents`, or the `list-agents` tool to inspect discov
 
 ### Optional starter pack
 
-If no agents are found, `/subagents` can offer an optional, opinionated starter pack. It copies eight agent templates, two example workflow skills, and missing global `subagent` settings. Existing files and configured values are not overwritten.
+If no agents are found, `/subagents` can offer an optional, opinionated starter pack. It copies eight agent templates, two workflow skills, and missing global `subagent` settings. Existing files and configured values are not overwritten.
+
+The two skills are installed into `$PI_CODING_AGENT_DIR/skills` and become available after `/reload`:
+
+| Skill | Purpose |
+| --- | --- |
+| `stress-interview` | Cross-review one target with `verifier`, `reviewer`, and `challenger` in parallel, then compare their findings |
+| `self-healing` | Run at most two `stress-interview` cycles and apply evidence-backed `worker` fixes between them |
+
+```text
+/skill:stress-interview review the staged diff in packages/subagent before release
+```
+
+Both skills expect the starter agents, so they report a missing agent instead of silently reviewing with one.
+
+If you already defined your own agents, the full pack is never offered. In that case `/subagents` offers only the workflow skills that are missing, and it leaves your agents and settings untouched.
 
 The starter pack is not required. Decline it if you prefer to define agents manually. It fills a missing `claudeRuntime` setting with `cli`; without that setting, the extension default is `sdk`.
 
@@ -85,8 +100,8 @@ Active child processes stop when pi replaces or reloads the parent extension run
 
 The extension registers two tools:
 
-- `list-agents` — list discovered agents and runtime settings
-- `subagent` — execute a CLI-style command string
+- `list-agents` lists discovered agents and runtime settings
+- `subagent` executes a CLI-style command string
 
 These strings are tool input, not shell commands. Do not run them in Bash.
 
@@ -126,7 +141,7 @@ Use `status` and `detail` for one-off inspection, not polling loops.
 
 | Command | Description |
 | --- | --- |
-| `/subagents` | List agents and offer the starter pack when none exist |
+| `/subagents` | List agents, offer the starter pack when none exist, and offer missing workflow skills otherwise |
 | `/sub:main [agent\|runId] <task>` | Launch or continue with main-session context |
 | `/sub:isolate [agent\|runId] <task>` | Launch or continue with isolated context |
 | `/sub:peek [runId]` | Show the latest result |
@@ -210,10 +225,12 @@ Claude-runtime children do not receive `ask_master`; they report blockers in the
 
 ## Troubleshooting
 
-- **`Configured defaultAgent "worker" was not found`** — create a matching agent, choose another agent explicitly, or update `defaultAgent`.
-- **Claude SDK authentication failure** — confirm the environment that starts pi contains valid Anthropic authentication.
-- **`spawn claude ENOENT`** — install Claude Code or switch `claudeRuntime` to `sdk`.
-- **Hidden run shows no transcript message** — inspect it with `/sub:peek`, `<>runId`, or `/sub:open`.
+- **`Configured defaultAgent "worker" was not found`**: create a matching agent, choose another agent explicitly, or update `defaultAgent`.
+- **Claude SDK authentication failure**: confirm the environment that starts pi contains valid Anthropic authentication.
+- **`spawn claude ENOENT`**: install Claude Code or switch `claudeRuntime` to `sdk`.
+- **Hidden run shows no transcript message**: inspect it with `/sub:peek`, `<>runId`, or `/sub:open`.
+- **`/skill:stress-interview` reports a missing agent**: run `/subagents` to install the starter pack, then `/reload`.
+- **Starter skills are missing although agents exist**: run `/subagents` and accept the workflow skill offer, then `/reload`.
 
 When reporting a bug, include the pi and extension versions, OS and Node version, launch command, reproduction steps, and sanitized error output. Do not attach full session files because they may contain prompts, tool output, or secrets.
 
