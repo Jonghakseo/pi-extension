@@ -56,7 +56,7 @@ function writeSessionHeader(sessionId: string, sessionFile: string): void {
 	writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId })}\n`, "utf8");
 }
 
-function writeRpcFakePi(sessionId: string, sessionFile: string, settleDelayMs = 0): string {
+function writeRpcFakePi(sessionId: string, sessionFile: string, settleDelayMs = 0, aborted = false): string {
 	const scriptPath = join(tempAgentDir, "fake-pi-rpc.mjs");
 	writeFileSync(
 		scriptPath,
@@ -88,7 +88,7 @@ process.stdin.on("data", (chunk) => {
       process.stdout.write(JSON.stringify({ id: "stray-prompt", type: "response", command: "prompt", success: true }) + "\\n");
       process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n");
       process.stdout.write(JSON.stringify({ id: request.id, type: "response", command: "prompt", success: true }) + "\\n");
-      setTimeout(() => { appendFileSync(${JSON.stringify(join(tempAgentDir, "fake-pi-rpc-settled.log"))}, "settled\\n"); process.stdout.write(JSON.stringify({ type: "agent_settled" }) + "\\n"); }, ${settleDelayMs});
+      setTimeout(() => { appendFileSync(${JSON.stringify(join(tempAgentDir, "fake-pi-rpc-settled.log"))}, "settled\\n"); process.stdout.write(JSON.stringify({ type: "agent_settled"${aborted ? ", aborted: true" : ""} }) + "\\n"); }, ${settleDelayMs});
     }
   }
 });
@@ -441,6 +441,46 @@ upsertJob({ id: "same-id", name: "replacement", enabled: true, kind: "at", once:
 		expect(readFileSync(finalJob.lastRunLog as string, "utf8")).toContain("outcome: settled");
 		expect(finalJob.lastDeliveryOutcome).toBe("settled");
 		expect(finalJob.lastExitCode).toBeUndefined();
+	});
+
+	it("records an aborted outcome when the resumed RPC run settles as aborted", async () => {
+		const sessionId = "source-session";
+		const sessionFile = join(tempAgentDir, "source.jsonl");
+		const fakePi = writeRpcFakePi(sessionId, sessionFile, 0, true);
+		const job: CronJob = {
+			id: "session-aborted",
+			name: "Session aborted",
+			enabled: true,
+			kind: "at",
+			once: true,
+			runAt: new Date(Date.now() - 1000).toISOString(),
+			timezone: "UTC",
+			cwd: tempAgentDir,
+			promptFile: join(tempAgentDir, "cron", "prompts", "session-aborted.md"),
+			scope: "session",
+			sessionId,
+			sessionFile,
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+		};
+		writeStore(job);
+		const child = spawn(process.execPath, [daemonPath], {
+			cwd: tempAgentDir,
+			stdio: "ignore",
+			env: {
+				...process.env,
+				PI_CODING_AGENT_DIR: tempAgentDir,
+				PI_CRON_PI_BIN: fakePi,
+				PI_CRON_TICK_INTERVAL_MS: "100",
+				PI_CRON_RETRY_LOCK_INTERVAL_MS: "100",
+				PI_CRON_JOB_TIMEOUT_MS: "2000",
+			},
+		});
+		childPid = child.pid;
+		const finalStore = await waitFor(readStore, (store) => store.jobs.length === 0 && store.history.length === 1);
+		const finalJob = finalStore.history[0] as CronJob;
+		expect(finalJob.lastDeliveryOutcome).toBe("aborted");
+		expect(readFileSync(finalJob.lastRunLog as string, "utf8")).toContain("outcome: aborted");
 	});
 
 	it.each([

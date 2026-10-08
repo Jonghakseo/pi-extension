@@ -59,6 +59,7 @@ until_report({
 - `done: false`는 다음 회차를 유지합니다.
 - `done: true`는 task와 timer를 제거하고 반복을 종료합니다.
 - 현재 회차와 다른 `runCount`, 이미 정리된 회차의 report는 거부됩니다.
+- 보고 전에 실행을 Esc 등으로 중단하면 Pi `1.1.0` 이상에서는 경고 알림을 띄우고 `/untils`의 최근 상태를 `N회차 중단됨 (보고 없음)`으로 남깁니다. 반복은 유지되며 멈추려면 `/until-cancel <id>`를 사용하세요.
 
 ## 개인 프리셋
 

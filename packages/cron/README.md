@@ -28,7 +28,7 @@ The scheduler is macOS-first. On macOS, its LaunchAgent keeps jobs running after
 - Stores each job as metadata plus a self-contained Markdown prompt.
 - New jobs default to `user` scope. `project` jobs are visible only from the same Git remote/root commit/path identity. `session` jobs are visible only from their original persisted Pi session.
 - User and project jobs run through a headless Pi process: `pi -p --no-session @prompt.md`.
-- Session jobs deliver to a live original session through a user-only local socket. If that session is fully closed, the daemon opens its original session file with `pi --mode rpc --session <file>`, verifies its identity, and waits for `agent_settled` or a confirmed idle state after an immediate command. It never creates a separate `--no-session` conversation for a session job.
+- Session jobs deliver to a live original session through a user-only local socket. If that session is fully closed, the daemon opens its original session file with `pi --mode rpc --session <file>`, verifies its identity, and waits for `agent_settled` or a confirmed idle state after an immediate command. It never creates a separate `--no-session` conversation for a session job. The recorded `lastDeliveryOutcome` is `aborted` instead of `settled` when Pi `1.1.0` or later reports that the resumed run was cancelled.
 - Extensions and MCP tools are loaded as in interactive mode so scheduled prompts can call MCP tools (Slack, Jira, etc.).
 - Uses a detached daemon and macOS `launchd` LaunchAgent so jobs continue after Pi exits and after reboot/login.
 - Moves one-shot jobs out of the current job list and into history after their first execution attempt.

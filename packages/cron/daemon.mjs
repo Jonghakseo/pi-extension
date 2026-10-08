@@ -661,7 +661,8 @@ function runSessionRpc(job, sessionFile) {
 			}
 			if (message.type === "agent_settled" && promptIssued && promptAccepted) {
 				settled = true;
-				finish(undefined, { outcome: "settled" });
+				// Pi 1.1.0+ marks cancelled runs; older hosts omit the field and stay "settled".
+				finish(undefined, { outcome: message.aborted === true ? "aborted" : "settled" });
 			}
 		}
 		timeout = setTimeout(() => finish(new Error("same-session RPC timed out")), DEFAULT_TIMEOUT_MS);
@@ -728,7 +729,7 @@ async function runSessionJob(job, runLogPath) {
 			`deliveredAt: ${nowIso()}`,
 			`outcome: ${result.outcome}`,
 			"",
-			"The original session owns task execution. queued means live delivery was accepted. settled means the cron RPC delivery completed, not that the task succeeded.",
+			"The original session owns task execution. queued means live delivery was accepted. settled means the cron RPC delivery completed, not that the task succeeded. aborted means the delivered run was cancelled before it finished.",
 			"",
 		].join("\n"),
 		"utf8",

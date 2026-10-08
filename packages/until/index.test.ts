@@ -183,6 +183,37 @@ describe("until extension", () => {
 		});
 	});
 
+	it("marks an unreported run as interrupted when agent_settled reports aborted and keeps the loop", async () => {
+		const apiMock = createExtensionApiMock();
+		untilExtension(apiMock.api);
+		const harness = createContext({ isIdle: true });
+		await registerAndDispatch(apiMock, harness.ctx);
+		harness.notify.mockClear();
+
+		await apiMock.getHandlers("agent_settled")[0]({ type: "agent_settled", aborted: true }, harness.ctx);
+		expect(harness.notify).toHaveBeenCalledWith(expect.stringContaining("until #1 1회차가 중단됐어"), "warning");
+
+		await apiMock.getCommand("untils").handler("", harness.ctx);
+		expect(apiMock.sentMessages.at(-1)).toMatchObject({ content: expect.stringContaining("1회차 중단됨 (보고 없음)") });
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(apiMock.sentMessages.at(-1)).toMatchObject({
+			customType: "until-prompt",
+			details: { taskId: 1, runCount: 2 },
+		});
+	});
+
+	it("does not mark reported runs as interrupted on aborted agent_settled", async () => {
+		const apiMock = createExtensionApiMock();
+		untilExtension(apiMock.api);
+		const harness = createContext({ isIdle: true });
+		await registerAndDispatch(apiMock, harness.ctx);
+		await report(apiMock, harness.ctx, { taskId: 1, runCount: 1, done: false, summary: "checked" });
+		harness.notify.mockClear();
+
+		await apiMock.getHandlers("agent_settled")[0]({ type: "agent_settled", aborted: true }, harness.ctx);
+		expect(harness.notify).not.toHaveBeenCalledWith(expect.stringContaining("중단됐어"), "warning");
+	});
+
 	it("uses the idle timer fallback when agent_settled is missing", async () => {
 		const apiMock = createExtensionApiMock();
 		untilExtension(apiMock.api);

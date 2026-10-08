@@ -557,7 +557,7 @@ export function createUntilExtension(options: UntilExtensionOptions = {}) {
 			latestCtx = ctx;
 		});
 
-		pi.on("agent_settled", async (_event, ctx) => {
+		pi.on("agent_settled", async (event, ctx) => {
 			agentRunning = false;
 			latestCtx = ctx;
 			let idle = false;
@@ -567,7 +567,19 @@ export function createUntilExtension(options: UntilExtensionOptions = {}) {
 				return;
 			}
 			if (!idle) return;
-			for (const task of tasks.values()) task.activeRun = undefined;
+			// Pi 1.1.0+ reports cancelled runs; older hosts omit the field.
+			const aborted = (event as { aborted?: unknown } | undefined)?.aborted === true;
+			for (const task of tasks.values()) {
+				if (aborted && task.activeRun) {
+					task.lastSummary = `${task.activeRun.runCount}회차 중단됨 (보고 없음)`;
+					safeNotify(
+						ctx,
+						`until #${task.id} ${task.activeRun.runCount}회차가 중단됐어. ${task.intervalLabel} 뒤 다시 실행하고, 멈추려면 /until-cancel ${task.id}`,
+						"warning",
+					);
+				}
+				task.activeRun = undefined;
+			}
 		});
 
 		pi.on("context", async (event) => {

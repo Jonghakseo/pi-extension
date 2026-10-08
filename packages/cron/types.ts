@@ -2,7 +2,7 @@ export type CronJobKind = "cron" | "at" | "delay";
 export type CronScope = "user" | "project" | "session";
 
 export type CronDisabledReason = "completed_once" | "user_disabled" | "error";
-export type SessionDeliveryOutcome = "queued" | "settled" | "failed";
+export type SessionDeliveryOutcome = "queued" | "settled" | "aborted" | "failed";
 
 export interface CronJob {
 	id: string;
