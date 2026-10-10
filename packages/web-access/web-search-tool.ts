@@ -116,6 +116,8 @@ function buildSearchReturn(pi: ExtensionAPI, opts: SearchReturnOptions): AgentTo
 	const isBackgroundFetch = fetchId !== null && !hasInlineReady;
 
 	return {
+		// Only when every query failed; a partial failure or an empty result set is not an error.
+		...(sc === 0 && opts.queryList.length > 0 ? { isError: true } : {}),
 		content: [{ type: "text", text: output.trim() }],
 		details: {
 			queries: opts.queryList,
@@ -165,6 +167,7 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 
 			if (queryList.length === 0) {
 				return {
+					isError: true,
 					content: [{ type: "text", text: "Error: No query provided. Use 'query' or 'queries' parameter." }],
 					details: { error: "No query provided" },
 				};

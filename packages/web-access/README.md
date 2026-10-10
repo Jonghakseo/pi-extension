@@ -19,6 +19,8 @@ pi install npm:@ryan_nookpi/pi-extension-web-access
 | `get_search_content` | 도구 | 이전 `web_search`·`fetch_content` 결과의 전체 본문을 다시 가져옵니다 |
 | `/search` | 명령어 | 저장된 검색 결과를 둘러보고 삭제합니다 |
 
+모든 검색 쿼리나 모든 URL이 실패하거나, `fetch_content`에 `url`/`urls`가 없거나, `get_search_content`에 없는 `responseId`·인덱스를 넘기면 tool result에 `isError: true`가 붙습니다. 일부만 실패한 호출에는 붙지 않습니다.
+
 ## 설정
 
 설정 없이 키 없는 Exa MCP로 동작합니다. 무료 한도를 넘기면 Exa API 키를 넣습니다.
@@ -50,5 +52,6 @@ Exa 사용량은 `~/.pi/exa-usage.json`에 기록됩니다. PDF 추출 결과는
 ## 원본 대비 차이
 
 - 검색 provider는 Exa(키 또는 키 없는 MCP)만 남겼습니다.
+- 실패한 호출을 `isError: true`로 표시합니다(원본 0.37.0).
 - Gemini·Perplexity·브라우저 쿠키 기반 경로를 제거했습니다.
 - 라이선스는 원본 MIT 표기를 유지합니다. `LICENSE`를 참고하세요.

@@ -39,7 +39,13 @@ export function registerContentTools(pi: ExtensionAPI): void {
 			const urlList = params.urls ?? (params.url ? [params.url] : []);
 			if (urlList.length === 0) {
 				return {
-					content: [{ type: "text", text: "Error: No URL provided." }],
+					isError: true,
+					content: [
+						{
+							type: "text",
+							text: "Error: No URL provided. Use the 'url' parameter, or 'urls' for parallel fetches.",
+						},
+					],
 					details: { error: "No URL provided" },
 				};
 			}
@@ -74,6 +80,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 				const result = fetchResults[0];
 				if (result.error) {
 					return {
+						isError: true,
 						content: [{ type: "text", text: `Error: ${result.error}` }],
 						details: {
 							urls: urlList,
@@ -142,6 +149,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 			output += `\n---\nUse get_search_content({ responseId: "${responseId}", urlIndex: 0 }) to retrieve full content.`;
 
 			return {
+				...(successful === 0 ? { isError: true } : {}),
 				content: [{ type: "text", text: output }],
 				details: { urls: urlList, urlCount: urlList.length, successful, totalChars, responseId },
 			};
@@ -273,6 +281,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 			if (!data) {
 				return {
 					content: [{ type: "text", text: `Error: No stored results for "${params.responseId}"` }],
+					isError: true,
 					details: { error: "Not found", responseId: params.responseId },
 				};
 			}
@@ -286,6 +295,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 						const available = data.queries.map((q) => `"${q.query}"`).join(", ");
 						return {
 							content: [{ type: "text", text: `Query "${params.query}" not found. Available: ${available}` }],
+							isError: true,
 							details: { error: "Query not found" },
 						};
 					}
@@ -296,6 +306,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 							content: [
 								{ type: "text", text: `Index ${params.queryIndex} out of range (0-${data.queries.length - 1})` },
 							],
+							isError: true,
 							details: { error: "Index out of range" },
 						};
 					}
@@ -303,6 +314,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 					const available = data.queries.map((q, i) => `${i}: "${q.query}"`).join(", ");
 					return {
 						content: [{ type: "text", text: `Specify query or queryIndex. Available: ${available}` }],
+						isError: true,
 						details: { error: "No query specified" },
 					};
 				}
@@ -310,6 +322,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 				if (queryData.error) {
 					return {
 						content: [{ type: "text", text: `Error for "${queryData.query}": ${queryData.error}` }],
+						isError: true,
 						details: { error: queryData.error, query: queryData.query },
 					};
 				}
@@ -329,6 +342,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 						const available = data.urls.map((u) => u.url).join("\n  ");
 						return {
 							content: [{ type: "text", text: `URL not found. Available:\n  ${available}` }],
+							isError: true,
 							details: { error: "URL not found" },
 						};
 					}
@@ -337,6 +351,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 					if (!urlData) {
 						return {
 							content: [{ type: "text", text: `Index ${params.urlIndex} out of range (0-${data.urls.length - 1})` }],
+							isError: true,
 							details: { error: "Index out of range" },
 						};
 					}
@@ -344,6 +359,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 					const available = data.urls.map((u, i) => `${i}: ${u.url}`).join("\n  ");
 					return {
 						content: [{ type: "text", text: `Specify url or urlIndex. Available:\n  ${available}` }],
+						isError: true,
 						details: { error: "No URL specified" },
 					};
 				}
@@ -351,6 +367,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 				if (urlData.error) {
 					return {
 						content: [{ type: "text", text: `Error for ${urlData.url}: ${urlData.error}` }],
+						isError: true,
 						details: { error: urlData.error, url: urlData.url },
 					};
 				}
@@ -363,6 +380,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 
 			return {
 				content: [{ type: "text", text: "Invalid stored data format" }],
+				isError: true,
 				details: { error: "Invalid data" },
 			};
 		},
