@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-web-access",
-	"version": "0.1.1",
+	"version": "0.2.0",
 	"description": "Web search, page/PDF/GitHub/YouTube content extraction tools for pi (fork of pi-web-access).",
 	"license": "MIT",
 	"repository": {
