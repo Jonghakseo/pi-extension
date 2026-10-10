@@ -8,7 +8,13 @@ import type { ExtractedContent } from "./extract.js";
 import { formatSearchSummary, hasFullInlineCoverage, stripThumbnails } from "./result-format.js";
 import { search } from "./search.js";
 import { state } from "./state.js";
-import { generateId, type QueryResultData, type StoredSearchData, storeResult } from "./storage.js";
+import {
+	generateId,
+	type QueryResultData,
+	type StoredSearchData,
+	storeFetchedContentResult,
+	storeResult,
+} from "./storage.js";
 
 const isRecencyFilter = (value: unknown): value is "day" | "week" | "month" | "year" =>
 	value === "day" || value === "week" || value === "month" || value === "year";
@@ -23,14 +29,15 @@ function startBackgroundFetch(pi: ExtensionAPI, urls: string[]): string | null {
 		.then((m) => m.fetchAllContent(urls, controller.signal))
 		.then((fetched) => {
 			if (!state.sessionActive || !state.pendingFetches.has(fetchId)) return;
-			const data: StoredSearchData = {
-				id: fetchId,
-				type: "fetch",
-				timestamp: Date.now(),
-				urls: stripThumbnails(fetched),
-			};
-			storeResult(fetchId, data);
-			pi.appendEntry("web-search-results", data);
+			pi.appendEntry(
+				"web-search-results",
+				storeFetchedContentResult(fetchId, {
+					id: fetchId,
+					type: "fetch",
+					timestamp: Date.now(),
+					urls: stripThumbnails(fetched),
+				}),
+			);
 			const ok = fetched.filter((f) => !f.error).length;
 			pi.sendMessage(
 				{
@@ -88,14 +95,15 @@ function buildSearchReturn(pi: ExtensionAPI, opts: SearchReturnOptions): AgentTo
 	let fetchId: string | null = null;
 	if (hasInlineReady && opts.inlineContent) {
 		fetchId = generateId();
-		const data: StoredSearchData = {
-			id: fetchId,
-			type: "fetch",
-			timestamp: Date.now(),
-			urls: sanitizeExtractedContents(opts.inlineContent),
-		};
-		storeResult(fetchId, data);
-		pi.appendEntry("web-search-results", data);
+		pi.appendEntry(
+			"web-search-results",
+			storeFetchedContentResult(fetchId, {
+				id: fetchId,
+				type: "fetch",
+				timestamp: Date.now(),
+				urls: sanitizeExtractedContents(opts.inlineContent),
+			}),
+		);
 		output += `---\nFull content for ${opts.inlineContent.length} sources available [${fetchId}].`;
 	} else if (opts.includeContent) {
 		fetchId = startBackgroundFetch(pi, opts.urls);

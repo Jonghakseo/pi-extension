@@ -31,6 +31,8 @@ fetch_content({ url: "https://example.com/api/items.json", mode: "raw" })
 
 추출한 텍스트 안의 `data:` URI(base64 이미지 등)는 `[pi-web-access inline data URI omitted; mime=...; encodedBytes=...; sha256=...]` 형태의 표시로 바뀝니다. 모델 출력과 세션에 저장되는 본문 어디에도 base64 페이로드가 남지 않습니다. `web_search`가 함께 가져온 본문도 저장 전에 같은 처리를 거칩니다. `mode: "raw"`는 본문을 그대로 돌려주는 모드라서 이 처리를 하지 않습니다.
 
+`fetch_content`가 가져온 URL 전문은 세션 JSONL이 아니라 Pi 설정 디렉터리(`~/.pi`) 아래 `web-search-cache`에 저장됩니다. 세션에는 URL·제목·길이 같은 메타데이터와 캐시 참조만 남습니다. 캐시 수명은 1시간이고 최대 128개, 128MiB입니다. 한도를 넘으면 오래된 항목부터 지웁니다. macOS·Linux에서 디렉터리는 `0700`, 파일은 `0600`으로 유지합니다. `PI_WEB_ACCESS_CACHE_ROOT`로 루트 디렉터리를 바꿀 수 있고, 캐시는 그 안의 `web-search-cache`에 생깁니다. 같은 값 없이 이어 연 세션은 거기 저장된 본문을 읽지 못합니다. 캐시가 만료되거나 지워진 뒤 `get_search_content`를 부르면 "Cached fetched content is missing or expired" 에러가 URL별로 나옵니다. 캐시 도입 전 세션에 본문이 그대로 들어 있는 기록은 1시간 안이면 그대로 읽힙니다.
+
 ## 설정
 
 설정 없이 키 없는 Exa MCP로 동작합니다. 무료 한도를 넘기면 Exa API 키를 넣습니다.
@@ -78,5 +80,6 @@ Exa 사용량은 `~/.pi/exa-usage.json`에 기록됩니다. PDF 추출 결과는
 - 직접 fetch에 SSRF 가드와 `fetchContent.domainPolicy`를 넣었습니다(원본의 `ssrf-protection`). 이 fork에는 프록시 경로가 없어 `ssrf.trustEnvProxy`와 프록시 관련 처리는 가져오지 않았고, `ssrf.allowRanges`만 남겼습니다.
 - GitHub PR·이슈 URL을 `gh api`로 가져와 렌더합니다(원본의 `github-issue-pr`). 원본의 `gh pr view --json` 필드 조합, REST 폴백, 체크 롤업·연결된 이슈 표시는 가져오지 않았습니다. `gh`가 실패하면 일반 HTTP 추출로 넘어갑니다. 끄려면 `githubPrIssue.enabled: false`입니다.
 - `web_search`에 Exa `category`를 추가했습니다(원본 0.36.0). 원본처럼 목록으로 제한하지 않고 문자열을 그대로 넘깁니다. API 키가 있으면 요청 body의 `category`로, 키 없는 MCP 경로는 필터를 받지 못하므로 쿼리 텍스트 뒤에 덧붙입니다. 원본의 MCP 고급 도구 시도는 가져오지 않았습니다.
+- `fetch_content` 전문을 `web-search-cache` 디스크 캐시에 저장하고 세션에는 참조만 남깁니다(원본 `storage.ts`). 원본의 research 결과 저장과, 여러 세션이 한 프로세스에서 같은 결과를 공유할 때 쓰는 holder 계수는 가져오지 않았습니다.
 - Gemini·Perplexity·브라우저 쿠키 기반 경로를 제거했습니다.
 - 라이선스는 원본 MIT 표기를 유지합니다. `LICENSE`를 참고하세요.

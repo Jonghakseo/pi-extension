@@ -4,7 +4,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { ExtractedContent } from "./extract.js";
 import { formatFullResults, stripThumbnails } from "./result-format.js";
-import { generateId, getResult, type QueryResultData, type StoredSearchData, storeResult } from "./storage.js";
+import { generateId, getResult, type QueryResultData, storeFetchedContentResult } from "./storage.js";
 import { formatSeconds } from "./utils.js";
 
 const MAX_INLINE_CONTENT = 30000;
@@ -73,14 +73,15 @@ export function registerContentTools(pi: ExtensionAPI): void {
 
 			// ALWAYS store results (even for single URL)
 			const responseId = generateId();
-			const data: StoredSearchData = {
-				id: responseId,
-				type: "fetch",
-				timestamp: Date.now(),
-				urls: stripThumbnails(fetchResults),
-			};
-			storeResult(responseId, data);
-			pi.appendEntry("web-search-results", data);
+			pi.appendEntry(
+				"web-search-results",
+				storeFetchedContentResult(responseId, {
+					id: responseId,
+					type: "fetch",
+					timestamp: Date.now(),
+					urls: stripThumbnails(fetchResults),
+				}),
+			);
 
 			// Single URL: return content directly (possibly truncated) with responseId
 			if (urlList.length === 1) {

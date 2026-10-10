@@ -11,10 +11,15 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export const CONFIG_PATH = join(homedir(), ".pi", "web-search.json");
 let activeConfigPath = CONFIG_PATH;
+
+/** Directory holding `web-search.json` (`~/.pi`); disk caches live in subfolders of it. */
+export function getWebSearchConfigDir(): string {
+	return dirname(activeConfigPath);
+}
 
 /** Raw JSON shape of `~/.pi/web-search.json` (all keys optional). */
 export interface WebSearchConfig {
