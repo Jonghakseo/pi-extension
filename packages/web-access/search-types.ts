@@ -17,5 +17,7 @@ export interface SearchOptions {
 	numResults?: number;
 	recencyFilter?: "day" | "week" | "month" | "year";
 	domainFilter?: string[];
+	/** Exa content category, e.g. "news" or "research paper". */
+	category?: string;
 	signal?: AbortSignal;
 }

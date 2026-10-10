@@ -156,6 +156,12 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 			domainFilter: Type.Optional(
 				Type.Array(Type.String(), { description: "Limit to domains (prefix with - to exclude)" }),
 			),
+			category: Type.Optional(
+				Type.String({
+					description:
+						'Restrict results to an Exa category, e.g. "news", "research paper", "pdf", "github", "company". Without an Exa API key it is added to the query text instead.',
+				}),
+			),
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate) {
@@ -191,6 +197,8 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 						numResults: params.numResults,
 						recencyFilter: isRecencyFilter(params.recencyFilter) ? params.recencyFilter : undefined,
 						domainFilter: params.domainFilter,
+						category:
+							typeof params.category === "string" && params.category.trim() ? params.category.trim() : undefined,
 						includeContent: params.includeContent,
 						signal,
 					});

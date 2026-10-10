@@ -361,6 +361,7 @@ function buildMcpQuery(query: string, options: ExaSearchOptions): string {
 				break;
 		}
 	}
+	if (options.category) parts.push(options.category);
 	return parts.join(" ");
 }
 
@@ -436,6 +437,7 @@ export async function searchWithExa(query: string, options: ExaSearchOptions = {
 		options.includeContent ||
 		!!options.recencyFilter ||
 		!!options.domainFilter?.length ||
+		!!options.category ||
 		!!(options.numResults && options.numResults !== 5);
 
 	const activityId = activityMonitor.logStart({ type: "api", query });
@@ -481,6 +483,7 @@ export async function searchWithExa(query: string, options: ExaSearchOptions = {
 				type: "auto",
 				numResults: options.numResults ?? 5,
 				...domainFilters,
+				...(options.category ? { category: options.category } : {}),
 				...(startDate ? { startPublishedDate: startDate } : {}),
 				contents: {
 					text: options.includeContent ? true : { maxCharacters: 3000 },

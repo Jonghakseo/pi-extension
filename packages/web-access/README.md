@@ -14,7 +14,7 @@ pi install npm:@ryan_nookpi/pi-extension-web-access
 
 | 이름 | 종류 | 설명 |
 |---|---|---|
-| `web_search` | 도구 | Exa로 검색합니다. `queries`로 여러 검색을 한 번에 보내고, `includeContent`로 본문을 백그라운드에서 받아둘 수 있습니다 |
+| `web_search` | 도구 | Exa로 검색합니다. `queries`로 여러 검색을 한 번에 보내고, `includeContent`로 본문을 백그라운드에서 받아둘 수 있습니다. `category`(`news`, `research paper`, `pdf`, `github` 등)로 Exa 결과 종류를 좁힐 수 있습니다 |
 | `fetch_content` | 도구 | 웹 페이지(서버가 마크다운을 주면 그대로 사용), PDF, GitHub 저장소·PR·이슈, YouTube·로컬 영상에서 텍스트를 추출합니다. `mode: "raw"`를 주면 HTTP(S) 응답 본문을 가공 없이 돌려줍니다 |
 | `get_search_content` | 도구 | 이전 `web_search`·`fetch_content` 결과의 전체 본문을 다시 가져옵니다 |
 | `/search` | 명령어 | 저장된 검색 결과를 둘러보고 삭제합니다 |
@@ -77,5 +77,6 @@ Exa 사용량은 `~/.pi/exa-usage.json`에 기록됩니다. PDF 추출 결과는
 - 추출 텍스트의 인라인 `data:` URI를 길이가 들어간 생략 표시로 바꿉니다(원본의 `data-uri-sanitize`). 원본과 같이 `raw` 모드는 제외합니다.
 - 직접 fetch에 SSRF 가드와 `fetchContent.domainPolicy`를 넣었습니다(원본의 `ssrf-protection`). 이 fork에는 프록시 경로가 없어 `ssrf.trustEnvProxy`와 프록시 관련 처리는 가져오지 않았고, `ssrf.allowRanges`만 남겼습니다.
 - GitHub PR·이슈 URL을 `gh api`로 가져와 렌더합니다(원본의 `github-issue-pr`). 원본의 `gh pr view --json` 필드 조합, REST 폴백, 체크 롤업·연결된 이슈 표시는 가져오지 않았습니다. `gh`가 실패하면 일반 HTTP 추출로 넘어갑니다. 끄려면 `githubPrIssue.enabled: false`입니다.
+- `web_search`에 Exa `category`를 추가했습니다(원본 0.36.0). 원본처럼 목록으로 제한하지 않고 문자열을 그대로 넘깁니다. API 키가 있으면 요청 body의 `category`로, 키 없는 MCP 경로는 필터를 받지 못하므로 쿼리 텍스트 뒤에 덧붙입니다. 원본의 MCP 고급 도구 시도는 가져오지 않았습니다.
 - Gemini·Perplexity·브라우저 쿠키 기반 경로를 제거했습니다.
 - 라이선스는 원본 MIT 표기를 유지합니다. `LICENSE`를 참고하세요.
