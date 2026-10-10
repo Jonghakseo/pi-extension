@@ -5,6 +5,7 @@ import TurndownService from "turndown";
 import { activityMonitor } from "./activity.js";
 import { sanitizeExtractedContents } from "./data-uri-sanitize.js";
 import { extractGitHub } from "./github-extract.js";
+import { extractGitHubIssuePr } from "./github-issue-pr.js";
 import { extractPDFToMarkdown, isPDF } from "./pdf-extract.js";
 import { extractRSCContent } from "./rsc-extract.js";
 import { assertUrlAllowedByDomainPolicy, fetchRemoteUrl, validateRemoteUrl } from "./ssrf-protection.js";
@@ -416,6 +417,10 @@ export async function extractContent(
 	}
 
 	try {
+		// PR and issue URLs go through gh api; null (gh missing or failing) falls through to HTTP.
+		const prIssueResult = await extractGitHubIssuePr(url, signal);
+		if (prIssueResult) return prIssueResult;
+		if (signal?.aborted) return abortedResult(url);
 		const ghResult = await extractGitHub(url, signal);
 		if (ghResult) return ghResult;
 		if (signal?.aborted) return abortedResult(url);

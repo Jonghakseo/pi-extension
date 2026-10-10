@@ -23,6 +23,7 @@ export interface WebSearchConfig {
 	githubClone?: {
 		enabled?: unknown;
 	};
+	githubPrIssue?: { enabled?: unknown };
 	fetchContent?: { domainPolicy?: unknown };
 	ssrf?: { allowRanges?: unknown };
 }
