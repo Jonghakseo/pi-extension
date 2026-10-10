@@ -15,10 +15,16 @@ export function registerContentTools(pi: ExtensionAPI): void {
 		name: "fetch_content",
 		label: "Fetch Content",
 		description:
-			"Extract text from web pages, GitHub, and PDFs. YouTube and local videos support frames only (timestamp/frames), not transcripts. Use get_search_content for full stored results.",
+			'Extract text from web pages, GitHub, and PDFs. YouTube and local videos support frames only (timestamp/frames), not transcripts. Use mode: "raw" for the exact text body of an HTTP(S) URL (JSON, XML, plain text, source files) without readability extraction. Use get_search_content for full stored results.',
 		parameters: Type.Object({
 			url: Type.Optional(Type.String({ description: "Single URL to fetch" })),
 			urls: Type.Optional(Type.Array(Type.String(), { description: "Multiple URLs (parallel)" })),
+			mode: Type.Optional(
+				Type.Union([Type.Literal("readable"), Type.Literal("raw")], {
+					description:
+						'"readable" (default) extracts the main content as markdown. "raw" returns the exact text response body of an HTTP(S) URL (up to 5MB, text types only) and ignores timestamp/frames.',
+				}),
+			),
 			timestamp: Type.Optional(
 				Type.String({
 					description:
@@ -60,6 +66,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 			const fetchResults = await fetchAllContent(urlList, signal, {
 				timestamp: params.timestamp,
 				frames: params.frames,
+				mode: params.mode,
 			});
 			const successful = fetchResults.filter((r) => !r.error).length;
 			const totalChars = fetchResults.reduce((sum, r) => sum + r.content.length, 0);

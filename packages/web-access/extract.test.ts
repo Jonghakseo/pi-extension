@@ -105,6 +105,106 @@ describe("markdown-first content negotiation", () => {
 	});
 });
 
+describe("fetch mode raw", () => {
+	async function withServer(
+		handler: Parameters<typeof createServer>[1],
+		run: (url: string) => Promise<void>,
+	): Promise<void> {
+		const server = createServer(handler);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		try {
+			const address = server.address();
+			if (!address || typeof address === "string") throw new Error("Expected a TCP address");
+			await run(`http://127.0.0.1:${address.port}/data`);
+		} finally {
+			server.closeAllConnections();
+			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		}
+	}
+
+	it("returns a JSON body untouched without asking for markdown", async () => {
+		const body = `{\n  "name": "raw",\n  "items": [1, 2, 3]\n}`;
+		let accept = "";
+		await withServer(
+			(request, response) => {
+				accept = String(request.headers.accept);
+				response.setHeader("content-type", "application/json");
+				response.end(body);
+			},
+			async (url) => {
+				const result = await extractContent(url, undefined, { mode: "raw" });
+				expect(result.error).toBeNull();
+				expect(result.content).toBe(body);
+				expect(accept.startsWith("text/html")).toBe(true);
+			},
+		);
+	});
+
+	it("does not run Readability on an HTML response", async () => {
+		const html = `<html><body><nav>menu</nav><article><p>short</p></article></body></html>`;
+		await withServer(
+			(_request, response) => {
+				response.setHeader("content-type", "text/html; charset=utf-8");
+				response.end(html);
+			},
+			async (url) => {
+				const result = await extractContent(url, undefined, { mode: "raw" });
+				expect(result.error).toBeNull();
+				expect(result.content).toBe(html);
+			},
+		);
+	});
+
+	it("rejects binary content types with a clear error", async () => {
+		await withServer(
+			(_request, response) => {
+				response.setHeader("content-type", "application/pdf");
+				response.end("%PDF-1.4");
+			},
+			async (url) => {
+				const result = await extractContent(url, undefined, { mode: "raw" });
+				expect(result.error).toContain("Unsupported content type in raw mode: application/pdf");
+				expect(result.content).toBe("");
+			},
+		);
+	});
+
+	it("rejects bodies over 5MB even without a content-length header", async () => {
+		await withServer(
+			(_request, response) => {
+				response.setHeader("content-type", "text/plain");
+				response.write(Buffer.alloc(3 * 1024 * 1024, "a"));
+				response.end(Buffer.alloc(3 * 1024 * 1024, "a"));
+			},
+			async (url) => {
+				const result = await extractContent(url, undefined, { mode: "raw" });
+				expect(result.error).toContain("Response too large");
+				expect(result.content).toBe("");
+			},
+		);
+	});
+
+	it("refuses non-http URLs instead of reading local files", async () => {
+		const result = await extractContent("file:///etc/hosts", undefined, { mode: "raw" });
+		expect(result.error).toContain("http(s)");
+	});
+
+	it("keeps an HTTP error status as an error while returning the body", async () => {
+		await withServer(
+			(_request, response) => {
+				response.statusCode = 404;
+				response.setHeader("content-type", "application/json");
+				response.end('{"error":"missing"}');
+			},
+			async (url) => {
+				const result = await extractContent(url, undefined, { mode: "raw" });
+				expect(result.error).toContain("HTTP 404");
+				expect(result.content).toBe('{"error":"missing"}');
+			},
+		);
+	});
+});
+
 describe("video content without Gemini", () => {
 	it("explains how to extract images from a YouTube URL", async () => {
 		const result = await extractContent("https://www.youtube.com/watch?v=dQw4w9WgXcQ");

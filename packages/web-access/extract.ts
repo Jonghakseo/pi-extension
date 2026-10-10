@@ -58,8 +58,11 @@ export interface ExtractedContent {
 	duration?: number;
 }
 
+export type FetchMode = "readable" | "raw";
+
 export interface ExtractOptions {
 	timeoutMs?: number;
+	mode?: FetchMode;
 	timestamp?: string;
 	frames?: number;
 }
@@ -211,6 +214,10 @@ export async function extractContent(
 ): Promise<ExtractedContent> {
 	if (signal?.aborted) {
 		return { url, title: "", content: "", error: "Aborted" };
+	}
+
+	if (options?.mode === "raw") {
+		return extractRaw(url, signal, options);
 	}
 
 	if (options?.frames && !options.timestamp) {
@@ -454,10 +461,146 @@ function isLikelyJSRendered(html: string): boolean {
 // Servers that support markdown content negotiation (Cloudflare Markdown for
 // Agents, Mintlify, Vercel) return markdown directly; others see the same
 // HTML preference order a browser would send.
+const BROWSER_USER_AGENT =
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 const BROWSER_ACCEPT =
 	"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8";
 const MARKDOWN_FIRST_ACCEPT =
 	"text/markdown,text/html;q=0.9,application/xhtml+xml;q=0.9,application/xml;q=0.8,image/avif;q=0.9,image/webp;q=0.9,image/apng;q=0.9,*/*;q=0.7";
+
+const RAW_MAX_BYTES = 5 * 1024 * 1024;
+
+function isTextContentType(contentType: string): boolean {
+	const mimeType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+	return (
+		mimeType.startsWith("text/") ||
+		mimeType === "application/json" ||
+		mimeType === "application/xml" ||
+		mimeType === "application/xhtml+xml" ||
+		mimeType === "application/javascript" ||
+		mimeType === "application/x-javascript" ||
+		mimeType === "application/x-ndjson" ||
+		mimeType === "application/yaml" ||
+		mimeType.endsWith("+json") ||
+		mimeType.endsWith("+xml")
+	);
+}
+
+async function readTextWithLimit(response: Response, maxBytes: number): Promise<string> {
+	const tooLarge = () => new Error(`Response too large (${Math.round(maxBytes / 1024 / 1024)}MB)`);
+	const reader = response.body?.getReader();
+	let buffer: Uint8Array;
+	if (!reader) {
+		buffer = new Uint8Array(await response.arrayBuffer());
+		if (buffer.byteLength > maxBytes) throw tooLarge();
+	} else {
+		const chunks: Uint8Array[] = [];
+		let total = 0;
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				if (!value) continue;
+				total += value.byteLength;
+				if (total > maxBytes) {
+					await reader.cancel();
+					throw tooLarge();
+				}
+				chunks.push(value);
+			}
+		} finally {
+			reader.releaseLock();
+		}
+		buffer = new Uint8Array(total);
+		let offset = 0;
+		for (const chunk of chunks) {
+			buffer.set(chunk, offset);
+			offset += chunk.byteLength;
+		}
+	}
+	const charset = response.headers.get("content-type")?.match(/charset\s*=\s*["']?([^;"'\s]+)/i)?.[1];
+	try {
+		return new TextDecoder(charset || "utf-8").decode(buffer);
+	} catch {
+		return new TextDecoder("utf-8").decode(buffer);
+	}
+}
+
+// mode: "raw" returns the server's own text body untouched. It asks for the
+// normal browser representation (no markdown preference) and skips the
+// GitHub/YouTube/video handlers, Readability, and the Jina fallback.
+async function extractRaw(url: string, signal?: AbortSignal, options?: ExtractOptions): Promise<ExtractedContent> {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return { url, title: "", content: "", error: "Invalid URL" };
+	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		return { url, title: "", content: "", error: "Raw mode only supports http(s) URLs" };
+	}
+
+	const activityId = activityMonitor.logStart({ type: "fetch", url });
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), options?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+	const onAbort = () => controller.abort();
+	signal?.addEventListener("abort", onAbort);
+
+	try {
+		const response = await fetch(url, {
+			signal: controller.signal,
+			headers: {
+				"User-Agent": BROWSER_USER_AGENT,
+				Accept: BROWSER_ACCEPT,
+				"Accept-Language": "en-US,en;q=0.9",
+				"Cache-Control": "no-cache",
+			},
+		});
+
+		const contentType = response.headers.get("content-type") || "";
+		const mimeType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+		const contentLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+		if (Number.isFinite(contentLength) && contentLength > RAW_MAX_BYTES) {
+			activityMonitor.logComplete(activityId, response.status);
+			return {
+				url,
+				title: "",
+				content: "",
+				error: `Response too large (${Math.round(contentLength / 1024 / 1024)}MB)`,
+			};
+		}
+		if (!isTextContentType(contentType)) {
+			activityMonitor.logComplete(activityId, response.status);
+			await response.body?.cancel().catch(() => {});
+			return {
+				url,
+				title: "",
+				content: "",
+				error: `Unsupported content type in raw mode: ${mimeType || "missing"}. Raw mode only returns text responses.`,
+			};
+		}
+
+		const text = await readTextWithLimit(response, RAW_MAX_BYTES);
+		activityMonitor.logComplete(activityId, response.status);
+		const title = extractTextTitle(text, url);
+		if (!response.ok) {
+			return { url, title, content: text, error: `HTTP ${response.status}: ${response.statusText}` };
+		}
+		return { url, title, content: text, error: null };
+	} catch (err) {
+		const message = errorMessage(err);
+		if (isAbortError(err)) {
+			activityMonitor.logComplete(activityId, 0);
+			if (signal?.aborted) return abortedResult(url);
+		} else {
+			activityMonitor.logError(activityId, message);
+		}
+		return { url, title: "", content: "", error: message };
+	} finally {
+		clearTimeout(timeoutId);
+		signal?.removeEventListener("abort", onAbort);
+	}
+}
 
 async function extractViaHttp(
 	url: string,
@@ -478,8 +621,7 @@ async function extractViaHttp(
 		const response = await fetch(url, {
 			signal: controller.signal,
 			headers: {
-				"User-Agent":
-					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+				"User-Agent": BROWSER_USER_AGENT,
 				Accept: preferMarkdown ? MARKDOWN_FIRST_ACCEPT : BROWSER_ACCEPT,
 				"Accept-Language": "en-US,en;q=0.9",
 				"Cache-Control": "no-cache",
