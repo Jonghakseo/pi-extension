@@ -33,6 +33,14 @@ fetch_content({ url: "https://example.com/api/items.json", mode: "raw" })
 
 `fetch_content`가 가져온 URL 전문은 세션 JSONL이 아니라 Pi 설정 디렉터리(`~/.pi`) 아래 `web-search-cache`에 저장됩니다. 세션에는 URL·제목·길이 같은 메타데이터와 캐시 참조만 남습니다. 캐시 수명은 1시간이고 최대 128개, 128MiB입니다. 한도를 넘으면 오래된 항목부터 지웁니다. macOS·Linux에서 디렉터리는 `0700`, 파일은 `0600`으로 유지합니다. `PI_WEB_ACCESS_CACHE_ROOT`로 루트 디렉터리를 바꿀 수 있고, 캐시는 그 안의 `web-search-cache`에 생깁니다. 같은 값 없이 이어 연 세션은 거기 저장된 본문을 읽지 못합니다. 캐시가 만료되거나 지워진 뒤 `get_search_content`를 부르면 "Cached fetched content is missing or expired" 에러가 URL별로 나옵니다. 캐시 도입 전 세션에 본문이 그대로 들어 있는 기록은 1시간 안이면 그대로 읽힙니다.
 
+Pi `codemode` 스크립트에서 `tools.web_search`와 `tools.fetch_content`를 부르면 텍스트 대신 구조화된 데이터를 돌려줍니다(두 도구의 `outputSchema`). `web_search`는 `{ responseId, fetchId, queries: [{ query, answer, error, provider?, results: [{ title, url, snippet }] }] }`이고, `fetch_content`는 `{ responseId, urls: [{ url, title, content, error, duration? }] }`입니다. `content`는 모델에게 보이는 30,000자 상한 없이 추출한 전문입니다. 모든 쿼리나 URL이 실패해도 쿼리·URL별 `error`가 담긴 데이터가 함께 오고 `isError`가 붙습니다. 스크립트가 부른 `web_search`에서는 `includeContent`가 백그라운드 대신 본문을 받을 때까지 기다리고, 결과의 `fetchId`로 `get_search_content`를 쓸 수 있습니다. 모델이 직접 부를 때의 출력은 그대로입니다.
+
+```js
+const { queries } = await tools.web_search({ queries: ["pi codemode", "exa search"] });
+const pages = await tools.fetch_content({ urls: queries.flatMap((q) => q.results.slice(0, 1).map((r) => r.url)) });
+return pages.urls.map((u) => ({ url: u.url, chars: u.content.length, error: u.error }));
+```
+
 `get_search_content`는 저장된 본문을 `offset`/`limit`(기본·최대 30,000자)으로 잘라 돌려주고, 더 남았으면 다음 `offset`을 안내합니다. `findText`(문자열 또는 최대 10개 배열)를 주면 본문 전체를 읽지 않고 일치 구절과 앞뒤 문맥만 돌려줍니다. `findMode`는 `exact`, `case-insensitive`(기본), `fuzzy`이고, 출력은 20,000자로 제한되며 매치 수가 함께 표시됩니다. `findText`와 `offset`/`limit`을 같이 주거나 `findText` 없이 `findMode`만 주면 에러입니다.
 
 ```
@@ -89,5 +97,6 @@ Exa 사용량은 `~/.pi/exa-usage.json`에 기록됩니다. PDF 추출 결과는
 - `web_search`에 Exa `category`를 추가했습니다(원본 0.36.0). 원본처럼 목록으로 제한하지 않고 문자열을 그대로 넘깁니다. API 키가 있으면 요청 body의 `category`로, 키 없는 MCP 경로는 필터를 받지 못하므로 쿼리 텍스트 뒤에 덧붙입니다. 원본의 MCP 고급 도구 시도는 가져오지 않았습니다.
 - `fetch_content` 전문을 `web-search-cache` 디스크 캐시에 저장하고 세션에는 참조만 남깁니다(원본 `storage.ts`). 원본의 research 결과 저장과, 여러 세션이 한 프로세스에서 같은 결과를 공유할 때 쓰는 holder 계수는 가져오지 않았습니다.
 - `get_search_content`에 `offset`/`limit`/`findText`/`findMode`를 추가했습니다(원본의 `content-find`). 검색 결과와 fetch 본문 모두에 적용되고, 원본의 research artifact 페이징과 검색 결과 페이지의 continuation 예산 계산은 가져오지 않았습니다.
+- Pi `codemode` 스크립트에 `web_search`·`fetch_content`의 구조화된 결과를 돌려줍니다(원본 0.37.0). 스크립트가 부른 `web_search`의 `includeContent`는 완료를 기다립니다. 원본의 `outputSchema`에 있던 `providers`, `mimeType`, `status` 필드는 이 fork에 해당 데이터가 없어 뺐고, MCP 서버 쪽 구조화 출력도 없습니다.
 - Gemini·Perplexity·브라우저 쿠키 기반 경로를 제거했습니다.
 - 라이선스는 원본 MIT 표기를 유지합니다. `LICENSE`를 참고하세요.

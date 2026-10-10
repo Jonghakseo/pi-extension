@@ -16,6 +16,40 @@ import {
 	storeResult,
 } from "./storage.js";
 
+// Shape of `structuredContent`, the data a Pi codemode script receives instead of the text output.
+const nullableString = (description: string) => Type.Union([Type.String(), Type.Null()], { description });
+const webSearchOutputSchema = Type.Object({
+	responseId: Type.String({ description: "Id of the stored search results" }),
+	fetchId: nullableString("Stored page content id when includeContent fetched or started fetching content, else null"),
+	queries: Type.Array(
+		Type.Object({
+			query: Type.String(),
+			answer: Type.String({ description: "Provider answer text, empty when the provider returned only results" }),
+			error: nullableString("Why this query failed, null on success"),
+			provider: Type.Optional(Type.String()),
+			results: Type.Array(Type.Object({ title: Type.String(), url: Type.String(), snippet: Type.String() })),
+		}),
+	),
+});
+
+function searchStructuredContent(
+	responseId: string,
+	fetchId: string | null,
+	results: QueryResultData[],
+): AgentToolResult<unknown>["structuredContent"] {
+	return {
+		responseId,
+		fetchId,
+		queries: results.map(({ query, answer, error, provider, results: hits }) => ({
+			query,
+			answer,
+			error,
+			...(provider ? { provider } : {}),
+			results: hits.map(({ title, url, snippet }) => ({ title, url, snippet })),
+		})),
+	};
+}
+
 const isRecencyFilter = (value: unknown): value is "day" | "week" | "month" | "year" =>
 	value === "day" || value === "week" || value === "month" || value === "year";
 
@@ -128,6 +162,7 @@ function buildSearchReturn(pi: ExtensionAPI, opts: SearchReturnOptions): AgentTo
 		// Only when every query failed; a partial failure or an empty result set is not an error.
 		...(sc === 0 && opts.queryList.length > 0 ? { isError: true } : {}),
 		content: [{ type: "text", text: output.trim() }],
+		structuredContent: searchStructuredContent(searchId, fetchId, opts.results),
 		details: {
 			queries: opts.queryList,
 			queryCount: opts.queryList.length,
@@ -142,6 +177,24 @@ function buildSearchReturn(pi: ExtensionAPI, opts: SearchReturnOptions): AgentTo
 }
 
 export function registerWebSearchTool(pi: ExtensionAPI): void {
+	// A call another tool makes (a Pi codemode script) reaches the tool_call handlers with
+	// parentToolCallId set, before execute. Such a script wants the finished data, so
+	// includeContent waits for the fetch instead of continuing in the background.
+	const nestedCallIds = new Set<string>();
+	pi.on("tool_call", (event) => {
+		if (event.parentToolCallId && event.toolName === "web_search") nestedCallIds.add(event.toolCallId);
+	});
+	// Ids of calls a later handler blocked never reach execute; drop them with the session.
+	pi.on("session_start", () => {
+		nestedCallIds.clear();
+	});
+	pi.on("session_tree", () => {
+		nestedCallIds.clear();
+	});
+	pi.on("session_shutdown", () => {
+		nestedCallIds.clear();
+	});
+
 	pi.registerTool({
 		name: "web_search",
 		label: "Web Search",
@@ -171,8 +224,10 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 				}),
 			),
 		}),
+		outputSchema: webSearchOutputSchema,
 
-		async execute(_toolCallId, params, signal, onUpdate) {
+		async execute(toolCallId, params, signal, onUpdate) {
+			const nested = nestedCallIds.delete(toolCallId);
 			const rawQueryList: unknown[] = Array.isArray(params.queries)
 				? params.queries
 				: params.query !== undefined
@@ -227,12 +282,26 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 				}
 			}
 
+			let inlineContent = allInlineContent.length > 0 ? allInlineContent : undefined;
+			if (nested && params.includeContent && allUrls.length > 0 && !hasFullInlineCoverage(allUrls, inlineContent)) {
+				const { fetchAllContent } = await import("./extract.js");
+				const provided = new Map<string, ExtractedContent>();
+				for (const content of inlineContent ?? []) {
+					if (!provided.has(content.url)) provided.set(content.url, content);
+				}
+				const missing = allUrls.filter((url) => !provided.has(url));
+				const fetched = await fetchAllContent(missing, signal);
+				signal?.throwIfAborted();
+				for (const content of fetched) provided.set(content.url, content);
+				inlineContent = stripThumbnails(allUrls.flatMap((url) => provided.get(url) ?? []));
+			}
+
 			return buildSearchReturn(pi, {
 				queryList,
 				results: searchResults,
 				urls: allUrls,
 				includeContent: params.includeContent ?? false,
-				inlineContent: allInlineContent.length > 0 ? allInlineContent : undefined,
+				inlineContent,
 			});
 		},
 

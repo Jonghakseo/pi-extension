@@ -19,6 +19,7 @@ function collectTools(register: (pi: ExtensionAPI) => void): Record<string, Tool
 			tools[tool.name] = tool;
 		},
 		appendEntry: () => {},
+		on: () => {},
 	} as unknown as ExtensionAPI);
 	return tools;
 }

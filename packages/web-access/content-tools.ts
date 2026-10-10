@@ -9,6 +9,33 @@ import { generateId, getResult, type QueryResultData, storeFetchedContentResult 
 import { formatSeconds } from "./utils.js";
 
 const MAX_INLINE_CONTENT = 30000;
+
+// Shape of `structuredContent`, the data a Pi codemode script receives instead of the text output.
+const fetchContentOutputSchema = Type.Object({
+	responseId: Type.Union([Type.String(), Type.Null()], { description: "Id of the stored content" }),
+	urls: Type.Array(
+		Type.Object({
+			url: Type.String(),
+			title: Type.String(),
+			content: Type.String({ description: "Full extracted content, not limited by the inline character cap" }),
+			error: Type.Union([Type.String(), Type.Null()], { description: "Why this URL failed, null on success" }),
+			duration: Type.Optional(Type.Number()),
+		}),
+	),
+});
+
+function fetchStructuredContent(responseId: string, results: ExtractedContent[]) {
+	return {
+		responseId,
+		urls: results.map(({ url, title, content, error, duration }) => ({
+			url,
+			title,
+			content,
+			error,
+			...(duration !== undefined ? { duration } : {}),
+		})),
+	};
+}
 const textContent = (text: string): TextContent => ({ type: "text", text });
 const imageContent = (data: string, mimeType: string): ImageContent => ({ type: "image", data, mimeType });
 export function registerContentTools(pi: ExtensionAPI): void {
@@ -41,6 +68,8 @@ export function registerContentTools(pi: ExtensionAPI): void {
 				}),
 			),
 		}),
+
+		outputSchema: fetchContentOutputSchema,
 
 		async execute(_toolCallId, params, signal, onUpdate) {
 			const urlList = params.urls ?? (params.url ? [params.url] : []);
@@ -84,6 +113,8 @@ export function registerContentTools(pi: ExtensionAPI): void {
 				}),
 			);
 
+			const structuredContent = fetchStructuredContent(responseId, fetchResults);
+
 			// Single URL: return content directly (possibly truncated) with responseId
 			if (urlList.length === 1) {
 				const result = fetchResults[0];
@@ -91,6 +122,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 					return {
 						isError: true,
 						content: [{ type: "text", text: `Error: ${result.error}` }],
+						structuredContent,
 						details: {
 							urls: urlList,
 							urlCount: 1,
@@ -129,6 +161,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 				const imageCount = (result.frames?.length ?? 0) + (result.thumbnail ? 1 : 0);
 				return {
 					content,
+					structuredContent,
 					details: {
 						urls: urlList,
 						urlCount: 1,
@@ -160,6 +193,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 			return {
 				...(successful === 0 ? { isError: true } : {}),
 				content: [{ type: "text", text: output }],
+				structuredContent,
 				details: { urls: urlList, urlCount: urlList.length, successful, totalChars, responseId },
 			};
 		},

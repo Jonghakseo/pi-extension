@@ -23,6 +23,7 @@ describe("web search without Gemini", () => {
 			registerTool: (tool: { parameters: { properties: Record<string, unknown> } }) => {
 				parameters = tool.parameters;
 			},
+			on: () => {},
 		} as unknown as ExtensionAPI);
 		expect(parameters?.properties).not.toHaveProperty("provider");
 	});
