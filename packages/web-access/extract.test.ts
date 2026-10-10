@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { extractContent } from "./extract.js";
+import { extractContent, fetchAllContent } from "./extract.js";
 
 describe("web content without Gemini", () => {
 	it("extracts a readable page from a local HTTP server", async () => {
@@ -202,6 +202,44 @@ describe("fetch mode raw", () => {
 				expect(result.content).toBe('{"error":"missing"}');
 			},
 		);
+	});
+});
+
+describe("inline data URI removal", () => {
+	const payload = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+	const markdown = `# Page with image\n\n${"Some readable text. ".repeat(40)}\n\n![pixel](data:image/png;base64,${payload})\n`;
+
+	async function withMarkdownServer(run: (url: string) => Promise<void>): Promise<void> {
+		const server = createServer((_request, response) => {
+			response.setHeader("content-type", "text/markdown");
+			response.end(markdown);
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		try {
+			const address = server.address();
+			if (!address || typeof address === "string") throw new Error("Expected a TCP address");
+			await run(`http://127.0.0.1:${address.port}/page`);
+		} finally {
+			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		}
+	}
+
+	it("replaces data URIs in fetched content with an omission marker", async () => {
+		await withMarkdownServer(async (url) => {
+			const [result] = await fetchAllContent([url]);
+			expect(result.error).toBeNull();
+			expect(result.content).toContain("![pixel](");
+			expect(result.content).toContain("inline data URI omitted");
+			expect(result.content).not.toContain(payload);
+			expect(result.content).not.toMatch(/data:image/i);
+		});
+	});
+
+	it("leaves raw mode bodies exactly as served", async () => {
+		await withMarkdownServer(async (url) => {
+			const [result] = await fetchAllContent([url], undefined, { mode: "raw" });
+			expect(result.content).toBe(markdown);
+		});
 	});
 });
 

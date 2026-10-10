@@ -3,6 +3,7 @@ import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-ag
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { normalizeQueryList } from "./config-runtime.js";
+import { sanitizeExtractedContents } from "./data-uri-sanitize.js";
 import type { ExtractedContent } from "./extract.js";
 import { formatSearchSummary, hasFullInlineCoverage, stripThumbnails } from "./result-format.js";
 import { search } from "./search.js";
@@ -91,7 +92,7 @@ function buildSearchReturn(pi: ExtensionAPI, opts: SearchReturnOptions): AgentTo
 			id: fetchId,
 			type: "fetch",
 			timestamp: Date.now(),
-			urls: opts.inlineContent,
+			urls: sanitizeExtractedContents(opts.inlineContent),
 		};
 		storeResult(fetchId, data);
 		pi.appendEntry("web-search-results", data);

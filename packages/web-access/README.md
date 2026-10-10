@@ -27,6 +27,8 @@ pi install npm:@ryan_nookpi/pi-extension-web-access
 fetch_content({ url: "https://example.com/api/items.json", mode: "raw" })
 ```
 
+추출한 텍스트 안의 `data:` URI(base64 이미지 등)는 `[pi-web-access inline data URI omitted; mime=...; encodedBytes=...; sha256=...]` 형태의 표시로 바뀝니다. 모델 출력과 세션에 저장되는 본문 어디에도 base64 페이로드가 남지 않습니다. `web_search`가 함께 가져온 본문도 저장 전에 같은 처리를 거칩니다. `mode: "raw"`는 본문을 그대로 돌려주는 모드라서 이 처리를 하지 않습니다.
+
 ## 설정
 
 설정 없이 키 없는 Exa MCP로 동작합니다. 무료 한도를 넘기면 Exa API 키를 넣습니다.
@@ -61,5 +63,6 @@ Exa 사용량은 `~/.pi/exa-usage.json`에 기록됩니다. PDF 추출 결과는
 - 실패한 호출을 `isError: true`로 표시합니다(원본 0.37.0).
 - `fetch_content`가 HTTP 요청에서 `text/markdown`을 먼저 요청합니다(원본 0.36.0). 서버가 `text/markdown`·`text/x-markdown`으로 답하면 Readability를 거치지 않고 본문을 그대로 씁니다. 500자 미만의 짧은 마크다운은 브라우저 Accept 헤더로 한 번 더 요청합니다.
 - `fetch_content`에 `mode: "raw"`를 추가했습니다(원본). 원본의 `answer` 모드와 `auth` 프로필은 가져오지 않았습니다.
+- 추출 텍스트의 인라인 `data:` URI를 길이가 들어간 생략 표시로 바꿉니다(원본의 `data-uri-sanitize`). 원본과 같이 `raw` 모드는 제외합니다.
 - Gemini·Perplexity·브라우저 쿠키 기반 경로를 제거했습니다.
 - 라이선스는 원본 MIT 표기를 유지합니다. `LICENSE`를 참고하세요.

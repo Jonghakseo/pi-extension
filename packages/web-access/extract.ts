@@ -3,6 +3,7 @@ import { parseHTML } from "linkedom";
 import pLimit from "p-limit";
 import TurndownService from "turndown";
 import { activityMonitor } from "./activity.js";
+import { sanitizeExtractedContents } from "./data-uri-sanitize.js";
 import { extractGitHub } from "./github-extract.js";
 import { extractPDFToMarkdown, isPDF } from "./pdf-extract.js";
 import { extractRSCContent } from "./rsc-extract.js";
@@ -784,5 +785,8 @@ export async function fetchAllContent(
 	signal?: AbortSignal,
 	options?: ExtractOptions,
 ): Promise<ExtractedContent[]> {
-	return Promise.all(urls.map((url) => fetchLimit(() => extractContent(url, signal, options))));
+	const results = await Promise.all(urls.map((url) => fetchLimit(() => extractContent(url, signal, options))));
+	// Raw mode promises the exact body, so it is the one path left untouched.
+	if (options?.mode === "raw") return results;
+	return sanitizeExtractedContents(results);
 }
