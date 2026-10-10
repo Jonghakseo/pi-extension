@@ -24,6 +24,7 @@ export function getWebSearchConfigDir(): string {
 /** Raw JSON shape of `~/.pi/web-search.json` (all keys optional). */
 export interface WebSearchConfig {
 	exaApiKey?: unknown;
+	openaiSearchModel?: unknown;
 	video?: { enabled?: unknown; maxSizeMB?: unknown };
 	githubClone?: {
 		enabled?: unknown;

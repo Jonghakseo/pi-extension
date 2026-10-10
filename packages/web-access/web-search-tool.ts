@@ -6,7 +6,7 @@ import { normalizeQueryList } from "./config-runtime.js";
 import { sanitizeExtractedContents } from "./data-uri-sanitize.js";
 import type { ExtractedContent } from "./extract.js";
 import { formatSearchSummary, hasFullInlineCoverage, stripThumbnails } from "./result-format.js";
-import { search } from "./search.js";
+import { isSearchProvider, search } from "./search.js";
 import { state } from "./state.js";
 import {
 	generateId,
@@ -199,7 +199,7 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 		name: "web_search",
 		label: "Web Search",
 		description:
-			"Search with Exa (API key or keyless MCP). Use queries for multiple searches; includeContent fetches source pages in the background.",
+			"Search the web with Exa (API key or keyless MCP) or, when logged in with a Codex subscription, OpenAI hosted web search (provider: auto/exa/openai). Use queries for multiple searches; includeContent fetches source pages in the background.",
 		parameters: Type.Object({
 			query: Type.Optional(
 				Type.String({
@@ -217,6 +217,12 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 			domainFilter: Type.Optional(
 				Type.Array(Type.String(), { description: "Limit to domains (prefix with - to exclude)" }),
 			),
+			provider: Type.Optional(
+				StringEnum(["auto", "exa", "openai"], {
+					description:
+						'Search provider (default: auto). auto uses OpenAI first when the current model is a Codex subscription model, then falls back to Exa; otherwise Exa. "openai" needs a Codex /login and uses subscription quota, with no fallback.',
+				}),
+			),
 			category: Type.Optional(
 				Type.String({
 					description:
@@ -226,7 +232,7 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 		}),
 		outputSchema: webSearchOutputSchema,
 
-		async execute(toolCallId, params, signal, onUpdate) {
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const nested = nestedCallIds.delete(toolCallId);
 			const rawQueryList: unknown[] = Array.isArray(params.queries)
 				? params.queries
@@ -243,6 +249,16 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 				};
 			}
 
+			if (params.provider !== undefined && !isSearchProvider(params.provider)) {
+				return {
+					isError: true,
+					content: [
+						{ type: "text", text: `Error: Unknown provider "${String(params.provider)}". Use auto, exa, or openai.` },
+					],
+					details: { error: "Unknown provider" },
+				};
+			}
+
 			const searchResults: QueryResultData[] = [];
 			const allUrls: string[] = [];
 			const allInlineContent: ExtractedContent[] = [];
@@ -256,15 +272,20 @@ export function registerWebSearchTool(pi: ExtensionAPI): void {
 				});
 
 				try {
-					const { answer, results, inlineContent, provider } = await search(query, {
-						numResults: params.numResults,
-						recencyFilter: isRecencyFilter(params.recencyFilter) ? params.recencyFilter : undefined,
-						domainFilter: params.domainFilter,
-						category:
-							typeof params.category === "string" && params.category.trim() ? params.category.trim() : undefined,
-						includeContent: params.includeContent,
-						signal,
-					});
+					const { answer, results, inlineContent, provider } = await search(
+						query,
+						{
+							provider: params.provider,
+							numResults: params.numResults,
+							recencyFilter: isRecencyFilter(params.recencyFilter) ? params.recencyFilter : undefined,
+							domainFilter: params.domainFilter,
+							category:
+								typeof params.category === "string" && params.category.trim() ? params.category.trim() : undefined,
+							includeContent: params.includeContent,
+							signal,
+						},
+						ctx,
+					);
 
 					if (signal?.aborted) break;
 

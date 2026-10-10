@@ -14,12 +14,20 @@ pi install npm:@ryan_nookpi/pi-extension-web-access
 
 | 이름 | 종류 | 설명 |
 |---|---|---|
-| `web_search` | 도구 | Exa로 검색합니다. `queries`로 여러 검색을 한 번에 보내고, `includeContent`로 본문을 백그라운드에서 받아둘 수 있습니다. `category`(`news`, `research paper`, `pdf`, `github` 등)로 Exa 결과 종류를 좁힐 수 있습니다 |
+| `web_search` | 도구 | Exa 또는 Codex 구독 OpenAI로 검색합니다(`provider`). `queries`로 여러 검색을 한 번에 보내고, `includeContent`로 본문을 백그라운드에서 받아둘 수 있습니다. `category`(`news`, `research paper`, `pdf`, `github` 등)로 Exa 결과 종류를 좁힐 수 있습니다 |
 | `fetch_content` | 도구 | 웹 페이지(서버가 마크다운을 주면 그대로 사용), PDF, GitHub 저장소·PR·이슈, YouTube·로컬 영상에서 텍스트를 추출합니다. `mode: "raw"`를 주면 HTTP(S) 응답 본문을 가공 없이 돌려줍니다 |
 | `get_search_content` | 도구 | 이전 `web_search`·`fetch_content` 결과의 본문을 다시 가져옵니다. `offset`/`limit`로 잘라 읽거나 `findText`로 일치 구절만 찾을 수 있습니다 |
 | `/search` | 명령어 | 저장된 검색 결과를 둘러보고 삭제합니다 |
 
 모든 검색 쿼리나 모든 URL이 실패하거나, `fetch_content`에 `url`/`urls`가 없거나, `get_search_content`에 없는 `responseId`·인덱스를 넘기면 tool result에 `isError: true`가 붙습니다. 일부만 실패한 호출에는 붙지 않습니다.
+
+`web_search`의 `provider`는 `auto`(기본), `exa`, `openai`입니다.
+
+- `auto`: 현재 모델이 Codex 구독 모델(`openai-codex`)이면 OpenAI 호스티드 검색을 먼저 쓰고, 실패하면 Exa로 넘어갑니다. 다른 모델이면 Exa만 씁니다. 사용자가 중단하면 폴백하지 않습니다.
+- `exa`: 항상 Exa입니다.
+- `openai`: OpenAI만 씁니다. Codex 로그인이 없으면 폴백 없이 `/login` 안내 에러를 돌려줍니다.
+
+OpenAI 검색은 Pi `/login`으로 로그인한 Codex(ChatGPT 구독) 자격이 있어야 하고, 호출할 때마다 구독 사용량을 씁니다. 그 OAuth 토큰만 `https://chatgpt.com/backend-api/codex/responses`로 보내며 에러 메시지에서는 가립니다. 요청 타임아웃은 60초입니다. 검색에 쓰는 모델은 가장 최신 `luna` 계열(없으면 최신 `gpt-N`)을 고르고, `openaiSearchModel`로 고정할 수 있습니다. 도메인 필터는 호스티드 검색의 `allowed_domains`/`blocked_domains`로, 최근성과 `category`는 지시문으로 전달합니다. 결과는 인용 출처 목록과 요약 답변입니다.
 
 `fetch_content`의 `mode`는 `readable`(기본)과 `raw`입니다. `raw`는 JSON, XML, 일반 텍스트 같은 텍스트 응답의 본문을 그대로 반환합니다. 마크다운 우선 Accept 헤더를 쓰지 않고, Readability 변환도 하지 않습니다. 응답은 5MB까지, 타임아웃은 기본 30초입니다. 이미지·PDF 같은 비텍스트 content-type은 에러로 돌려주고, HTTP 오류 상태는 본문과 함께 에러로 표시합니다. GitHub·YouTube·로컬 영상 처리와 Jina 폴백은 타지 않으며 `http://`, `https://` 외의 URL은 거부합니다.
 
@@ -50,7 +58,7 @@ get_search_content({ responseId: "abc123", urlIndex: 0, findText: ["timeout", "r
 
 ## 설정
 
-설정 없이 키 없는 Exa MCP로 동작합니다. 무료 한도를 넘기면 Exa API 키를 넣습니다.
+설정 없이 키 없는 Exa MCP로 동작합니다(Codex 구독 OpenAI 검색은 `/login`만 있으면 되고 설정이 필요 없습니다). 무료 한도를 넘기면 Exa API 키를 넣습니다.
 
 - 환경 변수 `EXA_API_KEY`
 - 또는 `~/.pi/web-search.json`
@@ -58,6 +66,7 @@ get_search_content({ responseId: "abc123", urlIndex: 0, findText: ["timeout", "r
 ```json
 {
   "exaApiKey": "...",
+  "openaiSearchModel": "gpt-5.4",
   "githubClone": { "enabled": true },
   "githubPrIssue": { "enabled": true },
   "video": { "enabled": true, "maxSizeMB": 50 },
@@ -87,7 +96,7 @@ Exa 사용량은 `~/.pi/exa-usage.json`에 기록됩니다. PDF 추출 결과는
 
 ## 원본 대비 차이
 
-- 검색 provider는 Exa(키 또는 키 없는 MCP)만 남겼습니다.
+- 검색 provider는 Exa(키 또는 키 없는 MCP)와, Pi `/login`으로 로그인한 Codex 구독 OpenAI(원본의 `openai-search`)만 남겼습니다. OpenAI는 `openaiApiKey`/`OPENAI_API_KEY`, `openaiResponsesUrl` 게이트웨이, provider baseUrl 재사용, alpha search, 현재 모델 직접 검색, Kimi를 가져오지 않았고 Codex 엔드포인트로만 요청합니다. 원본의 `auto` 라우팅은 `openai-codex` 모델일 때 OpenAI, 실패하면 Exa로 단순화했습니다.
 - 실패한 호출을 `isError: true`로 표시합니다(원본 0.37.0).
 - `fetch_content`가 HTTP 요청에서 `text/markdown`을 먼저 요청합니다(원본 0.36.0). 서버가 `text/markdown`·`text/x-markdown`으로 답하면 Readability를 거치지 않고 본문을 그대로 씁니다. 500자 미만의 짧은 마크다운은 브라우저 Accept 헤더로 한 번 더 요청합니다.
 - `fetch_content`에 `mode: "raw"`를 추가했습니다(원본). 원본의 `answer` 모드와 `auth` 프로필은 가져오지 않았습니다.
