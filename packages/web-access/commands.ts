@@ -52,15 +52,16 @@ export function registerCommands(pi: ExtensionAPI): void {
 						info += `... and ${selected.queries.length - 10} more\n`;
 					}
 				}
-				if (selected.type === "fetch" && selected.urls) {
+				const fetchedUrls = selected.type === "fetch" ? (selected.urls ?? selected.urlMetadata) : undefined;
+				if (fetchedUrls) {
 					info += "URLs:\n";
-					const urls = selected.urls.slice(0, 10);
-					for (const u of urls) {
+					for (const u of fetchedUrls.slice(0, 10)) {
 						const urlDisplay = u.url.length > 50 ? `${u.url.slice(0, 47)}...` : u.url;
-						info += `- ${urlDisplay} (${u.error || `${u.content.length} chars`})\n`;
+						const length = "contentLength" in u ? u.contentLength : u.content.length;
+						info += `- ${urlDisplay} (${u.error || `${length} chars`})\n`;
 					}
-					if (selected.urls.length > 10) {
-						info += `... and ${selected.urls.length - 10} more\n`;
+					if (fetchedUrls.length > 10) {
+						info += `... and ${fetchedUrls.length - 10} more\n`;
 					}
 				}
 				ctx.ui.notify(info, "info");

@@ -14,6 +14,10 @@ function stubFetch(handler: (url: string) => Response) {
 	return vi.fn(async (input: string | URL | Request) => handler(String(input))) as unknown as typeof fetch;
 }
 
+function resolveTo(address: string, family: number) {
+	return async () => [{ address, family }];
+}
+
 describe("validateRemoteUrl", () => {
 	const blocked = [
 		"http://127.0.0.1/",
@@ -76,9 +80,32 @@ describe("validateRemoteUrl", () => {
 		for (const url of ["http://localhost:3000/", "http://app.localhost/"]) {
 			await expect(validateRemoteUrl(url, { ...base, allowRanges: [] })).rejects.toThrow("ssrf.allowRanges");
 			await expect(validateRemoteUrl(url, { ...base, allowRanges: ["10.0.0.0/8"] })).rejects.toThrow("Blocked");
-			await expect(validateRemoteUrl(url, { ...base, allowRanges: ["127.0.0.0/8"] })).resolves.toBeInstanceOf(URL);
-			await expect(validateRemoteUrl(url, { ...base, allowRanges: ["::1/128"] })).resolves.toBeInstanceOf(URL);
+			await expect(
+				validateRemoteUrl(url, { ...base, allowRanges: ["127.0.0.0/8"], lookup: resolveTo("127.0.0.1", 4) }),
+			).resolves.toBeInstanceOf(URL);
+			await expect(
+				validateRemoteUrl(url, { ...base, allowRanges: ["::1/128"], lookup: resolveTo("::1", 6) }),
+			).resolves.toBeInstanceOf(URL);
 		}
+	});
+
+	it("still requires localhost to resolve inside an allowed range", async () => {
+		const base = { domainPolicy: NO_POLICY, allowRanges: ["127.0.0.0/8"] };
+		for (const address of ["10.1.2.3", "169.254.169.254"]) {
+			await expect(
+				validateRemoteUrl("http://x.localhost/", { ...base, lookup: resolveTo(address, 4) }),
+			).rejects.toThrow("Blocked internal address");
+		}
+		await expect(
+			validateRemoteUrl("http://x.localhost/", { ...base, lookup: resolveTo("127.0.0.1", 4) }),
+		).resolves.toBeInstanceOf(URL);
+		await expect(
+			validateRemoteUrl("http://localhost/", {
+				domainPolicy: NO_POLICY,
+				allowRanges: ["::1/128"],
+				lookup: resolveTo("127.0.0.1", 4),
+			}),
+		).rejects.toThrow("Blocked internal address");
 	});
 
 	it("explains ssrf.allowRanges when a private address is blocked", async () => {

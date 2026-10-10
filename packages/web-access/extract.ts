@@ -670,6 +670,7 @@ async function extractViaHttp(
 		});
 
 		if (!response.ok) {
+			await response.body?.cancel().catch(() => {});
 			activityMonitor.logComplete(activityId, response.status);
 			return {
 				url,
@@ -686,6 +687,7 @@ async function extractViaHttp(
 		if (contentLengthHeader) {
 			const contentLength = parseInt(contentLengthHeader, 10);
 			if (contentLength > maxResponseSize) {
+				await response.body?.cancel().catch(() => {});
 				activityMonitor.logComplete(activityId, response.status);
 				return {
 					url,
