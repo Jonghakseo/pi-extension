@@ -41,9 +41,17 @@ fetch_content({ url: "https://example.com/api/items.json", mode: "raw" })
   "exaApiKey": "...",
   "githubClone": { "enabled": true },
   "video": { "enabled": true, "maxSizeMB": 50 },
+  "fetchContent": {
+    "domainPolicy": { "allow": ["example.com"], "deny": ["blocked.example.com"] }
+  },
+  "ssrf": { "allowRanges": ["198.18.0.0/15"] },
   "shortcuts": { "activity": "ctrl+shift+w" }
 }
 ```
+
+`fetch_content`가 직접 보내는 HTTP(S) 요청(일반 추출, `mode: "raw"`, PDF 다운로드)은 SSRF 가드를 거칩니다. 호스트를 DNS로 풀어 사설·루프백·링크로컬·메타데이터 주소(`10.0.0.0/8`, `127.0.0.0/8`, `169.254.0.0/16`, `fc00::/7` 등)로 향하면 요청 전에 막고, redirect는 수동으로 따라가며 매 hop을 다시 검사합니다. Surge 같은 TUN/fake-IP 프록시가 공개 도메인을 `198.18.0.0/15`로 풀어 막히는 환경이라면 `ssrf.allowRanges`에 필요한 CIDR만 적어 예외로 둘 수 있습니다. 잘못된 항목은 조용히 무시하지 않고 에러가 납니다.
+
+`fetchContent.domainPolicy`는 선택 사항이고 생략하면 꺼집니다. 호스트 이름은 자기 자신과 서브도메인에 모두 매치되며, 두 목록에 다 걸리면 `deny`가 이깁니다. `allow`가 비어 있지 않으면 거기에 없는 호스트는 거부합니다. GitHub·YouTube처럼 별도 처리하는 URL과 redirect 대상에도 적용하고, 로컬 파일 경로는 대상이 아닙니다. 막힌 URL은 Jina Reader 폴백으로도 보내지 않습니다. 설정이 잘못되면 fetch를 허용하지 않고 에러를 돌려줍니다.
 
 Exa 사용량은 `~/.pi/exa-usage.json`에 기록됩니다. PDF 추출 결과는 기본적으로 `~/Downloads`에 저장됩니다.
 
@@ -64,5 +72,6 @@ Exa 사용량은 `~/.pi/exa-usage.json`에 기록됩니다. PDF 추출 결과는
 - `fetch_content`가 HTTP 요청에서 `text/markdown`을 먼저 요청합니다(원본 0.36.0). 서버가 `text/markdown`·`text/x-markdown`으로 답하면 Readability를 거치지 않고 본문을 그대로 씁니다. 500자 미만의 짧은 마크다운은 브라우저 Accept 헤더로 한 번 더 요청합니다.
 - `fetch_content`에 `mode: "raw"`를 추가했습니다(원본). 원본의 `answer` 모드와 `auth` 프로필은 가져오지 않았습니다.
 - 추출 텍스트의 인라인 `data:` URI를 길이가 들어간 생략 표시로 바꿉니다(원본의 `data-uri-sanitize`). 원본과 같이 `raw` 모드는 제외합니다.
+- 직접 fetch에 SSRF 가드와 `fetchContent.domainPolicy`를 넣었습니다(원본의 `ssrf-protection`). 이 fork에는 프록시 경로가 없어 `ssrf.trustEnvProxy`와 프록시 관련 처리는 가져오지 않았고, `ssrf.allowRanges`만 남겼습니다.
 - Gemini·Perplexity·브라우저 쿠키 기반 경로를 제거했습니다.
 - 라이선스는 원본 MIT 표기를 유지합니다. `LICENSE`를 참고하세요.

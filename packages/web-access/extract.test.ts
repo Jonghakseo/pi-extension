@@ -3,8 +3,22 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { setConfigPathForTests } from "./config.js";
 import { extractContent, fetchAllContent } from "./extract.js";
+
+// The SSRF guard blocks loopback, so the local test servers need an explicit exemption.
+let configDir: string;
+beforeAll(() => {
+	configDir = mkdtempSync(join(tmpdir(), "web-access-extract-config-"));
+	const configPath = join(configDir, "web-search.json");
+	writeFileSync(configPath, JSON.stringify({ ssrf: { allowRanges: ["127.0.0.0/8"] } }));
+	setConfigPathForTests(configPath);
+});
+afterAll(() => {
+	setConfigPathForTests(null);
+	rmSync(configDir, { recursive: true, force: true });
+});
 
 describe("web content without Gemini", () => {
 	it("extracts a readable page from a local HTTP server", async () => {

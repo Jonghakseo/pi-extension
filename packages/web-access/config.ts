@@ -23,6 +23,8 @@ export interface WebSearchConfig {
 	githubClone?: {
 		enabled?: unknown;
 	};
+	fetchContent?: { domainPolicy?: unknown };
+	ssrf?: { allowRanges?: unknown };
 }
 
 // ─── Generic config loader ──────────────────────────────────────────────────

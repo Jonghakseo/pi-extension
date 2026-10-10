@@ -7,6 +7,7 @@ import { sanitizeExtractedContents } from "./data-uri-sanitize.js";
 import { extractGitHub } from "./github-extract.js";
 import { extractPDFToMarkdown, isPDF } from "./pdf-extract.js";
 import { extractRSCContent } from "./rsc-extract.js";
+import { assertUrlAllowedByDomainPolicy, fetchRemoteUrl, validateRemoteUrl } from "./ssrf-protection.js";
 import { formatSeconds } from "./utils.js";
 import { extractVideoFrame, getLocalVideoDuration, isVideoFile } from "./video-extract.js";
 import { extractYouTubeFrame, extractYouTubeFrames, getYouTubeStreamInfo, isYouTubeURL } from "./youtube-extract.js";
@@ -14,7 +15,15 @@ import { extractYouTubeFrame, extractYouTubeFrames, getYouTubeStreamInfo, isYouT
 const DEFAULT_TIMEOUT_MS = 30000;
 const CONCURRENT_LIMIT = 3;
 
-const NON_RECOVERABLE_ERRORS = ["Unsupported content type", "Response too large"];
+// "Blocked" and "Hostname not allowed" come from the SSRF guard and domain policy.
+// A hosted fallback would fetch the same target, so they must not be retried.
+const NON_RECOVERABLE_ERRORS = [
+	"Unsupported content type",
+	"Response too large",
+	"Blocked ",
+	"Hostname not allowed",
+	"Failed to parse ",
+];
 const MIN_USEFUL_CONTENT = 500;
 
 function errorMessage(err: unknown): string {
@@ -401,6 +410,12 @@ export async function extractContent(
 	}
 
 	try {
+		assertUrlAllowedByDomainPolicy(url);
+	} catch (err) {
+		return { url, title: "", content: "", error: errorMessage(err) };
+	}
+
+	try {
 		const ghResult = await extractGitHub(url, signal);
 		if (ghResult) return ghResult;
 		if (signal?.aborted) return abortedResult(url);
@@ -429,6 +444,13 @@ export async function extractContent(
 	if (!httpResult.error) return httpResult;
 	if (NON_RECOVERABLE_ERRORS.some((prefix) => httpResult.error?.startsWith(prefix))) return httpResult;
 
+	// Jina fetches the target from its own network, so only hand it URLs this
+	// machine would be allowed to fetch itself.
+	try {
+		await validateRemoteUrl(url);
+	} catch {
+		return httpResult;
+	}
 	const jinaResult = await extractWithJinaReader(url, signal);
 	if (jinaResult) return jinaResult;
 	if (signal?.aborted) return abortedResult(url);
@@ -548,7 +570,7 @@ async function extractRaw(url: string, signal?: AbortSignal, options?: ExtractOp
 	signal?.addEventListener("abort", onAbort);
 
 	try {
-		const response = await fetch(url, {
+		const response = await fetchRemoteUrl(url, {
 			signal: controller.signal,
 			headers: {
 				"User-Agent": BROWSER_USER_AGENT,
@@ -619,7 +641,7 @@ async function extractViaHttp(
 	signal?.addEventListener("abort", onAbort);
 
 	try {
-		const response = await fetch(url, {
+		const response = await fetchRemoteUrl(url, {
 			signal: controller.signal,
 			headers: {
 				"User-Agent": BROWSER_USER_AGENT,
