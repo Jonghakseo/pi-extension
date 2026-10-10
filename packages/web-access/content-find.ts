@@ -2,6 +2,7 @@ export type FindMode = "exact" | "case-insensitive" | "fuzzy";
 
 const CONTEXT_CHARS = 400;
 const MAX_OUTPUT_CHARS = 20_000;
+const ELLIPSIS = "...";
 
 interface Match {
 	query: string;
@@ -209,7 +210,9 @@ export function findContent(
 				2 * (counts.length - 1),
 			);
 			const snippetLength =
-				normalizedLength(range.start, range.end) + (range.start > 0 ? 1 : 0) + (range.end < text.length ? 1 : 0);
+				normalizedLength(range.start, range.end) +
+				(range.start > 0 ? ELLIPSIS.length : 0) +
+				(range.end < text.length ? ELLIPSIS.length : 0);
 			length += 2 + String(index + 1).length + 2 + labelsLength + 1 + snippetLength;
 			returnedMatches += counts.reduce((total, result) => total + result.count, 0);
 		}
@@ -226,8 +229,8 @@ export function findContent(
 		for (const [index, range] of ranges.entries()) {
 			const contained = rangeCounts(range);
 			if (contained.length === 0) continue;
-			const prefix = range.start > 0 ? "..." : "";
-			const suffix = range.end < text.length ? "..." : "";
+			const prefix = range.start > 0 ? ELLIPSIS : "";
+			const suffix = range.end < text.length ? ELLIPSIS : "";
 			const snippet = `${prefix}${text.slice(range.start, range.end).replace(/\s+/g, " ").trim()}${suffix}`;
 			const counts = contained
 				.map((result) => `${overflow ? result.id : `"${result.query}"`} ×${result.count}`)

@@ -12,6 +12,8 @@ import { CONFIG_PATH, loadConfigSection } from "./config.js";
 
 const DEFAULT_MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const ALLOW_RANGES_HINT =
+	'To open local or private servers, add their CIDR to ssrf.allowRanges in web-search.json (e.g. "127.0.0.0/8" for localhost, "10.0.0.0/8" for a private network).';
 
 export type LookupAddress = { address: string; family: number };
 export type Lookup = (hostname: string) => Promise<LookupAddress[]>;
@@ -144,11 +146,13 @@ export async function validateRemoteUrl(rawUrl: string | URL, options: Validatio
 	const hostname = normalizeHostname(url.hostname);
 	if (!hostname) throw new Error("URL must include a hostname");
 	assertDomainPolicy(hostname, options.domainPolicy ?? loadDomainPolicy());
-	if (hostname === "localhost" || hostname.endsWith(".localhost")) {
-		throw new Error(`Blocked internal hostname: ${hostname}`);
-	}
 
 	const allowRanges = parseAllowRanges(options.allowRanges ?? loadSsrfConfig().allowRanges);
+	if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+		// Opening loopback through ssrf.allowRanges also opens localhost; no DNS lookup is needed for it.
+		if (isInAllowedRange("127.0.0.1", 4, allowRanges) || isInAllowedRange("::1", 6, allowRanges)) return url;
+		throw new Error(`Blocked internal hostname: ${hostname}. ${ALLOW_RANGES_HINT}`);
+	}
 	if (net.isIP(hostname)) {
 		assertPublicAddress(hostname, hostname, allowRanges);
 		return url;
@@ -229,10 +233,10 @@ function assertPublicAddress(address: string, hostname: string, allowRanges: Par
 		const hint = isFakeIpProxyAddress(normalized)
 			? '. This address is in 198.18.0.0/15, commonly used by TUN/fake-IP proxies. If that matches your setup, set ssrf.allowRanges to ["198.18.0.0/15"] in web-search.json.'
 			: "";
-		throw new Error(`Blocked internal address for ${hostname}: ${normalized}${hint}`);
+		throw new Error(`Blocked internal address for ${hostname}: ${normalized}${hint || `. ${ALLOW_RANGES_HINT}`}`);
 	}
 	if (ipVersion === 6 && isBlockedIPv6(normalized)) {
-		throw new Error(`Blocked internal address for ${hostname}: ${normalized}`);
+		throw new Error(`Blocked internal address for ${hostname}: ${normalized}. ${ALLOW_RANGES_HINT}`);
 	}
 }
 

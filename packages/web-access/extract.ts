@@ -231,6 +231,20 @@ export async function extractContent(
 		return extractRaw(url, signal, options);
 	}
 
+	// Hostname policy applies to every http(s) target, including YouTube frame requests.
+	// Local file paths do not parse as URLs and are not subject to it.
+	let parsedUrl: URL | null = null;
+	try {
+		parsedUrl = new URL(url);
+	} catch {}
+	if (parsedUrl) {
+		try {
+			assertUrlAllowedByDomainPolicy(parsedUrl);
+		} catch (err) {
+			return { url, title: "", content: "", error: errorMessage(err) };
+		}
+	}
+
 	if (options?.frames && !options.timestamp) {
 		const frameCount = options.frames;
 		const ytInfo = isYouTubeURL(url);
@@ -404,16 +418,8 @@ export async function extractContent(
 		};
 	}
 
-	try {
-		new URL(url);
-	} catch {
+	if (!parsedUrl) {
 		return { url, title: "", content: "", error: "Invalid URL" };
-	}
-
-	try {
-		assertUrlAllowedByDomainPolicy(url);
-	} catch (err) {
-		return { url, title: "", content: "", error: errorMessage(err) };
 	}
 
 	try {
@@ -449,10 +455,11 @@ export async function extractContent(
 	if (!httpResult.error) return httpResult;
 	if (NON_RECOVERABLE_ERRORS.some((prefix) => httpResult.error?.startsWith(prefix))) return httpResult;
 
-	// Jina fetches the target from its own network, so only hand it URLs this
-	// machine would be allowed to fetch itself.
+	// Jina fetches the target from its own network, so only hand it URLs that are
+	// public. ssrf.allowRanges exempts internal addresses for direct fetches, but
+	// must never send an internal URL to a third party, so it is ignored here.
 	try {
-		await validateRemoteUrl(url);
+		await validateRemoteUrl(url, { allowRanges: [] });
 	} catch {
 		return httpResult;
 	}
@@ -590,6 +597,7 @@ async function extractRaw(url: string, signal?: AbortSignal, options?: ExtractOp
 		const contentLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
 		if (Number.isFinite(contentLength) && contentLength > RAW_MAX_BYTES) {
 			activityMonitor.logComplete(activityId, response.status);
+			await response.body?.cancel().catch(() => {});
 			return {
 				url,
 				title: "",

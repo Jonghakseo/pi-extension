@@ -401,34 +401,41 @@ function unavailableFetchData(data: StoredSearchData, reason: string): StoredSea
 	};
 }
 
-function readCachedFetchData(data: StoredSearchData): StoredSearchData {
-	if (data.type !== "fetch") return data;
+// `transient` marks failures that may succeed on a later read (EMFILE, EACCES, ...), so the caller must not memoize them.
+function readCachedFetchData(data: StoredSearchData): { data: StoredSearchData; transient?: boolean } {
+	if (data.type !== "fetch") return { data };
 	if (Date.now() - data.timestamp >= CACHE_TTL_MS) {
-		return unavailableFetchData(data, "Cached fetched content is missing or expired");
+		return { data: unavailableFetchData(data, "Cached fetched content is missing or expired") };
 	}
-	if (isInlineFetchData(data)) return data;
+	if (isInlineFetchData(data)) return { data };
 	if (!data.fetchCache) {
-		return unavailableFetchData(data, data.fetchCacheError ?? "Cached fetched content is unavailable");
+		return { data: unavailableFetchData(data, data.fetchCacheError ?? "Cached fetched content is unavailable") };
 	}
 	const path = fetchCachePath(data.fetchCache.key);
-	if (!path) return unavailableFetchData(data, "Cached fetched content is missing or expired");
+	if (!path) return { data: unavailableFetchData(data, "Cached fetched content is missing or expired") };
 	let fd: number | null = null;
 	try {
-		if (!safeFetchCacheDir(false)) return unavailableFetchData(data, "Cached fetched content is missing or expired");
+		if (!safeFetchCacheDir(false)) {
+			return { data: unavailableFetchData(data, "Cached fetched content is missing or expired") };
+		}
 		const opened = openRegularFile(path);
 		fd = opened.fd;
 		enforceMode(fd, 0o600);
 		const parsed: unknown = JSON.parse(readFileSync(fd, "utf8"));
 		if (!isValidStoredData(parsed) || parsed.type !== "fetch" || parsed.id !== data.id || !isInlineFetchData(parsed)) {
-			return unavailableFetchData(data, "Cached fetched content is invalid");
+			return { data: unavailableFetchData(data, "Cached fetched content is invalid") };
 		}
-		return { ...parsed, fetchCache: data.fetchCache, urlMetadata: data.urlMetadata };
+		return { data: { ...parsed, fetchCache: data.fetchCache, urlMetadata: data.urlMetadata } };
 	} catch (err) {
-		if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-			return unavailableFetchData(data, "Cached fetched content is missing or expired");
+		const code = (err as NodeJS.ErrnoException).code;
+		if (code === "ENOENT") {
+			return { data: unavailableFetchData(data, "Cached fetched content is missing or expired") };
 		}
 		const message = err instanceof Error ? err.message : String(err);
-		return unavailableFetchData(data, `Cached fetched content could not be read: ${message}`);
+		return {
+			data: unavailableFetchData(data, `Cached fetched content could not be read: ${message}`),
+			transient: typeof code === "string",
+		};
 	} finally {
 		if (fd !== null)
 			try {
@@ -481,8 +488,8 @@ export function storeFetchedContentResult(
 export function getResult(id: string): StoredSearchData | null {
 	const data = storedResults.get(id);
 	if (!data) return null;
-	const loaded = readCachedFetchData(data);
-	if (loaded !== data) storedResults.set(id, loaded);
+	const { data: loaded, transient } = readCachedFetchData(data);
+	if (loaded !== data && !transient) storedResults.set(id, loaded);
 	return loaded;
 }
 

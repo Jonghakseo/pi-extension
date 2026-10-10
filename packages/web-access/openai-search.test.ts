@@ -115,6 +115,26 @@ describe("searchWithOpenAI", () => {
 		expect(result.results[0]?.snippet).toContain("coding agent");
 	});
 
+	it("does not duplicate headers that only differ in casing from the ones it sets", async () => {
+		const fetchMock = vi.fn(async (..._args: unknown[]) => searchStream());
+		vi.stubGlobal("fetch", fetchMock);
+		const ctx = codexContext();
+		ctx.modelRegistry.getApiKeyAndHeaders = (async () => ({
+			ok: true,
+			apiKey: TOKEN,
+			headers: { authorization: "Bearer stale", "content-type": "text/plain", "x-extra": "1" },
+		})) as never;
+
+		await searchWithOpenAI("q", {}, ctx);
+
+		const headers = (fetchMock.mock.calls[0] as [string, RequestInit])[1].headers as Record<string, string>;
+		const names = Object.keys(headers).map((name) => name.toLowerCase());
+		expect(new Set(names).size).toBe(names.length);
+		expect(headers.Authorization).toBe(`Bearer ${TOKEN}`);
+		expect(headers["Content-Type"]).toBe("application/json");
+		expect(headers["x-extra"]).toBe("1");
+	});
+
 	it("uses openaiSearchModel from the config file when set", async () => {
 		writeFileSync(join(dir, "web-search.json"), JSON.stringify({ openaiSearchModel: "gpt-5.4" }));
 		setConfigPathForTests(join(dir, "web-search.json"));

@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it } from "vitest";
+import { findContent } from "./content-find.js";
 import { registerContentTools } from "./content-tools.js";
 import { clearResults, storeResult } from "./storage.js";
 
@@ -132,6 +133,13 @@ describe("get_search_content findText", () => {
 		expect(text(result).length).toBeLessThanOrEqual(20_100);
 		expect(text(result)).toContain("Showing");
 		expect((result.details as { matchCount: number }).matchCount).toBe(5000);
+	});
+
+	it("stays within 20,000 characters when 900 matches each carry ellipses", () => {
+		const text = Array.from({ length: 900 }, (_, i) => `${"filler ".repeat(300)}needle${i}`).join(" ");
+		const result = findContent(text, ["needle"], "case-insensitive");
+		expect(result.matchCount).toBe(900);
+		expect(result.text.length).toBeLessThanOrEqual(20_000);
 	});
 
 	it("rejects findText combined with offset or limit", async () => {

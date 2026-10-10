@@ -76,7 +76,29 @@ describe("web search without Gemini", () => {
 			openaiSearch.mockRejectedValue(new Error("OpenAI API error 429"));
 			exaSearch.mockResolvedValue(exaHit);
 
-			await expect(search("q", {}, codexCtx)).resolves.toMatchObject({ answer: "exa", provider: "exa" });
+			await expect(search("q", {}, codexCtx)).resolves.toMatchObject({ provider: "exa" });
+		});
+
+		it("tells the model why auto fell back to Exa", async () => {
+			openaiSearch.mockRejectedValue(new Error("OpenAI API error 429: quota exceeded"));
+			exaSearch.mockResolvedValue(exaHit);
+
+			const result = await search("q", {}, codexCtx);
+
+			expect(result.provider).toBe("exa");
+			expect(result.answer).toContain("OpenAI search failed (OpenAI API error 429: quota exceeded)");
+			expect(result.answer).toContain("come from Exa");
+			expect(result.answer.endsWith("exa")).toBe(true);
+		});
+
+		it("gives OpenAI 20s under auto but leaves an explicit openai request on its default timeout", async () => {
+			openaiSearch.mockResolvedValue(openaiHit);
+
+			await search("q", {}, codexCtx);
+			await search("q", { provider: "openai" }, codexCtx);
+
+			expect(openaiSearch.mock.calls[0]?.[1]).toMatchObject({ timeoutMs: 20_000 });
+			expect(openaiSearch.mock.calls[1]?.[1]?.timeoutMs).toBeUndefined();
 		});
 
 		it("auto does not fall back after the caller aborts", async () => {

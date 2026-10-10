@@ -23,7 +23,7 @@ pi install npm:@ryan_nookpi/pi-extension-web-access
 
 `web_search`의 `provider`는 `auto`(기본), `exa`, `openai`입니다.
 
-- `auto`: 현재 모델이 Codex 구독 모델(`openai-codex`)이면 OpenAI 호스티드 검색을 먼저 쓰고, 실패하면 Exa로 넘어갑니다. 다른 모델이면 Exa만 씁니다. 사용자가 중단하면 폴백하지 않습니다.
+- `auto`: 현재 모델이 Codex 구독 모델(`openai-codex`)이면 OpenAI 호스티드 검색을 먼저 쓰고, 실패하면 Exa로 넘어갑니다. 다른 모델이면 Exa만 씁니다. 이 경로의 OpenAI 시도는 20초 타임아웃이고, Exa로 넘어가면 답변 맨 앞에 실패 사유를 짧은 노트로 붙입니다. 사용자가 중단하면 폴백하지 않습니다.
 - `exa`: 항상 Exa입니다.
 - `openai`: OpenAI만 씁니다. Codex 로그인이 없으면 폴백 없이 `/login` 안내 에러를 돌려줍니다.
 
@@ -79,6 +79,8 @@ get_search_content({ responseId: "abc123", urlIndex: 0, findText: ["timeout", "r
 ```
 
 `fetch_content`가 직접 보내는 HTTP(S) 요청(일반 추출, `mode: "raw"`, PDF 다운로드)은 SSRF 가드를 거칩니다. 호스트를 DNS로 풀어 사설·루프백·링크로컬·메타데이터 주소(`10.0.0.0/8`, `127.0.0.0/8`, `169.254.0.0/16`, `fc00::/7` 등)로 향하면 요청 전에 막고, redirect는 수동으로 따라가며 매 hop을 다시 검사합니다. Surge 같은 TUN/fake-IP 프록시가 공개 도메인을 `198.18.0.0/15`로 풀어 막히는 환경이라면 `ssrf.allowRanges`에 필요한 CIDR만 적어 예외로 둘 수 있습니다. 잘못된 항목은 조용히 무시하지 않고 에러가 납니다.
+
+로컬 개발 서버(`http://localhost:3000` 등)와 사설망 URL은 기본으로 막힙니다. 열려면 `ssrf.allowRanges`에 해당 대역을 넣습니다. 루프백은 `"127.0.0.0/8"`(또는 `"::1/128"`)이고, 이 대역이 들어 있으면 `localhost`와 `*.localhost`도 함께 열립니다. 사설망은 `"10.0.0.0/8"`, `"192.168.0.0/16"` 같은 CIDR을 적습니다. 차단 에러 메시지에도 같은 방법이 안내됩니다. 예외로 열린 내부 주소는 Jina Reader 폴백으로 보내지 않습니다.
 
 `fetchContent.domainPolicy`는 선택 사항이고 생략하면 꺼집니다. 호스트 이름은 자기 자신과 서브도메인에 모두 매치되며, 두 목록에 다 걸리면 `deny`가 이깁니다. `allow`가 비어 있지 않으면 거기에 없는 호스트는 거부합니다. GitHub·YouTube처럼 별도 처리하는 URL과 redirect 대상에도 적용하고, 로컬 파일 경로는 대상이 아닙니다. 막힌 URL은 Jina Reader 폴백으로도 보내지 않습니다. 설정이 잘못되면 fetch를 허용하지 않고 에러를 돌려줍니다.
 

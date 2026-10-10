@@ -144,7 +144,7 @@ export function registerContentTools(pi: ExtensionAPI): void {
 				if (truncated) {
 					output +=
 						`\n\n---\nShowing ${MAX_INLINE_CONTENT} of ${fullLength} chars. ` +
-						`Use get_search_content({ responseId: "${responseId}", urlIndex: 0 }) for full content.`;
+						`Continue reading with get_search_content({ responseId: "${responseId}", urlIndex: 0, offset: ${MAX_INLINE_CONTENT} }).`;
 				}
 
 				const content: Array<TextContent | ImageContent> = [];

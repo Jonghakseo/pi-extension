@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -143,6 +143,25 @@ describe("web-access fetched content cache", () => {
 		expect(loaded?.urls?.[0]).toMatchObject({ url: "https://a.test", content: "" });
 		expect(loaded?.urls?.[0].error).toMatch(/missing or expired/);
 	});
+
+	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"retries a cache read that failed for a transient reason instead of remembering the failure",
+		() => {
+			const sessionData = storeFetchedContentResult("abc", fetchData("abc"));
+			clearResults();
+			restoreFromSession(makeContext([{ type: "custom", customType: "web-search-results", data: sessionData }]));
+			const file = join(root, "web-search-cache", "abc.json");
+
+			chmodSync(file, 0o000);
+			try {
+				expect(getResult("abc")?.urls?.[0].error).toMatch(/could not be read/);
+			} finally {
+				chmodSync(file, 0o600);
+			}
+
+			expect(getResult("abc")?.urls?.[0].content).toBe("full page body");
+		},
+	);
 
 	it("still reads legacy session entries that carry the body inline", () => {
 		const legacy = fetchData("legacy");

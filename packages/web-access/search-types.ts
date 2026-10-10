@@ -19,5 +19,7 @@ export interface SearchOptions {
 	domainFilter?: string[];
 	/** Exa content category, e.g. "news" or "research paper". */
 	category?: string;
+	/** Request timeout for providers that support it. OpenAI defaults to 60s. */
+	timeoutMs?: number;
 	signal?: AbortSignal;
 }

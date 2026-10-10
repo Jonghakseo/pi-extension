@@ -71,6 +71,22 @@ describe("validateRemoteUrl", () => {
 		).resolves.toBeInstanceOf(URL);
 	});
 
+	it("opens localhost only when allowRanges covers loopback, and says how", async () => {
+		const base = { domainPolicy: NO_POLICY };
+		for (const url of ["http://localhost:3000/", "http://app.localhost/"]) {
+			await expect(validateRemoteUrl(url, { ...base, allowRanges: [] })).rejects.toThrow("ssrf.allowRanges");
+			await expect(validateRemoteUrl(url, { ...base, allowRanges: ["10.0.0.0/8"] })).rejects.toThrow("Blocked");
+			await expect(validateRemoteUrl(url, { ...base, allowRanges: ["127.0.0.0/8"] })).resolves.toBeInstanceOf(URL);
+			await expect(validateRemoteUrl(url, { ...base, allowRanges: ["::1/128"] })).resolves.toBeInstanceOf(URL);
+		}
+	});
+
+	it("explains ssrf.allowRanges when a private address is blocked", async () => {
+		await expect(validateRemoteUrl("http://10.0.0.5/", { domainPolicy: NO_POLICY, allowRanges: [] })).rejects.toThrow(
+			"ssrf.allowRanges",
+		);
+	});
+
 	it("matches domain policy hosts and subdomains, deny first, allow as a whitelist", async () => {
 		const options = {
 			lookup: publicLookup,
@@ -155,6 +171,48 @@ describe("config-driven behavior through extractContent", () => {
 		writeFileSync(path, JSON.stringify(config));
 		setConfigPathForTests(path);
 	}
+
+	it("applies the domain policy to YouTube frame requests before any video lookup", async () => {
+		useConfig({ fetchContent: { domainPolicy: { deny: ["youtube.com"] } } });
+		const fetchSpy = vi.spyOn(globalThis, "fetch");
+		try {
+			const result = await extractContent("https://www.youtube.com/watch?v=dQw4w9WgXcQ", undefined, { frames: 2 });
+			expect(result.error).toContain("Blocked hostname by fetch_content domain policy");
+			expect(fetchSpy).not.toHaveBeenCalled();
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
+
+	it("does not send an allowRanges-exempted internal URL to the Jina fallback", async () => {
+		useConfig({ ssrf: { allowRanges: ["127.0.0.0/8"] } });
+		const server = createServer((_request, response) => {
+			response.statusCode = 500;
+			response.end("boom");
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const realFetch = globalThis.fetch;
+		const jinaCalls: string[] = [];
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+			const target = String(input);
+			if (target.includes("r.jina.ai")) {
+				jinaCalls.push(target);
+				return new Response("", { status: 404 });
+			}
+			return realFetch(input, init);
+		});
+		try {
+			const address = server.address();
+			if (!address || typeof address === "string") throw new Error("Expected a TCP address");
+			const result = await extractContent(`http://127.0.0.1:${address.port}/page`);
+			expect(result.error).toContain("HTTP 500");
+			expect(jinaCalls).toEqual([]);
+		} finally {
+			fetchSpy.mockRestore();
+			server.closeAllConnections();
+			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		}
+	});
 
 	it("refuses loopback targets by default in readable and raw mode without any request", async () => {
 		useConfig({});

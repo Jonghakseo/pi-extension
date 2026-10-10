@@ -115,10 +115,6 @@ export async function resolveOpenAIAuth(ctx?: OpenAISearchContext): Promise<Open
 	return { apiKey: resolved.apiKey, model: loadOpenAIConfig().searchModel ?? preferred.id, headers };
 }
 
-export async function isOpenAISearchAvailable(ctx?: OpenAISearchContext): Promise<boolean> {
-	return (await resolveOpenAIAuth(ctx)) !== undefined;
-}
-
 // ─── Request ─────────────────────────────────────────────────────────────────
 
 function normalizeDomain(value: string): string | null {
@@ -397,20 +393,25 @@ async function runOpenAISearch(query: string, options: SearchOptions, auth: Open
 		tool_choice: "required",
 		parallel_tool_calls: true,
 	};
-	const headers: Record<string, string> = {
-		...auth.headers,
+	const ownHeaders: Record<string, string> = {
 		Authorization: `Bearer ${auth.apiKey}`,
 		"Content-Type": "application/json",
 		"OpenAI-Beta": "responses=experimental",
 		originator: "pi",
 	};
 	const accountId = extractAccountId(auth.apiKey);
-	if (accountId) headers["chatgpt-account-id"] = accountId;
+	if (accountId) ownHeaders["chatgpt-account-id"] = accountId;
+	// Registry headers must not duplicate ours under a different casing.
+	const ownNames = new Set(Object.keys(ownHeaders).map((name) => name.toLowerCase()));
+	const headers: Record<string, string> = { ...ownHeaders };
+	for (const [name, value] of Object.entries(auth.headers)) {
+		if (!ownNames.has(name.toLowerCase())) headers[name] = value;
+	}
 
 	options.signal?.throwIfAborted();
 	const activityId = activityMonitor.logStart({ type: "api", query });
 	try {
-		const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+		const timeout = AbortSignal.timeout(options.timeoutMs ?? SEARCH_TIMEOUT_MS);
 		const response = await fetch(CODEX_RESPONSES_URL, {
 			method: "POST",
 			headers,

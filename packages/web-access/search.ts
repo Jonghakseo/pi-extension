@@ -2,6 +2,10 @@ import { hasExaApiKey, searchWithExa } from "./exa.js";
 import { isOpenAISubscriptionModelSelected, type OpenAISearchContext, searchWithOpenAI } from "./openai-search.js";
 import type { SearchOptions, SearchResponse } from "./search-types.js";
 
+/** `auto` only spends this long on OpenAI before falling back to Exa; an explicit `openai` keeps the 60s default. */
+const AUTO_OPENAI_TIMEOUT_MS = 20_000;
+const MAX_FALLBACK_REASON_CHARS = 200;
+
 export type SearchProvider = "auto" | "exa" | "openai";
 
 export interface AttributedSearchResponse extends SearchResponse {
@@ -49,13 +53,20 @@ export async function search(
 	if (!isOpenAISubscriptionModelSelected(ctx)) return searchExa(query, options);
 	let openaiError: unknown;
 	try {
-		return { ...(await searchWithOpenAI(query, options, ctx)), provider: "openai" };
+		const openai = await searchWithOpenAI(query, { ...options, timeoutMs: AUTO_OPENAI_TIMEOUT_MS }, ctx);
+		return { ...openai, provider: "openai" };
 	} catch (err) {
 		if (options.signal?.aborted) throw err;
 		openaiError = err;
 	}
 	try {
-		return await searchExa(query, options);
+		const exa = await searchExa(query, options);
+		// Let the model know why the answer is not from the subscription search it would expect.
+		const reason = (openaiError instanceof Error ? openaiError.message : String(openaiError)).replace(/\s+/g, " ");
+		const short =
+			reason.length > MAX_FALLBACK_REASON_CHARS ? `${reason.slice(0, MAX_FALLBACK_REASON_CHARS)}...` : reason;
+		const note = `Note: OpenAI search failed (${short}); results below come from Exa.`;
+		return { ...exa, answer: exa.answer ? `${note}\n\n${exa.answer}` : note };
 	} catch (err) {
 		if (options.signal?.aborted) throw err;
 		const exaMessage = err instanceof Error ? err.message : String(err);
