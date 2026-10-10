@@ -15,7 +15,7 @@ pi install npm:@ryan_nookpi/pi-extension-web-access
 | 이름 | 종류 | 설명 |
 |---|---|---|
 | `web_search` | 도구 | Exa로 검색합니다. `queries`로 여러 검색을 한 번에 보내고, `includeContent`로 본문을 백그라운드에서 받아둘 수 있습니다 |
-| `fetch_content` | 도구 | 웹 페이지, PDF, GitHub 저장소, YouTube·로컬 영상에서 텍스트를 추출합니다 |
+| `fetch_content` | 도구 | 웹 페이지(서버가 마크다운을 주면 그대로 사용), PDF, GitHub 저장소, YouTube·로컬 영상에서 텍스트를 추출합니다 |
 | `get_search_content` | 도구 | 이전 `web_search`·`fetch_content` 결과의 전체 본문을 다시 가져옵니다 |
 | `/search` | 명령어 | 저장된 검색 결과를 둘러보고 삭제합니다 |
 
@@ -53,5 +53,6 @@ Exa 사용량은 `~/.pi/exa-usage.json`에 기록됩니다. PDF 추출 결과는
 
 - 검색 provider는 Exa(키 또는 키 없는 MCP)만 남겼습니다.
 - 실패한 호출을 `isError: true`로 표시합니다(원본 0.37.0).
+- `fetch_content`가 HTTP 요청에서 `text/markdown`을 먼저 요청합니다(원본 0.36.0). 서버가 `text/markdown`·`text/x-markdown`으로 답하면 Readability를 거치지 않고 본문을 그대로 씁니다. 500자 미만의 짧은 마크다운은 브라우저 Accept 헤더로 한 번 더 요청합니다.
 - Gemini·Perplexity·브라우저 쿠키 기반 경로를 제거했습니다.
 - 라이선스는 원본 MIT 표기를 유지합니다. `LICENSE`를 참고하세요.

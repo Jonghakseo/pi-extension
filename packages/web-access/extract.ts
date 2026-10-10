@@ -451,7 +451,20 @@ function isLikelyJSRendered(html: string): boolean {
 	return textContent.length < 500 && scriptCount > 3;
 }
 
-async function extractViaHttp(url: string, signal?: AbortSignal, options?: ExtractOptions): Promise<ExtractedContent> {
+// Servers that support markdown content negotiation (Cloudflare Markdown for
+// Agents, Mintlify, Vercel) return markdown directly; others see the same
+// HTML preference order a browser would send.
+const BROWSER_ACCEPT =
+	"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8";
+const MARKDOWN_FIRST_ACCEPT =
+	"text/markdown,text/html;q=0.9,application/xhtml+xml;q=0.9,application/xml;q=0.8,image/avif;q=0.9,image/webp;q=0.9,image/apng;q=0.9,*/*;q=0.7";
+
+async function extractViaHttp(
+	url: string,
+	signal?: AbortSignal,
+	options?: ExtractOptions,
+	preferMarkdown = true,
+): Promise<ExtractedContent> {
 	const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	const activityId = activityMonitor.logStart({ type: "fetch", url });
 
@@ -467,7 +480,7 @@ async function extractViaHttp(url: string, signal?: AbortSignal, options?: Extra
 			headers: {
 				"User-Agent":
 					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-				Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+				Accept: preferMarkdown ? MARKDOWN_FIRST_ACCEPT : BROWSER_ACCEPT,
 				"Accept-Language": "en-US,en;q=0.9",
 				"Cache-Control": "no-cache",
 				"Sec-Fetch-Dest": "document",
@@ -545,7 +558,16 @@ async function extractViaHttp(url: string, signal?: AbortSignal, options?: Extra
 		if (!isHTML) {
 			activityMonitor.logComplete(activityId, response.status);
 			const title = extractTextTitle(text, url);
-			return { url, title, content: text, error: null };
+			const mimeType = contentType.split(";")[0].trim().toLowerCase();
+			const isMarkdown = mimeType === "text/markdown" || mimeType === "text/x-markdown";
+			if (!isMarkdown || !preferMarkdown || text.trim().length >= MIN_USEFUL_CONTENT) {
+				return { url, title, content: text, error: null };
+			}
+			// Very short negotiated markdown is often a stub. Ask again the way a
+			// browser would; the markdown only fills in when that attempt has nothing.
+			const normal = await extractViaHttp(url, signal, options, false);
+			if (signal?.aborted || normal.content.trim()) return normal;
+			return { url, title, content: text, error: "Extracted content appears incomplete" };
 		}
 
 		const { document } = parseHTML(text);

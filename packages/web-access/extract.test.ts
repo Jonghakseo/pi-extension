@@ -27,6 +27,84 @@ describe("web content without Gemini", () => {
 	});
 });
 
+describe("markdown-first content negotiation", () => {
+	async function withServer(
+		handler: Parameters<typeof createServer>[1],
+		run: (url: string) => Promise<void>,
+	): Promise<void> {
+		const server = createServer(handler);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		try {
+			const address = server.address();
+			if (!address || typeof address === "string") throw new Error("Expected a TCP address");
+			await run(`http://127.0.0.1:${address.port}/doc`);
+		} finally {
+			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		}
+	}
+
+	it("asks for text/markdown first and returns a markdown body untouched", async () => {
+		const markdown = `# Negotiated title\n\n${"- keeps *markdown* syntax as is\n".repeat(30)}`;
+		let accept = "";
+		await withServer(
+			(request, response) => {
+				accept = String(request.headers.accept);
+				response.setHeader("content-type", "text/markdown; charset=utf-8");
+				response.end(markdown);
+			},
+			async (url) => {
+				const result = await extractContent(url);
+				expect(accept.startsWith("text/markdown")).toBe(true);
+				expect(result.error).toBeNull();
+				expect(result.title).toBe("Negotiated title");
+				expect(result.content).toBe(markdown);
+			},
+		);
+	});
+
+	it("still reads HTML from servers that ignore the markdown preference", async () => {
+		await withServer(
+			(_request, response) => {
+				response.setHeader("content-type", "text/html");
+				response.end(
+					`<html><body><article><h1>HTML only</h1>${"<p>Plain HTML paragraph for extraction.</p>".repeat(35)}</article></body></html>`,
+				);
+			},
+			async (url) => {
+				const result = await extractContent(url);
+				expect(result.error).toBeNull();
+				expect(result.content).toContain("Plain HTML paragraph for extraction.");
+			},
+		);
+	});
+
+	it("retries with a browser Accept header when negotiated markdown is a short stub", async () => {
+		const accepts: string[] = [];
+		await withServer(
+			(request, response) => {
+				const accept = String(request.headers.accept);
+				accepts.push(accept);
+				if (accept.startsWith("text/markdown")) {
+					response.setHeader("content-type", "text/markdown");
+					response.end("# Stub");
+					return;
+				}
+				response.setHeader("content-type", "text/html");
+				response.end(
+					`<html><body><article><h1>Full page</h1>${"<p>Full HTML body after retry.</p>".repeat(35)}</article></body></html>`,
+				);
+			},
+			async (url) => {
+				const result = await extractContent(url);
+				expect(accepts).toHaveLength(2);
+				expect(accepts[1].startsWith("text/html")).toBe(true);
+				expect(result.error).toBeNull();
+				expect(result.content).toContain("Full HTML body after retry.");
+			},
+		);
+	});
+});
+
 describe("video content without Gemini", () => {
 	it("explains how to extract images from a YouTube URL", async () => {
 		const result = await extractContent("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
