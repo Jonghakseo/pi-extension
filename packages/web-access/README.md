@@ -16,7 +16,7 @@ pi install npm:@ryan_nookpi/pi-extension-web-access
 |---|---|---|
 | `web_search` | 도구 | Exa로 검색합니다. `queries`로 여러 검색을 한 번에 보내고, `includeContent`로 본문을 백그라운드에서 받아둘 수 있습니다. `category`(`news`, `research paper`, `pdf`, `github` 등)로 Exa 결과 종류를 좁힐 수 있습니다 |
 | `fetch_content` | 도구 | 웹 페이지(서버가 마크다운을 주면 그대로 사용), PDF, GitHub 저장소·PR·이슈, YouTube·로컬 영상에서 텍스트를 추출합니다. `mode: "raw"`를 주면 HTTP(S) 응답 본문을 가공 없이 돌려줍니다 |
-| `get_search_content` | 도구 | 이전 `web_search`·`fetch_content` 결과의 전체 본문을 다시 가져옵니다 |
+| `get_search_content` | 도구 | 이전 `web_search`·`fetch_content` 결과의 본문을 다시 가져옵니다. `offset`/`limit`로 잘라 읽거나 `findText`로 일치 구절만 찾을 수 있습니다 |
 | `/search` | 명령어 | 저장된 검색 결과를 둘러보고 삭제합니다 |
 
 모든 검색 쿼리나 모든 URL이 실패하거나, `fetch_content`에 `url`/`urls`가 없거나, `get_search_content`에 없는 `responseId`·인덱스를 넘기면 tool result에 `isError: true`가 붙습니다. 일부만 실패한 호출에는 붙지 않습니다.
@@ -32,6 +32,13 @@ fetch_content({ url: "https://example.com/api/items.json", mode: "raw" })
 추출한 텍스트 안의 `data:` URI(base64 이미지 등)는 `[pi-web-access inline data URI omitted; mime=...; encodedBytes=...; sha256=...]` 형태의 표시로 바뀝니다. 모델 출력과 세션에 저장되는 본문 어디에도 base64 페이로드가 남지 않습니다. `web_search`가 함께 가져온 본문도 저장 전에 같은 처리를 거칩니다. `mode: "raw"`는 본문을 그대로 돌려주는 모드라서 이 처리를 하지 않습니다.
 
 `fetch_content`가 가져온 URL 전문은 세션 JSONL이 아니라 Pi 설정 디렉터리(`~/.pi`) 아래 `web-search-cache`에 저장됩니다. 세션에는 URL·제목·길이 같은 메타데이터와 캐시 참조만 남습니다. 캐시 수명은 1시간이고 최대 128개, 128MiB입니다. 한도를 넘으면 오래된 항목부터 지웁니다. macOS·Linux에서 디렉터리는 `0700`, 파일은 `0600`으로 유지합니다. `PI_WEB_ACCESS_CACHE_ROOT`로 루트 디렉터리를 바꿀 수 있고, 캐시는 그 안의 `web-search-cache`에 생깁니다. 같은 값 없이 이어 연 세션은 거기 저장된 본문을 읽지 못합니다. 캐시가 만료되거나 지워진 뒤 `get_search_content`를 부르면 "Cached fetched content is missing or expired" 에러가 URL별로 나옵니다. 캐시 도입 전 세션에 본문이 그대로 들어 있는 기록은 1시간 안이면 그대로 읽힙니다.
+
+`get_search_content`는 저장된 본문을 `offset`/`limit`(기본·최대 30,000자)으로 잘라 돌려주고, 더 남았으면 다음 `offset`을 안내합니다. `findText`(문자열 또는 최대 10개 배열)를 주면 본문 전체를 읽지 않고 일치 구절과 앞뒤 문맥만 돌려줍니다. `findMode`는 `exact`, `case-insensitive`(기본), `fuzzy`이고, 출력은 20,000자로 제한되며 매치 수가 함께 표시됩니다. `findText`와 `offset`/`limit`을 같이 주거나 `findText` 없이 `findMode`만 주면 에러입니다.
+
+```
+get_search_content({ responseId: "abc123", urlIndex: 0, offset: 30000 })
+get_search_content({ responseId: "abc123", urlIndex: 0, findText: ["timeout", "retry"], findMode: "fuzzy" })
+```
 
 ## 설정
 
@@ -81,5 +88,6 @@ Exa 사용량은 `~/.pi/exa-usage.json`에 기록됩니다. PDF 추출 결과는
 - GitHub PR·이슈 URL을 `gh api`로 가져와 렌더합니다(원본의 `github-issue-pr`). 원본의 `gh pr view --json` 필드 조합, REST 폴백, 체크 롤업·연결된 이슈 표시는 가져오지 않았습니다. `gh`가 실패하면 일반 HTTP 추출로 넘어갑니다. 끄려면 `githubPrIssue.enabled: false`입니다.
 - `web_search`에 Exa `category`를 추가했습니다(원본 0.36.0). 원본처럼 목록으로 제한하지 않고 문자열을 그대로 넘깁니다. API 키가 있으면 요청 body의 `category`로, 키 없는 MCP 경로는 필터를 받지 못하므로 쿼리 텍스트 뒤에 덧붙입니다. 원본의 MCP 고급 도구 시도는 가져오지 않았습니다.
 - `fetch_content` 전문을 `web-search-cache` 디스크 캐시에 저장하고 세션에는 참조만 남깁니다(원본 `storage.ts`). 원본의 research 결과 저장과, 여러 세션이 한 프로세스에서 같은 결과를 공유할 때 쓰는 holder 계수는 가져오지 않았습니다.
+- `get_search_content`에 `offset`/`limit`/`findText`/`findMode`를 추가했습니다(원본의 `content-find`). 검색 결과와 fetch 본문 모두에 적용되고, 원본의 research artifact 페이징과 검색 결과 페이지의 continuation 예산 계산은 가져오지 않았습니다.
 - Gemini·Perplexity·브라우저 쿠키 기반 경로를 제거했습니다.
 - 라이선스는 원본 MIT 표기를 유지합니다. `LICENSE`를 참고하세요.
