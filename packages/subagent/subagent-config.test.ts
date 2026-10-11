@@ -25,11 +25,10 @@ afterEach(() => {
 });
 
 describe("subagent config", () => {
-	it("defaults claudeRuntime to sdk when config is missing", () => {
+	it("uses defaults when config is missing", () => {
 		const tmpDir = createTempDir();
 
 		expect(loadSubagentConfig(tmpDir, { globalPath: null, projectPath: null })).toEqual({
-			claudeRuntime: "sdk",
 			defaultAgent: "worker",
 			symbolMap: {},
 		});
@@ -40,26 +39,11 @@ describe("subagent config", () => {
 		const configPath = path.join(tmpDir, ".pi", "subagent.json");
 		const nestedDir = path.join(tmpDir, "apps", "web", "src");
 		fs.mkdirSync(nestedDir, { recursive: true });
-		writeJson(configPath, { claudeRuntime: "cli", defaultAgent: "worker", symbolMap: {} });
+		writeJson(configPath, { defaultAgent: "reviewer", symbolMap: {} });
 
 		expect(findNearestProjectSubagentConfig(nestedDir)).toBe(configPath);
 		expect(loadSubagentConfig(nestedDir, { globalPath: null })).toEqual({
-			claudeRuntime: "cli",
-			defaultAgent: "worker",
-			symbolMap: {},
-		});
-	});
-
-	it("reads claudeRuntime from settings.json and lets project config override it", () => {
-		const tmpDir = createTempDir();
-		const globalPath = path.join(tmpDir, "settings.json");
-		const projectPath = path.join(tmpDir, ".pi", "subagent.json");
-		writeJson(globalPath, { subagent: { claudeRuntime: "cli", defaultAgent: "worker", symbolMap: {} } });
-		writeJson(projectPath, { claudeRuntime: "sdk", defaultAgent: "worker", symbolMap: {} });
-
-		expect(loadSubagentConfig(tmpDir, { globalPath })).toEqual({
-			claudeRuntime: "sdk",
-			defaultAgent: "worker",
+			defaultAgent: "reviewer",
 			symbolMap: {},
 		});
 	});
@@ -72,7 +56,6 @@ describe("subagent config", () => {
 		writeJson(projectPath, { symbolMap: { "!": "reviewer" } });
 
 		expect(loadSubagentConfig(tmpDir, { globalPath })).toEqual({
-			claudeRuntime: "sdk",
 			defaultAgent: "worker",
 			symbolMap: { "!": "reviewer" },
 		});
@@ -111,13 +94,12 @@ describe("subagent config", () => {
 		expect(loadSubagentConfig(tmpDir, { globalPath }).symbolMap).toEqual({ "!": "reviewer" });
 	});
 
-	it("ignores invalid config values and falls back to sdk", () => {
+	it("ignores the removed claudeRuntime setting", () => {
 		const tmpDir = createTempDir();
 		const projectPath = path.join(tmpDir, ".pi", "subagent.json");
 		writeJson(projectPath, { claudeRuntime: "weird" });
 
 		expect(loadSubagentConfig(tmpDir, { globalPath: null })).toEqual({
-			claudeRuntime: "sdk",
 			defaultAgent: "worker",
 			symbolMap: {},
 		});

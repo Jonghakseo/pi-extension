@@ -8,15 +8,6 @@ import * as fs from "node:fs";
 import type { Message } from "@earendil-works/pi-ai";
 import type { AgentConfig } from "./agents.js";
 import { currentResourceObserver, trackSubagentRunner } from "./async-task-lifecycle.js";
-import { buildClaudeArgs } from "./claude-args.js";
-import { createSidecarWriter } from "./claude-sidecar-writer.js";
-import {
-	type ClaudeStreamState,
-	createStreamState,
-	processClaudeEvent,
-	stateToSingleResult,
-} from "./claude-stream-parser.js";
-import { resolveClaudeRuntimeMode } from "./config.js";
 import { CONTEXT_GUARD_SIGNATURE, resolveContextGuardCeiling, shouldTripContextGuard } from "./context-limits.js";
 import {
 	emitRunnerDiagnostic,
@@ -38,45 +29,20 @@ import type { AgentAliasMatch, DisplayItem, OnUpdateCallback, SingleResult, Suba
 import {
 	computeAgentAliasHints as computeAgentAliasHintsUtil,
 	getSubCommandAgentCompletions as getSubCommandAgentCompletionsUtil,
-	mapPiToolsToClaude,
 	matchSubCommandAgent as matchSubCommandAgentUtil,
-	validateClaudeRuntimeModel,
 } from "./utils/agent-utils.js";
 
 export interface RunSingleAgentSessionConfig {
 	asyncRunId?: number;
 	sessionFile?: string;
-	resumeSessionId?: string;
-	sidecarSessionFile?: string;
 	persistedSessionBaseOffset?: number;
 	onDiagnostic?: RunnerDiagnosticSink;
-}
-
-function isUuidLikeSessionId(value: string | undefined): boolean {
-	return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function normalizeRunSessionConfig(config?: string | RunSingleAgentSessionConfig): RunSingleAgentSessionConfig {
 	if (!config) return {};
 	if (typeof config !== "string") return config;
-	if (isUuidLikeSessionId(config)) return { resumeSessionId: config };
-	return { sessionFile: config, sidecarSessionFile: config };
-}
-
-function extractToolNamesFromPrecedingAssistant(state: ClaudeStreamState): string[] {
-	for (let i = state.messages.length - 1; i >= 0; i--) {
-		const msg = state.messages[i];
-		if (msg.role === "assistant") {
-			const names: string[] = [];
-			for (const part of msg.content as any[]) {
-				if (part.type === "toolCall" && typeof part.name === "string") {
-					names.push(part.name);
-				}
-			}
-			return names;
-		}
-	}
-	return [];
+	return { sessionFile: config };
 }
 
 function appendStderrDiagnostic(result: SingleResult, message: string): void {
@@ -228,8 +194,6 @@ async function runSingleAgentUntracked(
 	currentResourceObserver()("settled");
 	const normalizedSessionConfig = normalizeRunSessionConfig(sessionConfig);
 	const sessionFile = normalizedSessionConfig.sessionFile;
-	const resumeSessionId = normalizedSessionConfig.resumeSessionId;
-	const sidecarSessionFile = normalizedSessionConfig.sidecarSessionFile ?? sessionFile;
 	const persistedSessionBaseOffset = normalizedSessionConfig.persistedSessionBaseOffset ?? 0;
 	const onDiagnostic = normalizedSessionConfig.onDiagnostic;
 	const agent = agents.find((a) => a.name === agentName);
@@ -261,38 +225,6 @@ async function runSingleAgentUntracked(
 		};
 	}
 
-	if (agent.runtime === "claude") {
-		if (resolveClaudeRuntimeMode(defaultCwd) === "sdk") {
-			// SDK query.close() has no process-exit acknowledgement.
-			currentResourceObserver()("unknown");
-			const { runClaudeAgentViaSdk } = await import("./claude-sdk-runner.js");
-			if (signal?.aborted) throw new Error("Subagent was aborted");
-			return runClaudeAgentViaSdk(
-				defaultCwd,
-				agent,
-				task,
-				step,
-				signal,
-				onUpdate,
-				makeDetails,
-				resumeSessionId,
-				sidecarSessionFile,
-			);
-		}
-		return runClaudeAgent(
-			defaultCwd,
-			agent,
-			task,
-			step,
-			signal,
-			onUpdate,
-			makeDetails,
-			resumeSessionId,
-			sidecarSessionFile,
-			onDiagnostic,
-		);
-	}
-
 	return runPiAgent(
 		defaultCwd,
 		agent,
@@ -306,369 +238,6 @@ async function runSingleAgentUntracked(
 		persistedSessionBaseOffset,
 		onDiagnostic,
 	);
-}
-
-async function runClaudeAgent(
-	defaultCwd: string,
-	agent: AgentConfig,
-	task: string,
-	step: number | undefined,
-	signal: AbortSignal | undefined,
-	onUpdate: OnUpdateCallback | undefined,
-	makeDetails: (results: SingleResult[]) => SubagentDetails,
-	resumeSessionId?: string,
-	sidecarSessionFile?: string,
-	onDiagnostic?: RunnerDiagnosticSink,
-): Promise<SingleResult> {
-	const observeResource = currentResourceObserver();
-	try {
-		validateClaudeRuntimeModel(agent.model);
-	} catch (err: any) {
-		return {
-			agent: agent.name,
-			agentSource: agent.source,
-			task,
-			exitCode: 1,
-			messages: [],
-			stderr: err.message,
-			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-			runtime: "claude",
-			step,
-		};
-	}
-
-	if (agent.tools && agent.tools.length > 0) {
-		try {
-			mapPiToolsToClaude(agent.tools);
-		} catch (err: any) {
-			return {
-				agent: agent.name,
-				agentSource: agent.source,
-				task,
-				exitCode: 1,
-				messages: [],
-				stderr: err.message,
-				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-				runtime: "claude",
-				step,
-			};
-		}
-	}
-
-	let tmpPromptDir: string | null = null;
-	let tmpPromptPath: string | null = null;
-
-	const resumeId = resumeSessionId;
-	const sidecarPath = sidecarSessionFile;
-
-	const streamState = createStreamState();
-	let stderrBuf = "";
-	const sidecar = sidecarPath ? createSidecarWriter(sidecarPath) : null;
-	let sidecarInitialUserWritten = false;
-	let completionMarkerWritten = false;
-	let wasAborted = false;
-
-	const diagnose = (event: Parameters<RunnerDiagnosticSink>[0]) => {
-		emitRunnerDiagnostic(onDiagnostic, { runtime: "claude", ...event });
-	};
-
-	const emitUpdate = () => {
-		if (!onUpdate) return;
-		const text = streamState.liveText ?? getFinalOutput(streamState.messages) ?? "(running...)";
-		const partial = stateToSingleResult(streamState, agent.name, agent.source, task, 0, step, stderrBuf);
-		partial.liveText = streamState.liveText;
-		partial.liveThinking = streamState.liveThinking;
-		partial.liveToolCalls = streamState.liveToolCalls;
-		partial.thoughtText = streamState.thoughtText;
-		onUpdate({
-			content: [{ type: "text", text }],
-			details: makeDetails([partial]),
-		});
-	};
-
-	const writeCompletionMarkerOnce = (exitCode: number) => {
-		if (!sidecar || completionMarkerWritten) return;
-		completionMarkerWritten = true;
-		const stopReason = wasAborted ? "aborted" : streamState.stopReason;
-		const normalizedExitCode = stopReason === "error" || stopReason === "aborted" ? 1 : exitCode;
-		sidecar.writeDone({ exitCode: normalizedExitCode, stopReason, runtime: "claude" });
-	};
-
-	try {
-		if (agent.systemPrompt.trim()) {
-			const tmp = writePromptToTempFile(agent.name, agent.systemPrompt);
-			tmpPromptDir = tmp.dir;
-			tmpPromptPath = tmp.filePath;
-		}
-
-		const args = buildClaudeArgs({
-			prompt: normalizeTaskForSubagentPrompt(task),
-			tools: agent.tools ?? [],
-			toolsConfigured: agent.toolsConfigured ?? agent.tools !== undefined,
-			model: agent.model,
-			thinking: agent.thinking,
-			resumeSessionId: resumeId,
-			cwd: defaultCwd,
-			systemPromptFile: tmpPromptPath ?? undefined,
-		});
-
-		const exitCode = await new Promise<number>((resolve) => {
-			if (signal?.aborted) throw new Error("Subagent was aborted");
-			const proc = spawn("claude", args, { cwd: defaultCwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
-			observeResource("active");
-			let buffer = "";
-			let procExited = false;
-			let settled = false;
-			let exitFallbackTimer: ReturnType<typeof setTimeout> | undefined;
-			let resultLingerTimer: ReturnType<typeof setTimeout> | undefined;
-			let lastExitCode = 0;
-			let lastProcessSignal: NodeJS.Signals | null = null;
-			let settleReason = "unknown";
-			let unparsedStdoutCount = 0;
-			const unparsedStdoutTail: string[] = [];
-			const parentIdentity = onDiagnostic ? readProcessIdentity(process.pid) : undefined;
-			const childIdentity = onDiagnostic ? readProcessIdentity(proc.pid) : undefined;
-
-			diagnose({
-				event: "spawn",
-				parentPid: process.pid,
-				parentProcessGroupId: parentIdentity?.processGroupId,
-				childPid: proc.pid,
-				childParentPid: childIdentity?.parentPid,
-				childProcessGroupId: childIdentity?.processGroupId,
-				processGroupMode: "inherited",
-			});
-
-			const terminateProcess = (terminationSignal: NodeJS.Signals, cause: string): boolean => {
-				diagnose({
-					event: "kill_intent",
-					childPid: proc.pid,
-					signal: terminationSignal,
-					cause,
-					stopReason: streamState.stopReason,
-				});
-				try {
-					const killSent = proc.kill(terminationSignal);
-					diagnose({
-						event: "kill_result",
-						childPid: proc.pid,
-						signal: terminationSignal,
-						cause,
-						killSent,
-					});
-					return killSent;
-				} catch (error) {
-					diagnose({
-						event: "process_error",
-						childPid: proc.pid,
-						cause: `kill:${cause}`,
-						error: toDiagnosticError(error),
-					});
-					return false;
-				}
-			};
-
-			const scheduleKillEscalation = (cause: string) => {
-				setTimeout(() => {
-					if (!procExited && proc.exitCode === null) terminateProcess("SIGKILL", `${cause}:grace_timeout`);
-				}, 5000);
-			};
-
-			const processLine = (line: string) => {
-				if (!line.trim()) return;
-				let event: any;
-				try {
-					event = JSON.parse(line);
-				} catch {
-					unparsedStdoutCount++;
-					const snippet = line.trim().slice(0, 300);
-					if (snippet) {
-						unparsedStdoutTail.push(snippet);
-						if (unparsedStdoutTail.length > 3) unparsedStdoutTail.shift();
-					}
-					return;
-				}
-				if (sidecar && !sidecarInitialUserWritten) {
-					sidecarInitialUserWritten = true;
-					sidecar.writeUserMessage(task);
-				}
-
-				const msgCountBefore = streamState.messages.length;
-				const isResult = processClaudeEvent(streamState, event);
-				emitUpdate();
-
-				if (sidecar && streamState.messages.length > msgCountBefore) {
-					for (let i = msgCountBefore; i < streamState.messages.length; i++) {
-						const msg = streamState.messages[i];
-						if (msg.role === "assistant") {
-							sidecar.writeAssistantTurn(streamState);
-						} else if (msg.role === "user") {
-							const toolNames = extractToolNamesFromPrecedingAssistant(streamState);
-							const textParts = (msg.content as any[])
-								.filter((p: any) => p.type === "text" && p.text)
-								.map((p: any) => p.text);
-							const content = textParts.join("\n") || "(no output)";
-							sidecar.writeToolResult(toolNames[0] ?? "tool", content);
-						}
-					}
-				}
-
-				if (isResult) {
-					if (sidecar) sidecar.writeFinalAssistant(streamState);
-					writeCompletionMarkerOnce(streamState.isError ? 1 : 0);
-					schedulePostResultLinger();
-				}
-			};
-
-			const resolveOnce = (code: number) => {
-				if (settled) return;
-				settled = true;
-				if (buffer.trim()) {
-					const pendingLine = buffer;
-					buffer = "";
-					processLine(pendingLine);
-				}
-				const finalCode = streamState.isError || streamState.stopReason === "error" ? 1 : code;
-				writeCompletionMarkerOnce(finalCode);
-				if (exitFallbackTimer) {
-					clearTimeout(exitFallbackTimer);
-					exitFallbackTimer = undefined;
-				}
-				if (resultLingerTimer) {
-					clearTimeout(resultLingerTimer);
-					resultLingerTimer = undefined;
-				}
-
-				if (streamState.messages.length === 0) {
-					const msg = `no assistant/tool messages captured; settleReason=${settleReason}; exitCode=${finalCode}; resultReceived=${streamState.resultReceived}`;
-					appendStderrDiagnostic({ stderr: stderrBuf } as SingleResult, msg);
-					stderrBuf += `[runner] ${msg}\n`;
-					if (unparsedStdoutCount > 0) {
-						const tail = `unparsed stdout lines=${unparsedStdoutCount}; tail=${unparsedStdoutTail.join(" | ") || "(empty)"}`;
-						stderrBuf += `[runner] ${tail}\n`;
-					}
-				}
-				diagnose({
-					event: "settled",
-					childPid: proc.pid,
-					code: finalCode,
-					signal: lastProcessSignal,
-					settleReason,
-					stopReason: wasAborted ? "aborted" : streamState.stopReason,
-				});
-				resolve(finalCode);
-			};
-
-			function schedulePostResultLinger() {
-				if (settled || procExited) {
-					settleReason = "result_immediate";
-					resolveOnce(0);
-					return;
-				}
-				if (resultLingerTimer) clearTimeout(resultLingerTimer);
-				resultLingerTimer = setTimeout(() => {
-					if (settled || procExited) return;
-					terminateProcess("SIGTERM", "result_linger_timeout");
-					scheduleKillEscalation("result_linger_timeout");
-					settleReason = "result_linger_timeout";
-					resolveOnce(0);
-				}, 3000);
-			}
-
-			proc.stdout.on("data", (data) => {
-				buffer += data.toString();
-				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
-				for (const line of lines) processLine(line);
-			});
-
-			proc.stderr.on("data", (data) => {
-				stderrBuf += data.toString();
-			});
-
-			proc.on("exit", (code, terminationSignal) => {
-				observeResource("settled");
-				procExited = true;
-				lastExitCode = normalizeChildExitCode(code, terminationSignal, lastExitCode);
-				lastProcessSignal = terminationSignal;
-				diagnose({ event: "exit", childPid: proc.pid, code, signal: terminationSignal });
-				if (streamState.resultReceived) {
-					settleReason = "exit_after_result";
-					resolveOnce(0);
-					return;
-				}
-				if (terminationSignal && !settled && !wasAborted) {
-					stderrBuf += `[runner] process terminated by signal ${terminationSignal}\n`;
-				}
-				exitFallbackTimer = setTimeout(() => {
-					settleReason = "exit_fallback_timeout";
-					resolveOnce(lastExitCode);
-				}, 1500);
-			});
-
-			proc.on("close", (code, terminationSignal) => {
-				observeResource("settled");
-				procExited = true;
-				lastProcessSignal = terminationSignal ?? lastProcessSignal;
-				diagnose({ event: "close", childPid: proc.pid, code, signal: terminationSignal });
-				if (!settled) {
-					settleReason = "close";
-					resolveOnce(streamState.resultReceived ? 0 : normalizeChildExitCode(code, lastProcessSignal, lastExitCode));
-				}
-			});
-
-			proc.on("error", (error) => {
-				observeResource(proc.pid ? "unknown" : "settled");
-				procExited = true;
-				stderrBuf += `[runner] process error: ${error?.message || String(error)}\n`;
-				diagnose({
-					event: "process_error",
-					childPid: proc.pid,
-					cause: "child_process_event",
-					error: toDiagnosticError(error),
-				});
-				settleReason = "process_error";
-				resolveOnce(1);
-			});
-
-			if (signal) {
-				const killProc = () => {
-					wasAborted = true;
-					settleReason = "aborted_by_signal";
-					diagnose({
-						event: "abort_received",
-						childPid: proc.pid,
-						abortReason: serializeDiagnosticValue(signal.reason),
-					});
-					terminateProcess("SIGTERM", "abort_signal");
-					scheduleKillEscalation("abort_signal");
-				};
-				if (signal.aborted) killProc();
-				else signal.addEventListener("abort", killProc, { once: true });
-			}
-		});
-
-		if (wasAborted) throw new Error("Subagent was aborted");
-
-		const finalExitCode = streamState.isError ? 1 : exitCode;
-		const result = stateToSingleResult(streamState, agent.name, agent.source, task, finalExitCode, step, stderrBuf);
-		result.sessionFile = sidecarPath;
-		result.claudeProjectDir = defaultCwd;
-		return result;
-	} finally {
-		if (tmpPromptPath)
-			try {
-				fs.unlinkSync(tmpPromptPath);
-			} catch {
-				/* ignore */
-			}
-		if (tmpPromptDir)
-			try {
-				fs.rmdirSync(tmpPromptDir);
-			} catch {
-				/* ignore */
-			}
-	}
 }
 
 async function runPiAgent(
@@ -710,7 +279,7 @@ async function runPiAgent(
 	};
 	let completionMarkerWritten = false;
 	let wasAborted = false;
-	const contextGuardCeiling = resolveContextGuardCeiling(agent.model, "pi");
+	const contextGuardCeiling = resolveContextGuardCeiling(agent.model);
 	let contextGuardTripped = false;
 	let peakContextTokens = 0;
 

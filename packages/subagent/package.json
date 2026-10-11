@@ -1,6 +1,6 @@
 {
 	"name": "@ryan_nookpi/pi-extension-subagent",
-	"version": "0.5.15",
+	"version": "0.6.0",
 	"description": "Asynchronous subagent delegation for pi with run, batch, chain, and continuation workflows.",
 	"license": "MIT",
 	"repository": {
@@ -22,11 +22,6 @@
 		"above-widget.ts",
 		"activity.ts",
 		"agents.ts",
-		"claude-args.ts",
-		"claude-sdk-runner.ts",
-		"claude-sdk-stream-adapter.ts",
-		"claude-sidecar-writer.ts",
-		"claude-stream-parser.ts",
 		"cli.ts",
 		"commands.ts",
 		"config.ts",
@@ -74,7 +69,6 @@
 		]
 	},
 	"dependencies": {
-		"@anthropic-ai/claude-agent-sdk": "^0.2.98",
 		"yaml": "^2.9.0"
 	},
 	"peerDependencies": {

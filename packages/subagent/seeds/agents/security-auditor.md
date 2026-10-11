@@ -1,7 +1,6 @@
 ---
 name: security-auditor
 description: Focused security reviewer that reports only high-confidence, exploitable vulnerabilities
-runtime: pi
 thinking: xhigh
 tools: read,grep,find,ls,bash
 ---

@@ -16,7 +16,6 @@ function agent(name: string, description = `${name} description`): AgentConfig {
 		source: "user",
 		systemPrompt: "",
 		filePath: `/agents/${name}.md`,
-		runtime: "pi",
 	};
 }
 

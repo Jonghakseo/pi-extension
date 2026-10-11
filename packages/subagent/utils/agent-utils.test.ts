@@ -6,7 +6,6 @@ import {
 	computeAgentAliasHints,
 	getAgentInitials,
 	getSubCommandAgentCompletions,
-	isClaudeModel,
 	matchSubCommandAgent,
 	normalizeAgentAlias,
 	normalizeModel,
@@ -95,20 +94,6 @@ describe("normalizeModel", () => {
 
 	it("should pass through slash-containing Claude models", () => {
 		expect(normalizeModel("openai/gpt-4o", "claude")).toBe("openai/gpt-4o");
-	});
-});
-
-// ── isClaudeModel ───────────────────────────────────────────────────────────
-
-describe("isClaudeModel", () => {
-	it("should detect Anthropic Claude models", () => {
-		expect(isClaudeModel("anthropic/claude-opus-4-7")).toBe(true);
-		expect(isClaudeModel("claude-sonnet-4-6")).toBe(true);
-	});
-
-	it("should reject non-Claude models", () => {
-		expect(isClaudeModel("openai-codex/gpt-5.4")).toBe(false);
-		expect(isClaudeModel(undefined)).toBe(false);
 	});
 });
 

@@ -55,7 +55,6 @@ describe("subagent starter pack", () => {
 		expect(fs.statSync(path.join(tmpDir, "settings.json")).mode & 0o777).toBe(0o600);
 		expect(readJson(path.join(tmpDir, "settings.json")).subagent).toEqual({
 			defaultAgent: "worker",
-			claudeRuntime: "cli",
 			symbolMap: { "?": "searcher", "!": "challenger", "@": "browser" },
 		});
 		expect(result.settingsUpdated).toBe(true);

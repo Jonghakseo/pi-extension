@@ -1,7 +1,6 @@
 ---
 name: reviewer
 description: Code review specialist for correctness, regressions, maintainability, and security analysis
-runtime: pi
 thinking: xhigh
 tools: read,grep,find,ls,bash
 ---

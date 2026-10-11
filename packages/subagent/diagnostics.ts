@@ -1,6 +1,5 @@
 import * as childProcess from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { AgentRuntime } from "./agents.js";
 import type { CommandRunState } from "./types.js";
 
 export const RUNNER_DIAGNOSTIC_CUSTOM_TYPE = "subagent-runner-diagnostic";
@@ -19,7 +18,7 @@ export type RunnerDiagnosticEventName =
 
 export interface RunnerDiagnosticEvent {
 	event: RunnerDiagnosticEventName;
-	runtime?: AgentRuntime;
+	runtime?: "pi";
 	parentPid?: number;
 	parentProcessGroupId?: number;
 	childPid?: number;

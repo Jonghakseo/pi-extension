@@ -70,7 +70,6 @@ export function isContextOverflowText(text: string | undefined | null): boolean 
 /**
  * Per-model-prefix effective ceilings (tokens). Set below the provider's real
  * hard limit so we cut over one turn before the cliff and keep findings.
- * Only applied to the pi runtime; the claude runtime handles its own limits.
  */
 const GUARD_CEILINGS: Array<{ prefix: string; tokens: number }> = [
 	// GPT-5.3 Codex Spark has a hard 128k text-only window. Pi checks native
@@ -104,14 +103,12 @@ function parseEnvCeiling(): number | undefined {
 /**
  * Resolve the proactive context-guard ceiling (in tokens) for a subagent run.
  *
- * Returns undefined when no guard applies (non-pi runtime, unknown model, or
+ * Returns undefined when no guard applies (unknown model or
  * guard explicitly disabled) — in which case we defer to the provider / pi's
  * native compaction. An env override (PI_SUBAGENT_CONTEXT_GUARD_TOKENS) wins
- * for pi-runtime models; set it to 0 to disable.
+ * for all models; set it to 0 to disable.
  */
-export function resolveContextGuardCeiling(model: string | undefined, runtime: string | undefined): number | undefined {
-	if (runtime && runtime !== "pi") return undefined;
-
+export function resolveContextGuardCeiling(model: string | undefined): number | undefined {
 	const envRaw = process.env[GUARD_ENV_KEY];
 	if (envRaw !== undefined) {
 		// Explicit disable via 0/empty; otherwise a positive override applies to all pi models.

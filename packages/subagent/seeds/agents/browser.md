@@ -1,7 +1,6 @@
 ---
 name: browser
 description: Browser automation specialist for UI testing, visual verification, and web interaction
-runtime: pi
 thinking: high
 tools: read,grep,find,ls,bash,edit,write
 ---

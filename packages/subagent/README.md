@@ -3,7 +3,7 @@
 Asynchronous subagent delegation for [pi](https://github.com/earendil-works/pi). Run specialist agents in dedicated child sessions, share main-session context when needed, and receive results as completion notifications.
 
 > [!WARNING]
-> Subagents run headlessly without approval prompts. Claude-runtime agents bypass permissions, and pi-runtime agents can use every tool declared by their agent definition. This extension is not a sandbox. Use trusted repositories, prompts, and agent definitions only.
+> Subagents run headlessly as pi child processes without approval prompts and can use every tool declared by their agent definition. This extension is not a sandbox. Use trusted repositories, prompts, and agent definitions only.
 
 ## Install
 
@@ -23,7 +23,6 @@ name: worker
 description: Implements requested changes
 thinking: medium
 tools: read,bash,edit,write
-runtime: pi
 ---
 
 Implement the requested changes and verify them.
@@ -49,12 +48,11 @@ Agent files use YAML frontmatter followed by the system prompt. `name` and `desc
 
 | Field | Description |
 | --- | --- |
-| `runtime` | `pi` (default) or `claude` |
-| `model` | Runtime-compatible model ID |
+| `model` | pi model ID |
 | `thinking` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
 | `tools` | Comma-separated tool names |
 
-Omitted optional fields use runtime defaults.
+Omitted optional fields use pi defaults. Every agent runs on pi. A legacy `runtime` field is ignored, except `runtime: claude`, which is no longer supported and marks the agent invalid.
 
 Agents are discovered in this order; later definitions override earlier agents with the same name:
 
@@ -85,7 +83,7 @@ Both skills expect the starter agents, so they report a missing agent instead of
 
 If you already defined your own agents, the full pack is never offered. In that case `/subagents` offers only the workflow skills that are missing, and it leaves your agents and settings untouched.
 
-The starter pack is not required. Decline it if you prefer to define agents manually. It fills a missing `claudeRuntime` setting with `cli`; without that setting, the extension default is `sdk`.
+The starter pack is not required. Decline it if you prefer to define agents manually.
 
 ## Context modes
 
@@ -100,7 +98,7 @@ Active child processes stop when pi replaces or reloads the parent extension run
 
 The extension registers two tools:
 
-- `list-agents` lists discovered agents and runtime settings
+- `list-agents` lists discovered agents and their settings
 - `subagent` executes a CLI-style command string
 
 These strings are tool input, not shell commands. Do not run them in Bash.
@@ -184,7 +182,6 @@ Global settings belong under `subagent` in `$PI_CODING_AGENT_DIR/settings.json`:
 ```json
 {
   "subagent": {
-    "claudeRuntime": "sdk",
     "defaultAgent": "worker",
     "symbolMap": {
       "?": "searcher",
@@ -205,29 +202,19 @@ A nearest project `.pi/subagent.json` overrides global values:
 }
 ```
 
-- `claudeRuntime`: `sdk` (default) or `cli`; applies only to `runtime: claude`
 - `defaultAgent`: used when an interactive launch omits the agent; defaults to `worker`
 - `symbolMap`: one-character shortcuts mapped to agent names; a valid project map replaces the global map
 
-Set `PI_SUBAGENT_CONTEXT_GUARD_TOKENS` to a positive integer to override the proactive context limit for pi-runtime children. Set it to `0` or an empty value to disable the guard.
-
-## Claude runtime
-
-The default Claude runtime uses the Claude Agent SDK and requires supported Anthropic authentication such as `ANTHROPIC_API_KEY`; see the [official Claude Agent SDK documentation](https://platform.claude.com/docs/en/agent-sdk/overview).
-
-For `claudeRuntime: "cli"`, install the `claude` executable, ensure it is on `PATH`, and authenticate Claude Code.
+Set `PI_SUBAGENT_CONTEXT_GUARD_TOKENS` to a positive integer to override the proactive context limit for child runs. Set it to `0` or an empty value to disable the guard.
 
 ## Escalation
 
-Pi-runtime children receive an `ask_master` tool. Calling it reports a decision or blocker to the parent and immediately terminates the child run. Use it only when the child cannot proceed safely.
-
-Claude-runtime children do not receive `ask_master`; they report blockers in their final response.
+Children receive an `ask_master` tool. Calling it reports a decision or blocker to the parent and immediately terminates the child run. Use it only when the child cannot proceed safely.
 
 ## Troubleshooting
 
 - **`Configured defaultAgent "worker" was not found`**: create a matching agent, choose another agent explicitly, or update `defaultAgent`.
-- **Claude SDK authentication failure**: confirm the environment that starts pi contains valid Anthropic authentication.
-- **`spawn claude ENOENT`**: install Claude Code or switch `claudeRuntime` to `sdk`.
+- **`runtime "claude" is no longer supported`**: remove the `runtime` field from the agent file; agents always run on pi.
 - **Hidden run shows no transcript message**: inspect it with `/sub:peek`, `<>runId`, or `/sub:open`.
 - **`/skill:stress-interview` reports a missing agent**: run `/subagents` to install the starter pack, then `/reload`.
 - **Starter skills are missing although agents exist**: run `/subagents` and accept the workflow skill offer, then `/reload`.
@@ -236,8 +223,7 @@ When reporting a bug, include the pi and extension versions, OS and Node version
 
 ## Security
 
-- Claude SDK uses permission bypass; Claude CLI uses `--dangerously-skip-permissions`.
-- Pi-runtime children can use every tool declared by their agent.
+- Children can use every tool declared by their agent.
 - Project agent definitions are repository-controlled instructions. Review `.pi/agents` and `.claude/agents` in unfamiliar repositories.
 - Restrict each agent's `tools` list to the minimum required.
 - `--isolated` separates conversation context, not filesystem, process, credential, or network access.

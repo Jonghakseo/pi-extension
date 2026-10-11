@@ -692,9 +692,6 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 					lastToolOutputChars: d.lastToolOutputChars ?? existing?.lastToolOutputChars,
 					thoughtText: d.thoughtText ?? d.progressText ?? existing?.thoughtText,
 					source: restoredSource,
-					runtime: d.runtime ?? existing?.runtime,
-					claudeSessionId: d.claudeSessionId ?? existing?.claudeSessionId,
-					claudeProjectDir: d.claudeProjectDir ?? existing?.claudeProjectDir,
 				};
 				// Extract thought/progress and output from content payload
 				const lines = content.split("\n");
@@ -753,9 +750,6 @@ function restoreRunsFromSession(store: SubagentStore, ctx: any, pi?: ExtensionAP
 					lastToolOutputChars: existing?.lastToolOutputChars,
 					thoughtText: d.thoughtText ?? d.progressText ?? existing?.thoughtText,
 					source: restoredSource,
-					runtime: d.runtime ?? existing?.runtime,
-					claudeSessionId: d.claudeSessionId ?? existing?.claudeSessionId,
-					claudeProjectDir: d.claudeProjectDir ?? existing?.claudeProjectDir,
 				});
 			}
 		}
@@ -1184,23 +1178,6 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 					return;
 				}
 
-				if (targetRun.runtime === "claude") {
-					if (!targetRun.claudeSessionId) {
-						ctx.ui.notify(
-							`Cannot resume Claude run #${targetRunId}: no claudeSessionId found. The session metadata was lost or never captured.`,
-							"error",
-						);
-						return;
-					}
-					if (!targetRun.claudeProjectDir || targetRun.claudeProjectDir !== ctx.cwd) {
-						ctx.ui.notify(
-							`Cannot resume Claude run #${targetRunId}: claudeProjectDir mismatch. Expected "${targetRun.claudeProjectDir ?? "(none)"}", current cwd is "${ctx.cwd}".`,
-							"error",
-						);
-						return;
-					}
-				}
-
 				const nextInstruction = input.slice(firstSpace + 1).trim();
 				if (!nextInstruction) {
 					ctx.ui.notify(usageText, "info");
@@ -1469,9 +1446,6 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 								elapsedMs: runState.elapsedMs,
 								lastActivityAt: runState.lastActivityAt,
 								thoughtText: runState.thoughtText,
-								runtime: runState.runtime,
-								claudeSessionId: runState.claudeSessionId,
-								claudeProjectDir: runState.claudeProjectDir,
 							},
 						},
 						{ deliverAs: "followUp", triggerTurn: false },
@@ -1497,7 +1471,6 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 					updateCommandRunsWidget(store);
 				}, RUN_TICK_INTERVAL_MS);
 
-				let claudeCheckpointSent = !!runState.claudeSessionId;
 				const recordActivity = hiddenFromMain
 					? () => {}
 					: createRunActivityRecorder(pi, runState, (model) => resolveContextWindow(ctx, model));
@@ -1531,44 +1504,11 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 											if (!current) return;
 											updateRunFromResult(runState, current);
 											recordActivity();
-											if (!claudeCheckpointSent && runState.claudeSessionId) {
-												claudeCheckpointSent = true;
-												if (!hiddenFromMain) {
-													pi.sendMessage(
-														{
-															customType: "subagent-command" as const,
-															content: `[subagent:${selectedAgent}#${runId}] checkpoint`,
-															display: false,
-															details: {
-																runId,
-																agent: selectedAgent,
-																task: taskForDisplay,
-																displayTask: runState.displayTask,
-																continuedFromRunId,
-																turnCount: runState.turnCount,
-																contextMode: runState.contextMode,
-																sessionFile: runState.sessionFile,
-																persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
-																status: "started",
-																startedAt: runState.startedAt,
-																elapsedMs: runState.elapsedMs,
-																lastActivityAt: runState.lastActivityAt,
-																runtime: runState.runtime,
-																claudeSessionId: runState.claudeSessionId,
-																claudeProjectDir: runState.claudeProjectDir,
-															},
-														},
-														{ deliverAs: "followUp", triggerTurn: false },
-													);
-												}
-											}
 											updateCommandRunsWidget(store);
 										},
 										makeDetails,
 										{
 											sessionFile: runState.sessionFile,
-											resumeSessionId: runState.claudeSessionId,
-											sidecarSessionFile: runState.sessionFile,
 											persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
 											...(store.asyncTasks?.provider.supported ? { asyncRunId: runState.id } : {}),
 											onDiagnostic: createRunDiagnosticSink(pi, runState),
@@ -1653,9 +1593,6 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 								thoughtText: runState.thoughtText,
 								retryCount: runState.retryCount,
 								status: runState.status,
-								runtime: runState.runtime,
-								claudeSessionId: runState.claudeSessionId,
-								claudeProjectDir: runState.claudeProjectDir,
 							},
 						};
 						if (hiddenFromMain) {
@@ -1723,9 +1660,6 @@ export function registerAll(pi: ExtensionAPI, store: SubagentStore): SubagentReg
 								lastToolOutputChars: runState.lastToolOutputChars,
 								thoughtText: runState.thoughtText,
 								status: runState.status,
-								runtime: runState.runtime,
-								claudeSessionId: runState.claudeSessionId,
-								claudeProjectDir: runState.claudeProjectDir,
 							},
 						};
 						if (hiddenFromMain) {

@@ -1,7 +1,6 @@
 ---
 name: code-cleaner
 description: Read-only code cleanup analyst for reuse, quality, and efficiency findings
-runtime: pi
 thinking: xhigh
 tools: read,grep,find,ls,bash
 ---

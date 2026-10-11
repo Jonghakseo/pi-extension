@@ -135,10 +135,6 @@ export function updateRunFromResult(state: CommandRunState, result: SingleResult
 	if (result.usage?.turns != null) state.turnCount = result.usage.turns;
 	if (result.thoughtText) state.thoughtText = result.thoughtText;
 
-	if (result.runtime) state.runtime = result.runtime;
-	if (result.claudeSessionId) state.claudeSessionId = result.claudeSessionId;
-	if (result.claudeProjectDir) state.claudeProjectDir = result.claudeProjectDir;
-
 	const output = getFinalOutput(result.messages);
 	if (output) state.lastOutput = output;
 

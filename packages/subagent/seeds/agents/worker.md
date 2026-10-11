@@ -1,7 +1,6 @@
 ---
 name: worker
 description: General-purpose implementation agent for multi-file changes, refactoring, and complex coding tasks
-runtime: pi
 thinking: medium
 tools: read,grep,find,ls,bash,edit,write
 ---

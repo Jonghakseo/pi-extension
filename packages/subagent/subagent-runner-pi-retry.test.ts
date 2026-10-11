@@ -23,7 +23,6 @@ const agent: AgentConfig = {
 	systemPrompt: "",
 	source: "user",
 	filePath: "/tmp/worker.md",
-	runtime: "pi",
 };
 const makeDetails = (results: SingleResult[]): SubagentDetails => ({
 	mode: "single",

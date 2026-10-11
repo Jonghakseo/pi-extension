@@ -1,7 +1,6 @@
 ---
 name: verifier
 description: Validation specialist for proving changes with tests, linting, type checking, and runtime evidence
-runtime: pi
 thinking: xhigh
 tools: read,grep,find,ls,bash
 ---

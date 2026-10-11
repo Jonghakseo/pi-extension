@@ -83,52 +83,7 @@ describe("runtime frontmatter parsing", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
-	it("defaults to 'pi' when runtime is not specified", () => {
-		const tmpDir = createTempAgentDir();
-		const agentsDir = path.join(tmpDir, ".pi", "agents");
-		fs.mkdirSync(agentsDir, { recursive: true });
-
-		writeAgentFile(
-			agentsDir,
-			"worker.md",
-			["---", "name: worker", "description: A worker agent", "---", "Do work."].join("\n"),
-		);
-
-		const result = discoverAgents(tmpDir);
-		const worker = result.agents.find((a) => a.name === "worker");
-		expect(worker).toBeDefined();
-		expect(worker?.runtime).toBe("pi");
-
-		fs.rmSync(tmpDir, { recursive: true, force: true });
-	});
-
-	it("reads runtime: claude from frontmatter", () => {
-		const tmpDir = createTempAgentDir();
-		const agentsDir = path.join(tmpDir, ".pi", "agents");
-		fs.mkdirSync(agentsDir, { recursive: true });
-
-		writeAgentFile(
-			agentsDir,
-			"claude-agent.md",
-			[
-				"---",
-				"name: claude-agent",
-				"description: A Claude runtime agent",
-				"runtime: claude",
-				"---",
-				"Do work with Claude.",
-			].join("\n"),
-		);
-
-		const result = discoverAgents(tmpDir);
-		const agent = result.agents.find((a) => a.name === "claude-agent");
-		expect(agent).toBeDefined();
-		expect(agent?.runtime).toBe("claude");
-
-		fs.rmSync(tmpDir, { recursive: true, force: true });
-	});
-
-	it("reads runtime: pi from frontmatter", () => {
+	it("ignores runtime: pi and unknown runtime values", () => {
 		const tmpDir = createTempAgentDir();
 		const agentsDir = path.join(tmpDir, ".pi", "agents");
 		fs.mkdirSync(agentsDir, { recursive: true });
@@ -136,13 +91,58 @@ describe("runtime frontmatter parsing", () => {
 		writeAgentFile(
 			agentsDir,
 			"pi-agent.md",
-			["---", "name: pi-agent", "description: A Pi runtime agent", "runtime: pi", "---", "Do work with Pi."].join("\n"),
+			["---", "name: pi-agent", "description: A Pi agent", "runtime: pi", "---", "Do work."].join("\n"),
+		);
+		writeAgentFile(
+			agentsDir,
+			"unknown-rt.md",
+			["---", "name: unknown-rt", "description: Unknown runtime", "runtime: openai", "---", "Do work."].join("\n"),
 		);
 
 		const result = discoverAgents(tmpDir);
-		const agent = result.agents.find((a) => a.name === "pi-agent");
-		expect(agent).toBeDefined();
-		expect(agent?.runtime).toBe("pi");
+		for (const name of ["pi-agent", "unknown-rt"]) {
+			const agent = result.agents.find((a) => a.name === name);
+			expect(agent).toBeDefined();
+			expect(agent?.configurationError).toBeUndefined();
+		}
+
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("rejects runtime: claude with a configuration error", () => {
+		const tmpDir = createTempAgentDir();
+		const agentsDir = path.join(tmpDir, ".pi", "agents");
+		fs.mkdirSync(agentsDir, { recursive: true });
+
+		writeAgentFile(
+			agentsDir,
+			"claude-agent.md",
+			["---", "name: claude-agent", "description: Legacy Claude agent", "runtime: Claude", "---", "Do work."].join(
+				"\n",
+			),
+		);
+		const claudeAgentsDir = path.join(tmpDir, ".claude", "agents");
+		fs.mkdirSync(claudeAgentsDir, { recursive: true });
+		writeAgentFile(
+			claudeAgentsDir,
+			"claude-bad-tools.md",
+			[
+				"---",
+				"name: claude-bad-tools",
+				"description: Legacy agent with bad tools",
+				"runtime: claude",
+				"tools: WebSearch",
+				"---",
+				"Do work.",
+			].join("\n"),
+		);
+
+		const agents = discoverAgents(tmpDir).agents;
+		for (const name of ["claude-agent", "claude-bad-tools"]) {
+			const agent = agents.find((a) => a.name === name);
+			expect(agent).toBeDefined();
+			expect(agent?.configurationError).toContain('runtime "claude" is no longer supported');
+		}
 
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
@@ -172,28 +172,7 @@ describe("runtime frontmatter parsing", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
-	it("treats unknown runtime values as 'pi'", () => {
-		const tmpDir = createTempAgentDir();
-		const agentsDir = path.join(tmpDir, ".pi", "agents");
-		fs.mkdirSync(agentsDir, { recursive: true });
-
-		writeAgentFile(
-			agentsDir,
-			"unknown-rt.md",
-			["---", "name: unknown-rt", "description: Agent with unknown runtime", "runtime: openai", "---", "Do work."].join(
-				"\n",
-			),
-		);
-
-		const result = discoverAgents(tmpDir);
-		const agent = result.agents.find((a) => a.name === "unknown-rt");
-		expect(agent).toBeDefined();
-		expect(agent?.runtime).toBe("pi");
-
-		fs.rmSync(tmpDir, { recursive: true, force: true });
-	});
-
-	it("defaults project .claude agents to 'pi' when runtime is not specified", () => {
+	it("loads project .claude agents with Claude model aliases", () => {
 		const tmpDir = createTempAgentDir();
 		const agentsDir = path.join(tmpDir, ".claude", "agents");
 		fs.mkdirSync(agentsDir, { recursive: true });
@@ -215,7 +194,7 @@ describe("runtime frontmatter parsing", () => {
 		const result = discoverAgents(tmpDir);
 		const agent = result.agents.find((a) => a.name === "gemini-self-reviewer");
 		expect(agent).toBeDefined();
-		expect(agent?.runtime).toBe("pi");
+		expect(agent?.configurationError).toBeUndefined();
 		expect(agent?.model).toBe("claude-haiku-4-5");
 
 		fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -289,7 +268,7 @@ describe("runtime frontmatter parsing", () => {
 		}
 	});
 
-	it("respects explicit runtime: claude for project .claude agents", () => {
+	it("rejects runtime: claude for project .claude agents", () => {
 		const tmpDir = createTempAgentDir();
 		const agentsDir = path.join(tmpDir, ".claude", "agents");
 		fs.mkdirSync(agentsDir, { recursive: true });
@@ -300,7 +279,7 @@ describe("runtime frontmatter parsing", () => {
 			[
 				"---",
 				"name: claude-in-claude-dir",
-				"description: Claude-format project agent explicitly using Claude runtime",
+				"description: Claude-format project agent with legacy runtime",
 				"runtime: claude",
 				"model: haiku",
 				"---",
@@ -311,15 +290,14 @@ describe("runtime frontmatter parsing", () => {
 		const result = discoverAgents(tmpDir);
 		const agent = result.agents.find((a) => a.name === "claude-in-claude-dir");
 		expect(agent).toBeDefined();
-		expect(agent?.runtime).toBe("claude");
-		expect(agent?.model).toBe("claude-haiku-4-5");
+		expect(agent?.configurationError).toContain('runtime "claude" is no longer supported');
 
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 });
 
-describe("runtime-aware prompt injection", () => {
-	it("pi runtime agents include ask_master guideline", () => {
+describe("prompt injection", () => {
+	it("agents include the ask_master guideline and no-recursion rule", () => {
 		const tmpDir = createTempAgentDir();
 		const agentsDir = path.join(tmpDir, ".pi", "agents");
 		fs.mkdirSync(agentsDir, { recursive: true });
@@ -330,58 +308,10 @@ describe("runtime-aware prompt injection", () => {
 			["---", "name: pi-worker", "description: Pi worker", "---", "Do pi work."].join("\n"),
 		);
 
-		const result = discoverAgents(tmpDir);
-		const agent = result.agents.find((a) => a.name === "pi-worker");
+		const agent = discoverAgents(tmpDir).agents.find((a) => a.name === "pi-worker");
 		expect(agent).toBeDefined();
 		expect(agent?.systemPrompt).toContain("ask_master Guideline:");
-		expect(agent?.systemPrompt).toContain("ask_master");
-		expect(agent?.systemPrompt).not.toContain("Blocker Reporting Guideline:");
-
-		fs.rmSync(tmpDir, { recursive: true, force: true });
-	});
-
-	it("claude runtime agents do NOT include ask_master guideline", () => {
-		const tmpDir = createTempAgentDir();
-		const agentsDir = path.join(tmpDir, ".pi", "agents");
-		fs.mkdirSync(agentsDir, { recursive: true });
-
-		writeAgentFile(
-			agentsDir,
-			"claude-worker.md",
-			["---", "name: claude-worker", "description: Claude worker", "runtime: claude", "---", "Do claude work."].join(
-				"\n",
-			),
-		);
-
-		const result = discoverAgents(tmpDir);
-		const agent = result.agents.find((a) => a.name === "claude-worker");
-		expect(agent).toBeDefined();
-		expect(agent?.systemPrompt).not.toContain("ask_master Guideline:");
-		expect(agent?.systemPrompt).not.toContain("Use `ask_master` when:");
-		expect(agent?.systemPrompt).toContain("Blocker Reporting Guideline:");
-		expect(agent?.systemPrompt).toContain("Do NOT attempt to call tools that are not available");
-
-		fs.rmSync(tmpDir, { recursive: true, force: true });
-	});
-
-	it("both runtimes include the no-recursion rule", () => {
-		const tmpDir = createTempAgentDir();
-		const agentsDir = path.join(tmpDir, ".pi", "agents");
-		fs.mkdirSync(agentsDir, { recursive: true });
-
-		writeAgentFile(agentsDir, "pi-a.md", ["---", "name: pi-a", "description: Pi A", "---", "Work."].join("\n"));
-		writeAgentFile(
-			agentsDir,
-			"claude-a.md",
-			["---", "name: claude-a", "description: Claude A", "runtime: claude", "---", "Work."].join("\n"),
-		);
-
-		const result = discoverAgents(tmpDir);
-		const piAgent = result.agents.find((a) => a.name === "pi-a");
-		const claudeAgent = result.agents.find((a) => a.name === "claude-a");
-
-		expect(piAgent?.systemPrompt).toContain("Global Runtime Rule (subagent):");
-		expect(claudeAgent?.systemPrompt).toContain("Global Runtime Rule (subagent):");
+		expect(agent?.systemPrompt).toContain("Global Runtime Rule (subagent):");
 
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});

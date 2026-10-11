@@ -5,7 +5,7 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import type { AgentConfig, AgentRuntime } from "./agents.js";
+import type { AgentConfig } from "./agents.js";
 import type { SubagentErrorClass } from "./failure-telemetry.js";
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
@@ -41,9 +41,6 @@ export interface SingleResult {
 	liveToolCalls?: number;
 	thoughtText?: string;
 	sessionFile?: string;
-	runtime?: AgentRuntime;
-	claudeSessionId?: string;
-	claudeProjectDir?: string;
 	liveActivityPreview?: string;
 }
 
@@ -108,9 +105,6 @@ export interface CommandRunState {
 	autoAbortReason?: string;
 	/** True while a removed invocation is still settling; blocks same-ID continuation races. */
 	abortPending?: boolean;
-	runtime?: AgentRuntime;
-	claudeSessionId?: string;
-	claudeProjectDir?: string;
 	/** Origin of this run: "tool" = LLM called subagent tool, "command" = user slash-command / >> shorthand. */
 	source?: "tool" | "command";
 	/** Optional batch group id for tool-level grouped parallel launches. */

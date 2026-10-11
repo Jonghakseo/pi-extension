@@ -372,8 +372,6 @@ function formatRunDetailOutput(run: CommandRunState): string {
 	const output = runOutput || sessionOutput || lineOutput || "(no output)";
 	const lines: string[] = [formatCommandRunSummary(run), `Prompt: ${run.task}`];
 
-	if (run.runtime) lines.push(`Runtime: ${run.runtime}`);
-	if (run.runtime === "claude" && run.claudeSessionId) lines.push(`Claude Session: ${run.claudeSessionId}`);
 	if (run.sessionFile) lines.push(`Session: ${run.sessionFile}`);
 	if (run.thoughtText) lines.push(`Thought: ${run.thoughtText}`);
 
@@ -449,40 +447,6 @@ function createEmptyDetails(
 		projectAgentsDir,
 		results: [],
 		launches,
-	};
-}
-
-function buildRunStartMessage(runState: CommandRunState, status: "started" | "resumed") {
-	const contextLabel = runState.contextMode === "main" ? "main context" : "dedicated sub-session";
-	return {
-		customType: "subagent-tool" as const,
-		content:
-			`[subagent:${runState.agent}#${runState.id}] ${status}` +
-			`\nContext: ${contextLabel} · turn ${runState.turnCount}`,
-		display: false,
-		details: {
-			...asyncInvocationDetails(),
-			runId: runState.id,
-			agent: runState.agent,
-			task: runState.task,
-			displayTask: runState.displayTask,
-			continuedFromRunId: runState.continuedFromRunId,
-			turnCount: runState.turnCount,
-			contextMode: runState.contextMode,
-			sessionFile: runState.sessionFile,
-			persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
-			status,
-			startedAt: runState.startedAt,
-			elapsedMs: runState.elapsedMs,
-			lastActivityAt: runState.lastActivityAt,
-			thoughtText: runState.thoughtText,
-			batchId: runState.batchId,
-			pipelineId: runState.pipelineId,
-			pipelineStepIndex: runState.pipelineStepIndex,
-			runtime: runState.runtime,
-			claudeSessionId: runState.claudeSessionId,
-			claudeProjectDir: runState.claudeProjectDir,
-		},
 	};
 }
 
@@ -562,9 +526,6 @@ function buildRunCompletionMessage(finalized: FinalizedRun, options?: { display?
 			batchId: runState.batchId,
 			pipelineId: runState.pipelineId,
 			pipelineStepIndex: runState.pipelineStepIndex,
-			runtime: runState.runtime,
-			claudeSessionId: runState.claudeSessionId,
-			claudeProjectDir: runState.claudeProjectDir,
 		},
 	});
 }
@@ -601,9 +562,6 @@ function buildEscalationMessage(runState: CommandRunState, escalationMessage: st
 			batchId: runState.batchId,
 			pipelineId: runState.pipelineId,
 			pipelineStepIndex: runState.pipelineStepIndex,
-			runtime: runState.runtime,
-			claudeSessionId: runState.claudeSessionId,
-			claudeProjectDir: runState.claudeProjectDir,
 		},
 	});
 }
@@ -775,7 +733,6 @@ function buildRunAnalyticsSummary(
 		| "batchId"
 		| "pipelineId"
 		| "pipelineStepIndex"
-		| "runtime"
 		| "errorClass"
 		| "peakContextTokens"
 		| "lastToolName"
@@ -795,7 +752,6 @@ function buildRunAnalyticsSummary(
 		batchId: runState.batchId,
 		pipelineId: runState.pipelineId,
 		stepIndex: runState.pipelineStepIndex,
-		runtime: runState.runtime,
 	};
 }
 
@@ -1494,7 +1450,6 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 		}
 
 		function launchRunInBackground(runState: CommandRunState, taskForAgent: string): Promise<FinalizedRun> {
-			let claudeCheckpointSent = !!runState.claudeSessionId;
 			const abortSignal = runState.abortController?.signal;
 			const recordActivity = createRunActivityRecorder(pi, runState, (model) => resolveContextWindow(ctx, model));
 			return invokeWithAutoRetry({
@@ -1525,20 +1480,11 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 								if (!current) return;
 								updateRunFromResult(runState, current);
 								recordActivity();
-								if (shouldRunAsync && !claudeCheckpointSent && runState.claudeSessionId) {
-									claudeCheckpointSent = true;
-									pi.sendMessage(buildRunStartMessage(runState, "started"), {
-										deliverAs: "followUp",
-										triggerTurn: false,
-									});
-								}
 								updateCommandRunsWidget(store);
 							},
 							(results) => makeDetails(mode, results),
 							{
 								sessionFile: runState.sessionFile,
-								resumeSessionId: runState.claudeSessionId,
-								sidecarSessionFile: runState.sessionFile,
 								persistedSessionBaseOffset: runState.persistedSessionBaseOffset,
 								...(store.asyncTasks?.provider.supported ? { asyncRunId: runState.id } : {}),
 								onDiagnostic: createRunDiagnosticSink(pi, runState),
@@ -1600,33 +1546,6 @@ export function createSubagentToolExecute(pi: ExtensionAPI, store: SubagentStore
 						details: makeDetails("single"),
 						isError: true,
 					};
-				}
-
-				if (continueFromRun.runtime === "claude") {
-					if (!continueFromRun.claudeSessionId) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Cannot resume Claude run #${continuationRunId}: no claudeSessionId found. The session metadata was lost or never captured.`,
-								},
-							],
-							details: makeDetails("single"),
-							isError: true,
-						};
-					}
-					if (!continueFromRun.claudeProjectDir || continueFromRun.claudeProjectDir !== ctx.cwd) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Cannot resume Claude run #${continuationRunId}: claudeProjectDir mismatch. Expected "${continueFromRun.claudeProjectDir ?? "(none)"}", current cwd is "${ctx.cwd}".`,
-								},
-							],
-							details: makeDetails("single"),
-							isError: true,
-						};
-					}
 				}
 			}
 

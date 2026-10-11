@@ -1,7 +1,6 @@
 ---
 name: searcher
 description: Research and codebase exploration specialist for grounded, source-backed synthesis
-runtime: pi
 thinking: medium
 tools: read,grep,find,ls,bash
 ---

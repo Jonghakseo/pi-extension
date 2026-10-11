@@ -19,7 +19,6 @@ export const STARTER_SKILL_NAMES = ["self-healing", "stress-interview"] as const
 
 const STARTER_SUBAGENT_SETTINGS = {
 	defaultAgent: "worker",
-	claudeRuntime: "cli",
 	symbolMap: {
 		"?": "searcher",
 		"!": "challenger",

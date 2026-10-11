@@ -104,40 +104,37 @@ describe("shouldTripContextGuard", () => {
 
 describe("resolveContextGuardCeiling", () => {
 	it("applies a 115k ceiling to GPT-5.3 Codex Spark", () => {
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.3-codex-spark", "pi")).toBe(115_000);
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.3-codex-spark", undefined)).toBe(115_000);
+		expect(resolveContextGuardCeiling("openai-codex/gpt-5.3-codex-spark")).toBe(115_000);
 	});
 
 	it("applies a 335k ceiling to the GPT-5.6 Codex family", () => {
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-sol", "pi")).toBe(335_000);
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-terra", undefined)).toBe(335_000);
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-luna", "pi")).toBe(335_000);
+		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-sol")).toBe(335_000);
+		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-terra")).toBe(335_000);
+		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-luna")).toBe(335_000);
 	});
 
 	it("keeps the 235k ceiling for whitelisted 272k Codex models", () => {
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.5", "pi")).toBe(235_000);
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.5", undefined)).toBe(235_000);
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.4", "pi")).toBe(235_000);
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.4-mini", "pi")).toBe(235_000);
+		expect(resolveContextGuardCeiling("openai-codex/gpt-5.5")).toBe(235_000);
+		expect(resolveContextGuardCeiling("openai-codex/gpt-5.4")).toBe(235_000);
+		expect(resolveContextGuardCeiling("openai-codex/gpt-5.4-mini")).toBe(235_000);
 	});
 
-	it("returns undefined for unknown models, unlisted codex models, and non-pi runtimes", () => {
-		expect(resolveContextGuardCeiling("anthropic/claude-opus-4-6", "pi")).toBeUndefined();
-		expect(resolveContextGuardCeiling("openai-codex/gpt-6-future", "pi")).toBeUndefined();
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-sol", "claude")).toBeUndefined();
-		expect(resolveContextGuardCeiling(undefined, "pi")).toBeUndefined();
+	it("returns undefined for unknown models and unlisted codex models", () => {
+		expect(resolveContextGuardCeiling("anthropic/claude-opus-4-6")).toBeUndefined();
+		expect(resolveContextGuardCeiling("openai-codex/gpt-6-future")).toBeUndefined();
+		expect(resolveContextGuardCeiling(undefined)).toBeUndefined();
 	});
 
-	it("honors an env override for all pi models", () => {
+	it("honors an env override for all models", () => {
 		process.env[ENV_KEY] = "120000";
-		expect(resolveContextGuardCeiling("anthropic/claude-opus-4-6", "pi")).toBe(120_000);
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-sol", "pi")).toBe(120_000);
+		expect(resolveContextGuardCeiling("anthropic/claude-opus-4-6")).toBe(120_000);
+		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-sol")).toBe(120_000);
 	});
 
 	it("disables the guard when env override is 0 or invalid", () => {
 		process.env[ENV_KEY] = "0";
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-sol", "pi")).toBeUndefined();
+		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-sol")).toBeUndefined();
 		process.env[ENV_KEY] = "not-a-number";
-		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-sol", "pi")).toBeUndefined();
+		expect(resolveContextGuardCeiling("openai-codex/gpt-5.6-sol")).toBeUndefined();
 	});
 });

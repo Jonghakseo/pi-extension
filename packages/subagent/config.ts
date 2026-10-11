@@ -2,16 +2,12 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
-export type ClaudeRuntimeMode = "sdk" | "cli";
-
 export interface SubagentConfig {
-	claudeRuntime: ClaudeRuntimeMode;
 	defaultAgent: string;
 	symbolMap: Record<string, string>;
 }
 
 interface RawSubagentConfig {
-	claudeRuntime?: unknown;
 	defaultAgent?: unknown;
 	symbolMap?: unknown;
 }
@@ -26,7 +22,6 @@ interface LoadSubagentConfigOptions {
 }
 
 const DEFAULT_CONFIG: SubagentConfig = {
-	claudeRuntime: "sdk",
 	defaultAgent: "worker",
 	symbolMap: {},
 };
@@ -37,10 +32,6 @@ function isFile(filePath: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-function normalizeClaudeRuntime(value: unknown): ClaudeRuntimeMode | undefined {
-	return value === "cli" || value === "sdk" ? value : undefined;
 }
 
 function normalizeDefaultAgent(value: unknown): string | undefined {
@@ -95,11 +86,6 @@ export function loadSubagentConfig(cwd: string, options: LoadSubagentConfigOptio
 
 	const globalConfig = readConfigFile(globalPath);
 	const projectConfig = readConfigFile(projectPath);
-	const claudeRuntime =
-		normalizeClaudeRuntime(projectConfig.claudeRuntime) ??
-		normalizeClaudeRuntime(globalConfig.claudeRuntime) ??
-		DEFAULT_CONFIG.claudeRuntime;
-
 	const defaultAgent =
 		normalizeDefaultAgent(projectConfig.defaultAgent) ??
 		normalizeDefaultAgent(globalConfig.defaultAgent) ??
@@ -108,12 +94,7 @@ export function loadSubagentConfig(cwd: string, options: LoadSubagentConfigOptio
 	const projectSymbolMap = normalizeSymbolMap(projectConfig.symbolMap);
 
 	return {
-		claudeRuntime,
 		defaultAgent,
 		symbolMap: projectSymbolMap ?? globalSymbolMap ?? DEFAULT_CONFIG.symbolMap,
 	};
-}
-
-export function resolveClaudeRuntimeMode(cwd: string, options?: LoadSubagentConfigOptions): ClaudeRuntimeMode {
-	return loadSubagentConfig(cwd, options).claudeRuntime;
 }

@@ -15,8 +15,6 @@ import {
 
 export const THINKING_LEVELS = AGENT_THINKING_LEVELS;
 
-export type AgentRuntime = "pi" | "claude";
-
 export interface AgentConfig {
 	name: string;
 	description: string;
@@ -30,7 +28,6 @@ export interface AgentConfig {
 	systemPrompt: string;
 	source: "user" | "project";
 	filePath: string;
-	runtime: AgentRuntime;
 }
 
 export interface AgentDiscoveryResult {
@@ -69,29 +66,13 @@ const COMMON_SUBAGENT_ESCALATION_GUIDELINE = [
 	"  - Your recommendation, if you have one",
 ].join("\n");
 
-const COMMON_CLAUDE_RUNTIME_ESCALATION_GUIDELINE = [
-	"Blocker Reporting Guideline:",
-	"- If you encounter a blocker that you cannot resolve with available tools and context,",
-	"  report it as plain text at the end of your response.",
-	"- Do NOT attempt to call tools that are not available in your environment (e.g. ask_master).",
-	"- Include: a clear description of the blocker, options you considered, and your recommendation.",
-].join("\n");
-
-function attachCommonSubagentRule(systemPrompt: string, runtime: AgentRuntime = "pi"): string {
+function attachCommonSubagentRule(systemPrompt: string): string {
 	let prompt = systemPrompt.trimEnd();
 	if (!prompt.includes("Global Runtime Rule (subagent):")) {
 		prompt = prompt ? `${prompt}\n\n${COMMON_SUBAGENT_NO_RECURSION_RULE}` : COMMON_SUBAGENT_NO_RECURSION_RULE;
 	}
-	if (runtime === "claude") {
-		if (!prompt.includes("Blocker Reporting Guideline:")) {
-			prompt = prompt
-				? `${prompt}\n\n${COMMON_CLAUDE_RUNTIME_ESCALATION_GUIDELINE}`
-				: COMMON_CLAUDE_RUNTIME_ESCALATION_GUIDELINE;
-		}
-	} else {
-		if (!prompt.includes("ask_master Guideline:")) {
-			prompt = prompt ? `${prompt}\n\n${COMMON_SUBAGENT_ESCALATION_GUIDELINE}` : COMMON_SUBAGENT_ESCALATION_GUIDELINE;
-		}
+	if (!prompt.includes("ask_master Guideline:")) {
+		prompt = prompt ? `${prompt}\n\n${COMMON_SUBAGENT_ESCALATION_GUIDELINE}` : COMMON_SUBAGENT_ESCALATION_GUIDELINE;
 	}
 	return prompt;
 }
@@ -157,11 +138,15 @@ function loadAgentsFromDir(dir: string, source: "user" | "project", options: Loa
 			} catch (error) {
 				configurationError = `${filePath}: ${error instanceof Error ? error.message : String(error)}`;
 			}
+			// Only the pi runtime is supported. Other runtime values are ignored; `runtime: claude` was removed
+			// and takes precedence so legacy agents see the migration hint first.
+			if (typeof frontmatter.runtime === "string" && frontmatter.runtime.trim().toLowerCase() === "claude") {
+				configurationError = `${filePath}: runtime "claude" is no longer supported. Remove the runtime field; agents always run on pi.`;
+			}
 			const model = normalizeModel(typeof frontmatter.model === "string" ? frontmatter.model : undefined, format);
 			const thinking = normalizeThinkingLevel(
 				typeof frontmatter.thinking === "string" ? frontmatter.thinking : undefined,
 			);
-			const runtime: AgentRuntime = frontmatter.runtime === "claude" ? "claude" : "pi";
 
 			agents.push({
 				name: frontmatter.name,
@@ -171,10 +156,9 @@ function loadAgentsFromDir(dir: string, source: "user" | "project", options: Loa
 				configurationError,
 				model,
 				thinking,
-				systemPrompt: attachCommonSubagentRule(body, runtime),
+				systemPrompt: attachCommonSubagentRule(body),
 				source,
 				filePath,
-				runtime,
 			});
 		} catch {}
 	}

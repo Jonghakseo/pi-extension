@@ -1,7 +1,6 @@
 ---
 name: challenger
 description: Skeptical reviewer for stress-testing plans, exposing assumptions, and challenging risky decisions
-runtime: pi
 thinking: xhigh
 tools: read,grep,find,ls
 ---
