@@ -18,9 +18,24 @@ import {
 	realPathOf,
 	SKILL_DIR,
 	SNAPSHOT_DIR,
+	STATE_DIR,
 	STATE_FILE,
 	writeFileAtomic,
 } from "./lib.mjs";
+import {
+	boundsOf,
+	fetchLibrary,
+	findItem,
+	instantiateItem,
+	itemTexts,
+	LIBRARY_FILE,
+	loadCatalog,
+	mergeItems,
+	randomId,
+	readLibrary,
+	searchCatalog,
+	writeLibrary,
+} from "./library.mjs";
 
 const USAGE = `usage:
   excal open <file.excalidraw> [--from-mermaid <file.mmd>] [--no-window]
@@ -28,7 +43,13 @@ const USAGE = `usage:
   excal lint <file.excalidraw>
   excal snapshot <file.excalidraw> [-o out.png]
   excal history <file.excalidraw>
-  excal status | stop | build`;
+  excal status | stop | build
+  excal library search <키워드...> [--refresh]
+  excal library add <카탈로그 id | author/name | URL | 파일.excalidrawlib>
+  excal library list [키워드]
+  excal library preview [키워드] [-o out.png]
+  excal library insert <file.excalidraw> <아이템 id|이름> [--at x,y] [--width N] [--id 접두사]
+  excal library remove <아이템 id|이름>...`;
 
 const die = (msg, code = 1) => {
 	console.error(msg);
@@ -336,6 +357,195 @@ function lint(file) {
 	process.exit(errors.length ? 1 : 0);
 }
 
+/** Export a PNG of the file from its window (opening one if needed). Returns the PNG path. */
+async function takeSnapshot(file, out) {
+	const srv = await ensureServer();
+	const info = await register(srv, file);
+	if (info.clients === 0) {
+		const windowState = await openWindow(srv, info);
+		if (windowState !== "opened") die(`[excal] 창에 연결하지 못해 스냅샷을 찍을 수 없습니다 (window: ${windowState})`);
+	}
+	const r = await call(srv.port, srv.token, `/api/files/${info.id}/snapshot`, { method: "POST" });
+	if (!r.ok) die(`[excal] 스냅샷 실패: ${await r.text()}`);
+	const target = out
+		? path.resolve(out)
+		: path.join(SNAPSHOT_DIR, `${path.basename(file, path.extname(file))}-${info.id}.png`);
+	fs.mkdirSync(path.dirname(target), { recursive: true });
+	fs.writeFileSync(target, Buffer.from(await r.arrayBuffer()));
+	return target;
+}
+
+// ---------- library ----------
+
+/** Tell open windows the library file changed. Does not start the server. */
+async function notifyLibrary() {
+	const token = readToken();
+	const state = readJSON(STATE_FILE, null);
+	if (await healthy(state, token)) await call(state.port, token, "/api/library/reload", { method: "POST" });
+}
+
+const PREVIEW_MAX = 48;
+
+const short = (s, n) => {
+	const t = String(s ?? "")
+		.replace(/\s+/g, " ")
+		.trim();
+	return t.length > n ? `${t.slice(0, n - 3)}...` : t;
+};
+
+async function libraryCommand(sub, args) {
+	switch (sub) {
+		case "search": {
+			const refresh = args.includes("--refresh");
+			const query = args.filter((a) => a !== "--refresh").join(" ");
+			if (!query) die("usage: excal library search <키워드...>");
+			const hits = searchCatalog(await loadCatalog({ refresh }), query);
+			if (!hits.length) return console.log(`"${query}" 결과 없음. 영어 키워드로 다시 찾아보세요`);
+			for (const l of hits.slice(0, 20)) {
+				console.log(`${l.source.replace(/\.excalidrawlib$/, "")}  ${l.name}`);
+				console.log(`    ${short(l.description, 110)}`);
+			}
+			if (hits.length > 20) console.log(`... 외 ${hits.length - 20}개. 키워드를 더 좁히세요`);
+			return;
+		}
+		case "add": {
+			if (!args[0]) die("usage: excal library add <카탈로그 id | author/name | URL | 파일.excalidrawlib>");
+			const lib = await fetchLibrary(args[0]);
+			const { items, added, skipped } = mergeItems(readLibrary(), lib.items);
+			writeLibrary(items);
+			await notifyLibrary();
+			console.log(
+				`"${lib.name}" 아이템 ${added}개 추가${skipped ? `, 이미 있는 ${skipped}개 건너뜀` : ""} (총 ${items.length}개)`,
+			);
+			console.log(`출처: ${lib.from}`);
+			console.log(`라이브러리: ${LIBRARY_FILE}`);
+			return;
+		}
+		case "list": {
+			const query = args.join(" ").toLowerCase();
+			const items = readLibrary().filter(
+				(i) => !query || [i.name ?? "", ...itemTexts(i)].some((s) => s.toLowerCase().includes(query)),
+			);
+			if (!items.length) return console.log(query ? `"${query}" 아이템 없음` : "라이브러리가 비어 있습니다");
+			for (const i of items) {
+				const b = boundsOf(i.elements);
+				const texts = itemTexts(i);
+				console.log(
+					`${i.id}  "${i.name ?? "(이름 없음)"}"  요소 ${i.elements.length}개  ${Math.round(b.width)}×${Math.round(b.height)}` +
+						(texts.length ? `  텍스트: ${short(texts.join(" | "), 60)}` : ""),
+				);
+			}
+			return;
+		}
+		case "preview": {
+			const i = args.indexOf("-o");
+			const out = i === -1 ? undefined : args.splice(i, 2)[1];
+			if (i !== -1 && !out) die("[excal] -o 뒤에 출력 경로가 필요합니다");
+			const query = args.join(" ").toLowerCase();
+			const all = readLibrary().filter(
+				(it) => !query || [it.name ?? "", ...itemTexts(it)].some((s) => s.toLowerCase().includes(query)),
+			);
+			if (!all.length) die(query ? `[excal] "${query}" 아이템 없음` : "[excal] 라이브러리가 비어 있습니다");
+			const items = all.slice(0, PREVIEW_MAX);
+			// One cell per item: the item scaled into a box, its number underneath.
+			const COLS = 6;
+			const CELL_W = 180;
+			const CELL_H = 170;
+			const elements = [];
+			items.forEach((it, n) => {
+				const b = boundsOf(it.elements);
+				const fit = Math.min(140 / (b.width || 1), 110 / (b.height || 1));
+				const cx = (n % COLS) * CELL_W;
+				const cy = Math.floor(n / COLS) * CELL_H;
+				const w = b.width * fit;
+				const h = b.height * fit;
+				const placed = instantiateItem(it, {
+					prefix: `pv${n + 1}`,
+					x: cx + 20 + (140 - w) / 2,
+					y: cy + 10 + (110 - h) / 2,
+					width: w || undefined,
+				});
+				elements.push(...placed.elements);
+				elements.push({
+					type: "text",
+					id: `pv${n + 1}-label`,
+					x: cx + 20,
+					y: cy + 128,
+					fontSize: 14,
+					// v1 items only carry a generated "<library> #n" name; the number says the same
+					text: it.name && !/ #\d+$/.test(it.name) ? `${n + 1}. ${short(it.name, 18)}` : `${n + 1}`,
+				});
+			});
+			const file = path.join(STATE_DIR, "library-preview.excalidraw");
+			const scene = JSON.parse(emptyScene());
+			scene.elements = elements;
+			writeFileAtomic(file, `${JSON.stringify(scene, null, 2)}\n`);
+			for (const [n, it] of items.entries()) console.log(`${n + 1}. ${it.id}  ${it.name ?? ""}`);
+			if (all.length > items.length) console.log(`... 외 ${all.length - items.length}개. 키워드로 좁히세요`);
+			console.log(await takeSnapshot(file, out));
+			return;
+		}
+		case "insert": {
+			const opt = (name) => {
+				const i = args.indexOf(name);
+				if (i === -1) return undefined;
+				const v = args.splice(i, 2)[1];
+				if (v === undefined || v.startsWith("--")) die(`[excal] ${name} 뒤에 값이 필요합니다`);
+				return v;
+			};
+			const at = opt("--at");
+			const width = opt("--width");
+			const prefix = opt("--id") || `lib-${randomId().slice(0, 6)}`;
+			if (args.length < 2)
+				die("usage: excal library insert <file.excalidraw> <아이템 id|이름> [--at x,y] [--width N] [--id 접두사]");
+			const file = resolveFile(args[0]);
+			const item = findItem(readLibrary(), args.slice(1).join(" "));
+			const [x, y] = (at ?? "0,0").split(",").map(Number);
+			if (!Number.isFinite(x) || !Number.isFinite(y)) die(`[excal] --at은 x,y 숫자여야 합니다: ${at}`);
+			if (width !== undefined && !(Number(width) > 0)) die(`[excal] --width는 양수여야 합니다: ${width}`);
+			const { data, error } = loadScene(file);
+			if (error) die(error);
+			if (!Array.isArray(data.elements)) data.elements = [];
+			const taken = new Set(data.elements.flatMap((e) => [e.id, ...(e.groupIds || [])]).filter(Boolean));
+			const placed = instantiateItem(item, { prefix, x, y, width: width && Number(width), takenIds: taken });
+			data.elements.push(...placed.elements);
+			writeFileAtomic(file, `${JSON.stringify(data, null, 2)}\n`);
+			const b = placed.box;
+			console.log(
+				JSON.stringify(
+					{
+						item: item.name ?? item.id,
+						group: placed.group,
+						ids: placed.elements.map((e) => e.id),
+						box: { x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), height: Math.round(b.height) },
+					},
+					null,
+					2,
+				),
+			);
+			if (placed.hasImages)
+				console.error(
+					"[excal] 이미지 요소가 있는 아이템입니다. 라이브러리에는 이미지 파일이 없어 빈 칸으로 보일 수 있습니다",
+				);
+			return;
+		}
+		case "remove": {
+			if (!args.length) die("usage: excal library remove <아이템 id|이름>...");
+			let items = readLibrary();
+			for (const ref of args) {
+				const item = findItem(items, ref);
+				items = items.filter((i) => i !== item);
+				console.log(`삭제: ${item.id}  ${item.name ?? ""}`);
+			}
+			writeLibrary(items);
+			await notifyLibrary();
+			return;
+		}
+		default:
+			die(USAGE);
+	}
+}
+
 // ---------- commands ----------
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -393,26 +603,9 @@ switch (cmd) {
 	case "lint":
 		lint(resolveFile(rest[0]));
 		break;
-	case "snapshot": {
-		const out = flag("-o");
-		const file = resolveFile(rest[0]);
-		const srv = await ensureServer();
-		const info = await register(srv, file);
-		if (info.clients === 0) {
-			const windowState = await openWindow(srv, info);
-			if (windowState !== "opened")
-				die(`[excal] 창에 연결하지 못해 스냅샷을 찍을 수 없습니다 (window: ${windowState})`);
-		}
-		const r = await call(srv.port, srv.token, `/api/files/${info.id}/snapshot`, { method: "POST" });
-		if (!r.ok) die(`[excal] 스냅샷 실패: ${await r.text()}`);
-		const target = out
-			? path.resolve(out)
-			: path.join(SNAPSHOT_DIR, `${path.basename(file, path.extname(file))}-${info.id}.png`);
-		fs.mkdirSync(path.dirname(target), { recursive: true });
-		fs.writeFileSync(target, Buffer.from(await r.arrayBuffer()));
-		console.log(target);
+	case "snapshot":
+		console.log(await takeSnapshot(resolveFile(rest[0]), flag("-o")));
 		break;
-	}
 	case "history": {
 		const file = resolveFile(rest[0]);
 		const dir = path.join(HISTORY_DIR, fileIdFor(file));
@@ -448,6 +641,13 @@ switch (cmd) {
 	case "build":
 		ensureBuilt(true);
 		console.log("built");
+		break;
+	case "library":
+		try {
+			await libraryCommand(rest[0], rest.slice(1));
+		} catch (err) {
+			die(`[excal] ${err.message}`);
+		}
 		break;
 	default:
 		die(USAGE);

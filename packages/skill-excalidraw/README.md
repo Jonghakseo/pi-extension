@@ -25,9 +25,12 @@ pi install npm:@ryan_nookpi/pi-skill-excalidraw
 주문 API 요청 순서를 시퀀스 다이어그램으로 보여줘
 방금 그린 다이어그램에서 결제 실패 분기를 추가해줘
 docs/flow.mmd에 쓴 mermaid를 Excalidraw로 가져와줘
+AWS 아이콘 라이브러리를 받아서 서버리스 아키텍처를 그려줘
 ```
 
 요청 내용이 스킬 설명과 맞으면 에이전트가 알아서 스킬을 불러옵니다. 직접 부르려면 `/skill:excalidraw <요청>`을 쓰세요.
+
+공개 Excalidraw 라이브러리도 쓸 수 있습니다. 창의 라이브러리 패널에서 "라이브러리 찾기"로 설치하거나, 에이전트가 `excal library search/add/insert`로 찾아 다이어그램에 넣습니다. 둘 다 개인 라이브러리 파일 하나(`~/.cache/pi-excalidraw/library.excalidrawlib`)에 쌓여 모든 창이 같이 씁니다.
 
 파일은 기본적으로 작업 디렉터리의 `./.diagrams/<주제>.excalidraw`에 만듭니다. 창은 사용자 Chrome 프로필과 분리된 전용 프로필로 뜨고, 연결된 창 없이 30분이 지나면 서버가 스스로 꺼집니다.
 

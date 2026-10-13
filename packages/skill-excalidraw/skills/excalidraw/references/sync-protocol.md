@@ -3,9 +3,10 @@
 ## 구성
 
 - `scripts/excal.mjs`: CLI. 빌드 확인, 데몬 기동, 파일 등록, Chrome `--app` 창 실행, lint/inspect.
+- `scripts/library.mjs`: 라이브러리 파일 읽기·쓰기, v1/v2 정규화, 카탈로그 캐시·검색, URL 허용 목록, 아이템 복제(`instantiateItem`). CLI와 서버가 같이 쓴다.
 - `scripts/server.mjs`: Node 내장 모듈만 쓰는 데몬. `127.0.0.1`에만 바인딩. 기본 포트 47813(사용 중이면 임의 포트). 창 푸시는 최소 WebSocket 구현(서버→창 텍스트 프레임, 20초 ping). SSE는 Chrome의 origin당 HTTP/1.1 연결 6개를 창마다 하나씩 차지해 6번째 창부터 모든 요청이 막히므로 쓰지 않는다.
 - `app/`: Vite + React + `@excalidraw/excalidraw` 0.18.1 + `@excalidraw/mermaid-to-excalidraw`. `app/src/scene.js`에 변환·병합 순수 로직, `app/src/main.jsx`에 동기화 로직.
-- 상태: `~/.cache/pi-excalidraw/` (`EXCAL_STATE_DIR`로 변경). `server.json`(pid/port), `token`, `files.json`(id→경로), `history/<id>/`, `snapshots/`, `server.log`, `chrome-profile/`.
+- 상태: `~/.cache/pi-excalidraw/` (`EXCAL_STATE_DIR`로 변경). `server.json`(pid/port), `token`, `files.json`(id→경로), `history/<id>/`, `snapshots/`, `server.log`, `chrome-profile/`, `library.excalidrawlib`(개인 라이브러리, v2), `library-catalog.json`(카탈로그 캐시), `library-preview.excalidraw`.
 
 ## 환경 변수
 
@@ -16,6 +17,7 @@
 | `EXCAL_IDLE_MINUTES` | 무접속 자동 종료(기본 30) |
 | `EXCAL_BROWSER=none` | 창을 띄우지 않음 |
 | `EXCAL_CHROME_ARGS` | Chrome 추가 인자 (예: `--remote-debugging-port=9333`) |
+| `EXCAL_LIBRARY_CATALOG` | 라이브러리 카탈로그 URL 또는 로컬 JSON 경로(테스트용) |
 
 ## 동기화
 
@@ -36,6 +38,14 @@
 - 3-way 기준선: 마지막 동기화 시점의 요소별 `{version, contentKey}`. 로컬만 바뀐 요소는 로컬, 원격이 바뀐 요소는 원격이 이긴다.
 - 로컬 편집 저장: `onChange`에서 요소 version 합이 바뀐 경우만 400ms debounce 후 PUT.
 - 스냅샷: CLI → POST `/snapshot` → 서버가 첫 번째 연결 창에 `snapshot {reqId, rev}` → 창이 해당 rev 반영까지 최대 5초 대기 → `refitText`(아래 폰트 절) → `exportToBlob` → POST `/api/snapshots/<reqId>` → CLI가 PNG 저장. 창이 그 rev를 반영하지 못했으면(마지막 반영 오류 포함) PNG 대신 에러 JSON을 보내고 CLI는 실패로 끝난다.
+
+## 라이브러리
+
+- 서버: GET `/api/library` → `{libraryItems}`, PUT `/api/library` `{libraryItems, clientId}`는 직렬화 결과가 파일과 다를 때만 쓰고 다른 모든 창(파일 무관)에 `library` 이벤트를 보낸다. 같은 내용 PUT을 무시해서 창끼리 저장이 핑퐁하지 않는다. POST `/api/library/reload`는 파일을 다시 읽어 모든 창에 보낸다(CLI가 파일을 직접 고친 뒤 호출, 서버가 꺼져 있으면 생략).
+- 창: `useHandleLibrary({excalidrawAPI, adapter})`가 위 API로 불러오고 저장한다. `library` 이벤트는 `updateLibrary({merge: false})`로 반영한다.
+- 설치 왕복: "라이브러리 찾기" 링크는 `libraryReturnUrl`(`/?file=<id>`, 인코딩)과 `target=window.name`(`excal-<id>`)을 libraries.excalidraw.com에 넘긴다. 사이트는 `<returnUrl>#addLibrary=<url>&token=<Excalidraw id>` 링크를 그 이름의 창으로 연다. 그 창을 찾으면 해시 변경으로, 못 찾으면 새 탭에서 같은 훅이 설치한다. token이 창 id와 다르거나 창이 가려져 있으면 Excalidraw가 포커스를 기다렸다가 `confirm`을 띄운다.
+- 돌아오는 URL에는 서버 토큰을 넣지 않는다. 창은 처음 열릴 때 URL의 토큰을 같은 origin `localStorage`(`excal-token`)에 두고, 토큰 없이 열린 새 탭은 해시에 `addLibrary`가 있을 때만 거기서 읽는다. 그 밖의 토큰 없는 URL은 인증되지 않는다.
+- 파일 보호: 쓸 때마다 이전 내용을 `library.excalidrawlib.bak`에 남긴다. 파일이 있는데 읽히지 않으면 GET은 500, PUT은 409로 거부하고 CLI도 오류로 끝난다. 빈 배열로 읽어 덮어쓰지 않기 위해서다. Excalidraw는 저장 전에 `adapter.load`를 다시 부르므로 load가 실패하면 저장도 일어나지 않는다. `index.html`은 `referrer`를 `no-referrer`로 둔다.
 
 ## 보안
 

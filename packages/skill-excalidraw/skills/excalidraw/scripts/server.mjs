@@ -21,6 +21,7 @@ import {
 	sha,
 	writeFileAtomic,
 } from "./lib.mjs";
+import { LIBRARY_FILE, readLibrary, serializeLibrary, writeLibrary } from "./library.mjs";
 
 const PREFERRED_PORT = Number(process.env.EXCAL_PORT || 47813);
 const IDLE_MS = Number(process.env.EXCAL_IDLE_MINUTES || 30) * 60_000;
@@ -178,6 +179,11 @@ function broadcast(entry, event, data, exceptClientId) {
 	}
 }
 
+/** The library is shared by every window, whatever file it shows. */
+function broadcastAll(event, data, exceptClientId) {
+	for (const entry of entries.values()) broadcast(entry, event, data, exceptClientId);
+}
+
 function totalClients() {
 	let n = 0;
 	for (const e of entries.values()) n += e.clients.size;
@@ -286,6 +292,45 @@ async function handleApi(req, res, url) {
 			clients: entry.clients.size,
 			url: `http://127.0.0.1:${PORT}/?file=${id}&token=${TOKEN}`,
 		});
+	}
+
+	if (parts[1] === "library" && !parts[2] && method === "GET") {
+		try {
+			return send(res, 200, { libraryItems: readLibrary() });
+		} catch (err) {
+			return send(res, 500, { error: err.message });
+		}
+	}
+
+	if (parts[1] === "library" && !parts[2] && method === "PUT") {
+		const { libraryItems, clientId } = JSON.parse((await readBody(req)).toString());
+		if (!Array.isArray(libraryItems)) return send(res, 400, { error: "libraryItems array required" });
+		let current = "";
+		try {
+			current = fs.readFileSync(LIBRARY_FILE, "utf8");
+			readLibrary(); // refuse to replace a file we cannot read
+		} catch (err) {
+			if (err.code !== "ENOENT") return send(res, 409, { error: err.message });
+		}
+		// Windows save back whatever they just loaded; skip no-op writes so they do not echo forever.
+		if (serializeLibrary(libraryItems) !== current) {
+			writeLibrary(libraryItems);
+			log("library saved", libraryItems.length, "items");
+			broadcastAll("library", { libraryItems }, clientId);
+		}
+		return send(res, 200, { ok: true, count: libraryItems.length });
+	}
+
+	// The CLI edits the library file directly, then asks open windows to reload it.
+	if (parts[1] === "library" && parts[2] === "reload" && method === "POST") {
+		let libraryItems;
+		try {
+			libraryItems = readLibrary();
+		} catch (err) {
+			return send(res, 500, { error: err.message });
+		}
+		broadcastAll("library", { libraryItems });
+		return send(res, 200, { ok: true, count: libraryItems.length });
 	}
 
 	if (parts[1] === "snapshots" && parts[2] && method === "POST") {

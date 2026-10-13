@@ -6,6 +6,7 @@ import {
 	FONT_FAMILY,
 	restoreElements,
 	serializeAsJSON,
+	useHandleLibrary,
 } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -23,8 +24,18 @@ import {
 
 const params = new URLSearchParams(location.search);
 const FILE_ID = params.get("file");
-const TOKEN = params.get("token");
+const TOKEN_KEY = "excal-token";
+// The library site sends the user back to `/?file=<id>#addLibrary=...` without
+// the token (it must not leave the machine), so the window keeps it in
+// same-origin storage. Only that return trip may use the stored token; any
+// other tokenless URL stays unauthenticated.
+const LIBRARY_RETURN = new URLSearchParams(location.hash.slice(1)).has("addLibrary");
+const TOKEN = params.get("token") || (LIBRARY_RETURN ? localStorage.getItem(TOKEN_KEY) : null);
+if (params.get("token")) localStorage.setItem(TOKEN_KEY, params.get("token"));
 const CLIENT_ID = crypto.randomUUID();
+// Lets libraries.excalidraw.com target this window when it sends the library back.
+if (FILE_ID) window.name = `excal-${FILE_ID}`;
+const LIBRARY_RETURN_URL = encodeURIComponent(`${location.origin}/?file=${FILE_ID}`);
 const SAVE_DEBOUNCE_MS = 400;
 const RESTORE_OPTS = { refreshDimensions: true, repairBindings: true };
 const randomNonce = () => Math.floor(Math.random() * 2 ** 31);
@@ -62,6 +73,23 @@ async function api(pathname, init = {}) {
 		headers: { "x-excal-token": TOKEN, ...(init.headers || {}) },
 	});
 }
+
+/** Personal library stored by the daemon (STATE_DIR/library.excalidrawlib), shared by all windows. */
+const libraryAdapter = {
+	async load() {
+		const res = await fetch("/api/library", { headers: { "x-excal-token": TOKEN } });
+		if (!res.ok) throw new Error(`library load failed ${res.status}`);
+		return res.json();
+	},
+	async save({ libraryItems }) {
+		const res = await fetch("/api/library", {
+			method: "PUT",
+			headers: { "x-excal-token": TOKEN, "content-type": "application/json" },
+			body: JSON.stringify({ libraryItems, clientId: CLIENT_ID }),
+		});
+		if (!res.ok) throw new Error(`library save failed ${res.status}`);
+	},
+};
 
 /** Parse file content and turn skeleton / mermaid input into full elements. */
 async function prepareScene(content, prevElements = []) {
@@ -118,6 +146,10 @@ function App() {
 		queue: Promise.resolve(),
 		firstLoad: true,
 	}).current;
+
+	// Loads/saves the library through the daemon and installs `#addLibrary=<url>`
+	// links coming back from libraries.excalidraw.com.
+	useHandleLibrary({ excalidrawAPI, adapter: libraryAdapter });
 
 	// Serialize all scene mutations (remote apply / save) so they never interleave.
 	const enqueue = useCallback((fn) => {
@@ -326,6 +358,7 @@ function App() {
 			hello: () => loadLatest(),
 			scene: ({ rev, content }) => enqueue(() => (rev > s.rev ? applyRemote(content, rev) : undefined)),
 			snapshot: (data) => snapshot(data),
+			library: ({ libraryItems }) => excalidrawAPI.updateLibrary({ libraryItems, merge: false }),
 			problem: ({ message }) => {
 				excalidrawAPI.setToast({ message, closable: true, duration: 6000 });
 				setStatus("파일 오류");
@@ -385,6 +418,7 @@ function App() {
 			excalidrawAPI={setAPI}
 			onChange={onChange}
 			langCode="ko-KR"
+			libraryReturnUrl={LIBRARY_RETURN_URL}
 			UIOptions={{ canvasActions: { loadScene: false, saveToActiveFile: false } }}
 			renderTopRightUI={() => (
 				<span

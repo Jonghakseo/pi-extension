@@ -17,6 +17,7 @@ $EXCAL snapshot <file> [-o out.png]  # 창에서 PNG를 내보내고 경로 출�
 $EXCAL history <file>     # 백업 목록 (최근 50개). 파일 외부 변경 직전 + 사용자 창 편집 5분마다
 $EXCAL status | stop
 $EXCAL build             # app/ 소스를 고친 뒤 재빌드
+$EXCAL library search|add|list|preview|insert|remove   # 공개 라이브러리 아이콘. 아래 "라이브러리" 절
 ```
 
 `<이 스킬 디렉터리>`는 이 SKILL.md가 있는 디렉터리의 절대 경로다. 현재 작업 디렉터리 기준 상대 경로로 부르면 안 된다.
@@ -48,6 +49,27 @@ $EXCAL build             # app/ 소스를 고친 뒤 재빌드
 3. 파일 쓰기 도구로 `.excalidraw` 파일 작성 → `lint` → 오류를 고친 뒤 `open`.
 4. `snapshot` → PNG를 `read`로 보고 겹침·잘린 라벨·어색한 화살표를 확인한다. 고칠 게 있으면 수정 후 한 번 더 확인한다(최대 2회).
 5. 파일 경로와 한 줄 요약을 보고한다. 창은 이미 열려 있으니 URL은 붙이지 않아도 된다.
+
+## 라이브러리 (아이콘·스텐실)
+
+AWS·Kubernetes·사람 그림처럼 손으로 그리기 어려운 모양은 공개 라이브러리(libraries.excalidraw.com)에서 가져온다. 개인 라이브러리 파일 하나(`~/.cache/pi-excalidraw/library.excalidrawlib`)를 CLI와 창의 라이브러리 패널이 같이 쓴다. 사용자가 창에서 "라이브러리 찾기"로 설치한 것도 여기에 쌓인다.
+
+```bash
+$EXCAL library search aws          # 카탈로그 검색. 각 줄 첫 칸(author/name)이 add 키. 영어 키워드로 찾는다
+$EXCAL library add <author/name>   # 개인 라이브러리에 추가. 열린 창 패널에도 바로 반영. URL·로컬 .excalidrawlib도 된다
+$EXCAL library list [키워드]         # 아이템 id·이름·크기·안의 텍스트
+$EXCAL library preview [키워드]      # 아이템을 번호 붙인 격자로 찍은 PNG 경로 출력 → read로 보고 고른다
+$EXCAL library insert <file> <아이템 id|이름> --at x,y [--width 80] [--id aws-lambda]
+$EXCAL library remove <아이템 id|이름>
+```
+
+1. 이미 있는 아이템이면 `list`로 찾고, 없으면 `search` → `add`.
+2. 이름이 `<라이브러리> #3`처럼 번호뿐인 아이템(옛 v1 형식)은 이름으로 고를 수 없다. `preview <키워드>`로 PNG를 보고 번호에 해당하는 id를 쓴다. `preview`는 미리보기 전용 창을 하나 연다.
+3. 다이어그램 파일을 먼저 쓴 다음(또는 `inspect`로 빈 자리를 확인한 다음) `insert`로 붙인다. 아이템의 왼쪽 위가 `--at`에 오고, `--width`를 주면 비율대로 줄인다. 아이콘은 보통 `--width 60~100`이 노드 옆에 맞는다.
+4. `insert`는 요소 id를 `<--id>-1`, `-2`처럼 새로 만들고 전체를 그룹 `<--id>`로 묶어 출력한다(`box`는 실제 차지 영역). 라벨과 화살표는 그 옆에 스켈레톤으로 직접 붙인다. 아이콘 요소에 화살표를 바인딩하기보다 아이콘 옆 라벨 도형에 연결하는 편이 깔끔하다.
+5. `lint` → `snapshot`으로 확인한다.
+
+카탈로그는 `raw.githubusercontent.com/excalidraw/excalidraw-libraries`에서 받아 하루 캐시한다(`search --refresh`로 갱신). URL은 Excalidraw 기본 허용 목록(`excalidraw.com`, excalidraw-libraries 저장소)만 받는다.
 
 ## 기존 다이어그램 수정
 
