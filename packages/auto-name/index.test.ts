@@ -89,6 +89,23 @@ describe("auto-name extension", () => {
 		expect(apiMock.getSessionName()).toBe("");
 	});
 
+	it("ignores runs started by extension custom messages", async () => {
+		vi.mocked(generateShortLabel).mockResolvedValue("Should not apply");
+		const apiMock = createExtensionApiMock();
+		autoSessionName(apiMock.api);
+		const beforeAgentStart = apiMock.getHandlers("before_agent_start")[0];
+		if (!beforeAgentStart) throw new Error("before_agent_start handler missing");
+
+		await beforeAgentStart(
+			{ messageType: "custom", message: { customType: "bg-done", content: "job finished" }, systemPrompt: "" },
+			createMockCtx(),
+		);
+		await Promise.resolve();
+
+		expect(generateShortLabel).not.toHaveBeenCalled();
+		expect(apiMock.getSessionName()).toBe("");
+	});
+
 	it("swallows name-generation failures and clears status when the name disappears", async () => {
 		vi.mocked(generateShortLabel).mockRejectedValue(new Error("boom"));
 		const apiMock = createExtensionApiMock();

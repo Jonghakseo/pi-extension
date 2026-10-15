@@ -678,6 +678,8 @@ export default function claudeHooksBridge(pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
+		// Pi 1.2.0+ also fires this for sendMessage(triggerTurn) runs; UserPromptSubmit covers user prompts only.
+		if (event.messageType === "custom") return;
 		const loaded = loadTrustedProjectSettings(ctx);
 		if (!loaded) return;
 		notifyOnceForParseError(ctx, loaded);

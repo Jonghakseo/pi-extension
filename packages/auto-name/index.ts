@@ -87,6 +87,8 @@ export default function autoSessionName(pi: ExtensionAPI) {
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		if (isSubagentSession(ctx)) return;
+		// Pi 1.2.0부터 sendMessage(triggerTurn) run도 이 이벤트를 보낸다. 사용자 프롬프트만 이름 후보로 쓴다.
+		if (event.messageType === "custom") return;
 
 		// name이 이미 있으면 스킵
 		if (pi.getSessionName()) return;

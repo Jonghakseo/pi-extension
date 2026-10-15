@@ -2,6 +2,27 @@
 
 이 문서는 `pi-extension` 모노레포를 Pi 본체의 다음 릴리스에 맞춰 업데이트할 때 같은 조사를 반복하지 않기 위한 기준 문서다.
 
+## 1.2.0 업데이트 조사 (2026-10-12)
+
+전역 CLI는 `1.1.0`, npm 최신은 `1.2.0`이다. 저장소 SDK를 `1.1.0 → 1.2.0`으로 올렸고 전역 설치는 바꾸지 않았다. 공식 coding-agent, pi-ai, pi-tui, agent CHANGELOG의 `1.2.0`을 확인했다(agent는 항목 없음).
+
+| 변경 내역 | 저장소 영향과 조치 |
+| --- | --- |
+| `before_agent_start`가 `sendMessage(..., { triggerTurn: true })` run에도 발생, `BeforeAgentStartEvent`가 `messageType` union(Breaking) | `auto-name`(이름 감지)과 `claude-hooks-bridge`(`UserPromptSubmit`)는 `event.prompt`를 읽어 타입 오류. 사용자 프롬프트 전용 의미라 `messageType === "custom"`이면 건너뛰도록 수정. 필드가 없는 구버전 호스트는 기존 동작 유지. system prompt·context 주입 handler(`memory-layer`, `todo-write`, `todo-write-overlay`, `task`, `subagent`, `cc-system-prompt`)는 custom run에도 적용되는 편이 맞아 유지. `vcc-ko`의 대기 중 auto-continue 취소도 어떤 run이 시작되든 같은 의미라 유지. |
+| run 시작 중 busy 처리: `ctx.isIdle()` false, `sendMessage()`는 시작 중 run에 queue, `sendUserMessage()`는 `deliverAs` 필요(Breaking) | `delayed-action`, `until`, `bash-async`/`subagent` delivery-guard는 `isIdle()` 기반 분기라 더 정확해진다. `deliverAs` 없는 호출(`vcc-ko` compaction 후 follow-up, `cross-agent` 명령)은 idle 시점 호출이라 유지. |
+| pi-tui `Editor`/`Input` 커서를 APC 마커로 감쌈(Breaking), `showHardwareCursor` 동작 변경 | `ask-user-question`의 `Editor`, `memory-layer`의 `Input`은 TUI 안에서만 렌더하고 `\x1b[7m`를 직접 다루는 코드가 없다. 영향 없음. |
+| 처리되지 않은 휠 이벤트가 overlay `handleInput` 대신 transcript 스크롤로 감 | 휠 입력에 의존하는 overlay 없음. 영향 없음. |
+| `parseKey()`가 shift 기호를 `+`처럼 반환 | 사용처 없음. |
+| `reachesTools`, namespace `aliases`, OpenRouter 키별 목록, `PI_CLIPBOARD_OSC52`, 설정 schema, MCP 리소스 목록 변경 | 저장소 코드와 무관. |
+| `@earendil-works/chord` 의존성 제거, 실험적 server/client 제거 | lockfile에서 `chord` 제거만 확인. 사용처 없음. |
+
+적용:
+- 루트 `devDependencies` 3개와 `pnpm.overrides` 4개를 `1.2.0`으로 변경. peer 범위 유지.
+- `1.2.0` `bash.js`에도 `fsAccess()`와 `spawn()` 사이 중단 확인이 없어 patch를 내용 변경 없이 `patches/pi-coding-agent@1.2.0.patch`로 옮기고 `pnpm-workspace.yaml`을 갱신. 설치본에 hunk 적용 확인.
+- `auto-name`, `claude-hooks-bridge`에 custom run 회귀 테스트 추가(수정 제거 시 실패 확인).
+- 검증: `pnpm run verify:strict` 통과(154개 파일, 1,818개 테스트, 지정 소스 coverage 100%). `env -i` 격리 환경에서 `discoverAndLoadExtensions()`로 27개 entrypoint 로드, errors 0건.
+- RPC 스모크: 저장소 설치본 `1.2.0` CLI를 `--mode rpc --approve`로 띄우고, 로컬 OpenAI 호환 가짜 서버를 provider로 연결했다. `sendMessage(triggerTurn)` run에서 `before_agent_start`가 `messageType: "custom"`으로 오는 것을 확인했다. 수정본은 이 run에서 이름 생성 호출과 `UserPromptSubmit` hook이 0회였고, user 프롬프트에서는 각각 1회 실행돼 세션 이름이 설정됐다. 수정 전 코드는 같은 custom run에서 `prompt` 없는 hook을 실행하고 auto-name이 `extension_error`(`undefined.trim`)를 냈다.
+
 ## 1.1.0 업데이트 조사 (2026-10-08)
 
 전역 CLI와 npm 최신이 모두 `1.1.0`이다. 저장소 SDK를 `1.0.4 → 1.1.0`으로 올렸고 전역 설치는 바꾸지 않았다. 공식 coding-agent, pi-ai, pi-tui, agent CHANGELOG의 `1.1.0`을 확인했다.

@@ -766,6 +766,55 @@ describe("project trust", () => {
 	});
 });
 
+describe("UserPromptSubmit", () => {
+	it("runs for user prompts and skips runs started by extension custom messages", async () => {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "claude-hooks-prompt-test-"));
+		const logPath = path.join(cwd, "prompts.log");
+		fs.mkdirSync(path.join(cwd, ".claude"));
+		fs.writeFileSync(
+			path.join(cwd, ".claude", "settings.json"),
+			JSON.stringify({
+				hooks: {
+					UserPromptSubmit: [{ hooks: [{ type: "command", command: "cat >> prompts.log; echo >> prompts.log" }] }],
+				},
+			}),
+		);
+		const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
+		claudeHooksBridge({
+			on(name: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) {
+				handlers.set(name, handler);
+			},
+		} as unknown as ExtensionAPI);
+		const ctx = {
+			cwd,
+			hasUI: false,
+			isProjectTrusted: () => true,
+			ui: { notify: vi.fn() },
+			sessionManager: { getSessionId: () => "prompt-test", getSessionFile: () => undefined, getEntries: () => [] },
+		} as unknown as ExtensionContext;
+		const beforeAgentStart = handlers.get("before_agent_start");
+		if (!beforeAgentStart) throw new Error("before_agent_start handler missing");
+
+		try {
+			await beforeAgentStart(
+				{ messageType: "custom", message: { customType: "bg-done", content: "job finished" }, systemPrompt: "" },
+				ctx,
+			);
+			expect(fs.existsSync(logPath)).toBe(false);
+
+			await beforeAgentStart({ messageType: "user", prompt: "hello hooks", systemPrompt: "" }, ctx);
+			const lines = fs.readFileSync(logPath, "utf8").trim().split("\n");
+			expect(lines).toHaveLength(1);
+			expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({
+				hook_event_name: "UserPromptSubmit",
+				prompt: "hello hooks",
+			});
+		} finally {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
 // ---------------------------------------------------------------------------
 // Integration: payload field names match official spec
 // ---------------------------------------------------------------------------
