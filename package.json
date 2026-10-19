@@ -64,6 +64,7 @@
 		"publish:web-access": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-extension-web-access publish --access public --no-git-checks",
 		"publish:skill-skill-creator": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-skill-skill-creator publish --access public --no-git-checks",
 		"publish:skill-excalidraw": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-skill-excalidraw publish --access public --no-git-checks",
+		"publish:skill-hairline": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-skill-hairline publish --access public --no-git-checks",
 		"publish:skill-tmux-terminal": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-skill-tmux-terminal publish --access public --no-git-checks",
 		"publish:skill-chrome-cdp": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-skill-chrome-cdp publish --access public --no-git-checks",
 		"publish:skill-a4": "pnpm run verify:strict && pnpm --filter @ryan_nookpi/pi-skill-a4 publish --access public --no-git-checks",

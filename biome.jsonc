@@ -6,7 +6,9 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"ignoreUnknown": false
+		"ignoreUnknown": false,
+		// Vendored upstream bundle (@lucasmarkes/hairline): kept byte-identical to the npm release.
+		"includes": ["**", "!packages/skill-hairline/skills/hairline/assets"]
 	},
 	"formatter": {
 		"enabled": true,

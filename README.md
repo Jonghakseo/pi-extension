@@ -29,6 +29,7 @@ packages/
   skill-a4/              (skill-only package)
   skill-chrome-cdp/      (skill-only package)
   skill-excalidraw/      (skill-only package)
+  skill-hairline/        (skill-only package)
   skill-skill-creator/   (skill-only package)
   skill-tmux-terminal/   (skill-only package)
   subagent/

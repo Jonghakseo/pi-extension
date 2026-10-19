@@ -1,0 +1,8 @@
+package: @lucasmarkes/hairline 0.5.1
+author: Lucas Marques (https://github.com/lucasmarkes)
+license: MIT (LICENSE-hairline)
+repository: https://github.com/lucasmarkes/hairline
+tag: v0.5.1 (37d2e78dcb333ab30c3338e28ed4a690364ea014)
+tarball: https://registry.npmjs.org/@lucasmarkes/hairline/-/hairline-0.5.1.tgz
+integrity: sha512-zjY3bdMC3As/+enKitZ1X+D1HjpesQiAKzG1sbCFsOrb5xIuJEoepkJTBIO4jmFh6JXOQlGGylhV71nr9ipNpQ==
+files: dist/index.js -> hairline.js, dist/index.d.ts -> hairline.d.ts

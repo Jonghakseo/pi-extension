@@ -1,0 +1,47 @@
+{
+	"name": "@ryan_nookpi/pi-skill-hairline",
+	"version": "0.1.0",
+	"description": "Pi skill that puts @lucasmarkes/hairline's pointer-reactive isometric line figures into web pages and single-file HTML.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/skill-hairline"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/skill-hairline#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"pi-skill",
+		"hairline",
+		"isometric",
+		"svg",
+		"illustration"
+	],
+	"files": [
+		"skills/hairline/SKILL.md",
+		"skills/hairline/references/",
+		"skills/hairline/assets/",
+		"skills/hairline/scripts/hairline.mjs",
+		"README.md",
+		"LICENSE"
+	],
+	"engines": {
+		"node": ">=18"
+	},
+	"pi": {
+		"skills": [
+			"./skills/hairline"
+		]
+	},
+	"scripts": {
+		"test": "node --test skills/hairline/scripts/hairline.test.mjs",
+		"update-vendor": "node tools/update-vendor.mjs"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
