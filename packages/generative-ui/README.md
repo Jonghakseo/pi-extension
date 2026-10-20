@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-generative-ui
 
+![generative-ui: Opens charts, diagrams, and mockups the model writes in a native window.](./cover.svg)
+
 This extension lets pi open visual results in a separate native window.
 
 Use it for charts, diagrams, mockups, mini apps, or other interactive HTML/SVG output when plain text is not enough.

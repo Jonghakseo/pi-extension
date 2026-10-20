@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-web-access
 
+![web-access: Searches the web and pulls pages, PDFs, GitHub, and YouTube into context.](./cover.svg)
+
 Pi에 웹 검색과 웹 콘텐츠 추출 도구를 추가하는 익스텐션입니다. [pi-web-access](https://github.com/nicobailon/pi-web-access)(MIT)를 가져와 Exa 검색 하나만 남기고 줄인 fork입니다.
 
 ## 설치

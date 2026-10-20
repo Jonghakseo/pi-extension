@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-todo-write-overlay
 
+![todo-write-overlay: Shows the agent's live task list in a top-right overlay.](./cover.svg)
+
 pi가 현재 세션에서 구조화된 작업 목록을 만들고 갱신할 수 있게 해주는 `todo_write` 익스텐션입니다. 할 일 목록은 입력창 위젯이 아니라 **우측 상단 passive overlay**로 표시됩니다.
 
 ![todo_write overlay in chat](./assets/todo-overlay-chat.png)

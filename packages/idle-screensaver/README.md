@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-idle-screensaver
 
+![idle-screensaver: Covers an idle session with a quiet full-screen overlay until a key is pressed.](./cover.svg)
+
 This extension shows a clean idle overlay when pi has been inactive for a while.
 
 If you often leave sessions open in the background, it keeps the screen less distracting and makes the current session easier to recognize.

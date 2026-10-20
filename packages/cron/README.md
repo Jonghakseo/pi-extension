@@ -1,5 +1,7 @@
 # cron extension
 
+![cron: Runs scheduled Pi jobs from a detached daemon that survives restarts.](./cover.svg)
+
 Persistent scheduler for Pi.
 
 ## Installation

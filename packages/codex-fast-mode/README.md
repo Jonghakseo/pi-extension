@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-codex-fast-mode
 
+![codex-fast-mode: Toggles a faster, terser Codex setup per session with /codex-fast.](./cover.svg)
+
 This extension helps pi use OpenAI Codex in a faster, lower-verbosity mode.
 
 It is intended for `openai-codex` with `gpt-5.5`, the supported `gpt-5.6` variants, `gpt-6-astra`, `gpt-6-luna`, `gpt-6-sol`, and `gpt-6.1-sol`, when you want quick execution and shorter responses.

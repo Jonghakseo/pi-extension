@@ -1,5 +1,7 @@
 # bash-async
 
+![bash-async: Runs long shell commands in the background and reports when they finish.](./cover.svg)
+
 Bounded background shell jobs for finite, non-interactive commands in [pi](https://github.com/earendil-works/pi).
 
 ## Install

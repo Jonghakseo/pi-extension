@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-skill-chrome-cdp
 
+![chrome-cdp: Inspects and drives your real, logged-in Chrome through DevTools Protocol.](./cover.svg)
+
 사용자가 로그인해 둔 실제 Chrome 세션과 열린 탭을 검사하고 조작하는 스킬입니다. 공식 `chrome-devtools` CLI의 auto-connect를 주로 쓰고, 임의 CDP 메서드가 필요하면 `scripts/cdp.mjs`로 직접 호출합니다. 사용자가 요청했을 때만 연결하며, Chrome의 Allow 대화상자는 사용자가 직접 눌러야 합니다.
 
 ## 설치

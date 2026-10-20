@@ -1,5 +1,7 @@
 # pi-vcc-ko
 
+![vcc-ko: Compacts long chats without an LLM call, Korean-aware, with session_recall search.](./cover.svg)
+
 [sting8k/pi-vcc](https://github.com/sting8k/pi-vcc) (MIT)의 포크. 알고리즘형 대화 압축기로, LLM 호출 없이 추출·포맷만으로 브리프 트랜스크립트를 만든다. 한국어 사용자를 위한 추출 정규식 확장이 추가되어 있다.
 
 ## 설치

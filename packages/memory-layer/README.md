@@ -1,5 +1,7 @@
 # memory-layer
 
+![memory-layer: Remembers, recalls, and forgets facts across sessions in three tiers.](./cover.svg)
+
 Long-term and session memory for Pi. Remember, recall, forget, and browse memories across sessions.
 
 ## What it does

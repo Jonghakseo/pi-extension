@@ -1,5 +1,7 @@
 # cross-agent
 
+![cross-agent: Loads commands from Claude, Gemini, and Codex agent folders into pi.](./cover.svg)
+
 Load commands from other AI coding agent directories (`.claude/`, `.gemini/`, `.codex/`) into pi.
 
 ## What it does

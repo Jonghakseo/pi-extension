@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-setup-sh
 
+![setup-sh: Runs the repo's setup.sh when a session starts, and skips it once it passed.](./cover.svg)
+
 Automatically runs `setup.sh` from the current pi working directory when a session starts.
 
 This is useful for repositories that need a predictable bootstrap step before the agent starts editing, testing, or running commands.

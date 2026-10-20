@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-auto-name
 
+![auto-name: Names each session from its first message, so open tabs stay readable.](./cover.svg)
+
 This extension automatically names a pi session based on the first user message.
 
 It helps you quickly recognize what each session is about when many tasks are open at once.

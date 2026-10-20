@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-skill-skill-creator
 
+![skill-creator: Creates, edits, and validates Agent Skills: triggers, SKILL.md, references.](./cover.svg)
+
 Pi 스킬을 만들고 고치고 검증하는 스킬입니다. `SKILL.md` frontmatter, description 트리거, `references/`·`scripts/` 분리, 작은 eval 설계를 안내하고 `validate_skill.py`로 형식을 검사합니다. Pi가 표준을 어디까지 완화하는지(이름과 디렉터리명 불일치 허용, `description` 없으면 미로딩 등)도 함께 반영합니다.
 
 ## 설치

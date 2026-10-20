@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-skill-hairline
 
+![hairline: Adds hairline's pointer-reactive isometric line figures to web pages.](./cover.svg)
+
 [`@lucasmarkes/hairline`](https://github.com/lucasmarkes/hairline)의 등각(isometric) 선 도형 33종을 웹 산출물에 넣는 스킬입니다. 도형은 SVG 선화이고 포인터를 따라 움직입니다. 에이전트가 프로젝트 형태를 보고 npm 설치, 단일 HTML 인라인, 정적 파일 복사 중 하나로 붙이고, 브라우저에서 동작을 확인합니다.
 
 ## 설치

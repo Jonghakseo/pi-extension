@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-skill-excalidraw
 
+![excalidraw: Writes .excalidraw diagrams and opens them in a live-synced local window.](./cover.svg)
+
 플로우차트, 아키텍처도, 시퀀스·상태 다이어그램을 `.excalidraw` 파일로 만들고 실시간 동기화되는 로컬 Excalidraw 창으로 여는 스킬입니다. 에이전트가 파일을 고치면 창에 바로 반영되고, 사용자가 창에서 고친 내용은 같은 파일에 저장됩니다.
 
 ## 설치

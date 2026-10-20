@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-clipboard
 
+![clipboard: Copies text to the system clipboard and reads it back on request.](./cover.svg)
+
 This extension lets pi copy generated text directly to your system clipboard and paste your clipboard contents back into the conversation.
 
 It is especially handy for reply drafts, commit messages, PR descriptions, SQL queries, and other text you want to paste right away.

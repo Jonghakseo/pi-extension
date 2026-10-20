@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-until
 
+![until: Re-runs a prompt on an interval until a condition, like a green PR, is met.](./cover.svg)
+
 조건이 충족될 때까지 Pi가 같은 작업을 주기적으로 다시 실행하도록 만드는 익스텐션입니다. PR 상태, 배포 완료, 외부 응답처럼 "조금 뒤에 다시 확인"해야 하는 작업에 적합합니다.
 
 Pi `0.84.3` 이상이 필요합니다.

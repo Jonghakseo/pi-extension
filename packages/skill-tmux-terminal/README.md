@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-skill-tmux-terminal
 
+![tmux-terminal: Drives TUIs, REPLs, and stdin programs through an isolated tmux pane.](./cover.svg)
+
 TUI, REPL, stdin 입력, 선택 메뉴처럼 실제 터미널 화면이 필요한 프로그램을 전용 tmux 서버로 실행하고 화면 캡처와 키 입력으로 조작하는 스킬입니다. 세션은 Pi 세션 ID로 소유권을 나눠 다른 세션의 화면과 섞이지 않습니다.
 
 ## 설치

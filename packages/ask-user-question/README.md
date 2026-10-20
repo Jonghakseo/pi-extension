@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-ask-user-question
 
+![ask-user-question: Stops mid-task to ask you a radio, checkbox, or free-text question.](./cover.svg)
+
 pi에서 `ask_user_question` 도구를 추가해, 사용자에게 여러 질문을 한 번에 구조화해서 받을 수 있게 해주는 익스텐션입니다.
 
 ## 설치

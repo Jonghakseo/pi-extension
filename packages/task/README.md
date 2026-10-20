@@ -1,5 +1,7 @@
 # task
 
+![task: Keeps a persistent RPC worker per task, routed to a fast, balanced, or powerful model.](./cover.svg)
+
 Asynchronous task delegation with a persistent Pi RPC worker per Task. The parent supplies an instruction; a separate evaluator chooses `fast`, `balanced`, or `powerful`, then a configurable preset selects the worker model and thinking level.
 
 This is a separate package. It does not replace `subagent`.

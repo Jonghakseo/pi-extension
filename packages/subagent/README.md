@@ -1,5 +1,7 @@
 # subagent
 
+![subagent: Delegates work to async subagents with run, batch, chain, and continue.](./cover.svg)
+
 Asynchronous subagent delegation for [pi](https://github.com/earendil-works/pi). Run specialist agents in dedicated child sessions, share main-session context when needed, and receive results as completion notifications.
 
 > [!WARNING]

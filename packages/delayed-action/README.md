@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-delayed-action
 
+![delayed-action: Queues a follow-up prompt that fires after a delay like 5m or 1h.](./cover.svg)
+
 지정한 시간 뒤에 프롬프트를 다시 제출해 Pi 턴을 트리거하는 delay 익스텐션입니다.
 
 이 패키지는 `/delay` 명령어와 `delay`, `delay-manage` tool을 제공합니다. 시간이 되면 예약한 프롬프트를 사용자 메시지처럼 제출하며, 에이전트가 작업 중이면 follow-up으로 큐잉합니다.

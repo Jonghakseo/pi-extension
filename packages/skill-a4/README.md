@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-skill-a4
 
+![a4: Converts Markdown into an A4 Word document without touching the words.](./cover.svg)
+
 Markdown 문서를 내용은 그대로 두고 A4 인쇄용 Microsoft Word(`.docx`)로 바꾸는 스킬입니다. 요약·번역·재배열 없이 제목 구조, 목록, 표, 인용, 코드 블록을 보존하고, 결과를 검사 스크립트로 확인합니다. 글꼴·굵기·크기 제약도 지정할 수 있습니다.
 
 ## 설치

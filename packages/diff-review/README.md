@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-diff-review
 
+![diff-review: Opens a native diff review window and sends your comments back to pi.](./cover.svg)
+
 A native diff review extension for pi.
 
 It opens a dedicated review window for the current repository so you can inspect the branch diff, review individual commits, browse all changed files, and collect feedback before sending it back into the editor.

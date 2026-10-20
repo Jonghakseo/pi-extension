@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-cc-system-prompt
 
+![cc-system-prompt: Swaps pi's system prompt for Claude Code's when a Claude model is selected.](./cover.svg)
+
 For pi users who want to use the **Claude Code system prompt** inside pi.
 
 When you select a Claude model, this extension swaps pi's default system prompt with a Claude Code-style system prompt, so pi behaves with the Claude Code prompt instead of pi's default one.

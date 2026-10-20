@@ -1,5 +1,7 @@
 # claude-hooks-bridge
 
+![claude-hooks-bridge: Runs the hooks in .claude/settings.json on pi's lifecycle events.](./cover.svg)
+
 Bridge [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) (`.claude/settings.json`) into pi extension lifecycle events.
 
 ## What it does

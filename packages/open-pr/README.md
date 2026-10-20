@@ -1,5 +1,7 @@
 # open-pr
 
+![open-pr: Opens the current branch's pull request in your browser.](./cover.svg)
+
 Open the current branch's pull request in your browser via [GitHub CLI](https://cli.github.com/).
 
 ## What it does

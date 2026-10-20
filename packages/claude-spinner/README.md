@@ -1,5 +1,7 @@
 # @ryan_nookpi/pi-extension-claude-spinner
 
+![claude-spinner: Swaps the working indicator for Claude's · ✻ ✽ ✶ ✳ ✢ frames.](./cover.svg)
+
 This extension applies a Claude-style spinner to Pi sessions.
 
 It only changes the working indicator frames. It does not add custom working text or elapsed-time status messages.
