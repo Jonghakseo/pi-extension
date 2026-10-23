@@ -6,6 +6,12 @@ import { ownProcessStartIdentity, processLiveness } from "./process-identity.mjs
 import { writeAtomicFile } from "./store-lock.mjs";
 
 export const DAEMON_PROTOCOL_VERSION = 1;
+/** Guard timeout applied when a job does not set one. */
+export const GUARD_DEFAULT_TIMEOUT_MS = 60_000;
+/** Hard cap for a single guard run; the CLI rejects larger values and the daemon clamps stored ones. */
+export const GUARD_MAX_TIMEOUT_MS = 120_000;
+/** Features this daemon runtime understands. Older daemons omit the field entirely. */
+export const DAEMON_CAPABILITIES = Object.freeze(["guard"]);
 
 export function getDaemonPath() {
 	return join(dirname(fileURLToPath(import.meta.url)), "daemon.mjs");
@@ -58,6 +64,7 @@ export function writeDaemonOwner(cronDir, daemonPath = getDaemonPath(), options 
 		protocolVersion: DAEMON_PROTOCOL_VERSION,
 		daemonPath,
 		drainTimeoutMs: options.drainTimeoutMs,
+		capabilities: [...DAEMON_CAPABILITIES],
 	};
 	if (!owner.processIdentity) throw new Error("cannot prove daemon process start identity");
 	writeAtomicFile(daemonOwnerPath(cronDir), `${JSON.stringify(owner)}\n`);

@@ -52,7 +52,8 @@ export function getDaemonStatus(): DaemonStatus {
 	const owner = readDaemonOwner(getCronDir());
 	if (owner) {
 		const liveness = daemonOwnerLiveness(owner);
-		if (liveness !== "dead") return { running: true, pid: owner.pid, runtimeId: owner.runtimeId };
+		if (liveness !== "dead")
+			return { running: true, pid: owner.pid, runtimeId: owner.runtimeId, capabilities: owner.capabilities };
 		return { running: false, stalePid: owner.pid, runtimeId: owner.runtimeId };
 	}
 	const pid = readDaemonPid();

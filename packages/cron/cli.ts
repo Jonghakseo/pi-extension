@@ -4,6 +4,8 @@
  * LLM-facing interface: { command: "cron ..." }
  */
 
+import { GUARD_DEFAULT_TIMEOUT_MS, GUARD_MAX_TIMEOUT_MS } from "./daemon-runtime.mjs";
+
 export type CronCliParseResult =
 	| { type: "help" }
 	| { type: "params"; params: Record<string, unknown> }
@@ -33,7 +35,14 @@ export const CRON_CLI_HELP_TEXT = [
 	"   • `kind at` and `kind delay` are one-shot automatically.",
 	"   • For a cron expression that should run once, pass `--once`.",
 	"",
-	"5. Destructive actions:",
+	"5. Guards (run the model only when a shell check says so):",
+	"   • `--guard '<cmd>'` runs `/bin/sh -c <cmd>` in the job cwd before every run. No pi process or session delivery happens when it skips.",
+	"   • `--guard-mode exit` (default): exit 0 runs, exit 1 skips, anything else (2+, timeout, spawn failure) is a recorded guard error and skips.",
+	"   • `--guard-mode changed`: runs only on exit 0 with non-empty stdout whose hash differs from the last successful run.",
+	`   • Guard stdout is appended to that run's prompt as a \`## Guard output\` section. \`--guard-timeout <ms>\` defaults to ${GUARD_DEFAULT_TIMEOUT_MS} (max ${GUARD_MAX_TIMEOUT_MS}).`,
+	'   • `cron update <id> --guard ""` removes the guard. Guards need a daemon with guard support; run `cron update-runtime` if refused.',
+	"",
+	"6. Destructive actions:",
 	"   • cron remove <id> deletes the job immediately",
 	"   • cron uninstall-launchd --yes explicitly confirms launchd uninstall without an extra UI dialog",
 	"",
@@ -48,8 +57,8 @@ export const CRON_CLI_HELP_TEXT = [
 	"    cron history [--scope <user|project|session>] [--include-prompt]",
 	"",
 	"  Job Management:",
-	"    cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--scope <user|project|session>] [--cwd <path>] [--enabled <true|false>] [--once] -- <promptMarkdown>",
-	"    cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [-- <promptMarkdown>]",
+	"    cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--scope <user|project|session>] [--cwd <path>] [--enabled <true|false>] [--once] [--guard <cmd>] [--guard-mode <exit|changed>] [--guard-timeout <ms>] -- <promptMarkdown>",
+	'    cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [--guard <cmd>|--guard ""] [--guard-mode <exit|changed>] [--guard-timeout <ms>] [-- <promptMarkdown>]',
 	"    cron run|enable|disable|remove <id> [--scope <user|project|session>]",
 	"",
 	"  Daemon / launchd:",
@@ -72,6 +81,13 @@ export const CRON_CLI_HELP_TEXT = [
 	"  Delay-style one-shot job (runAt must still be an ISO timestamp):",
 	'    cron upsert --name "two-hour-reminder" --kind delay --run-at "2026-04-30T15:00:00+09:00" -- "# Reminder\\n\\nSelf-contained task..."',
 	"",
+	"  Every 10 minutes, but only when a check prints a new list (guard):",
+	`    cron upsert --name pr-cleanup-watch --kind cron --schedule "*/10 * * * *" --scope session --guard 'python3 ~/bin/check.py "Product PR" --cleanup-only' --guard-mode changed -- "# PR cleanup\\n\\nReview the guard output below..."`,
+	"",
+	"  Run only while a marker file exists (exit-code guard), then drop the guard:",
+	"    cron update nightly-sync --guard 'test -f ~/.sync-pending' --guard-timeout 5000",
+	'    cron update nightly-sync --guard ""',
+	"",
 	"  Update schedule without changing prompt:",
 	'    cron update daily-release-check --schedule "30 9 * * 1-5"',
 	"",
@@ -90,6 +106,8 @@ type TokenizeResult = { tokens: string[] } | { error: string };
 function tokenizeCli(input: string): TokenizeResult {
 	const tokens: string[] = [];
 	let current = "";
+	// Tracks a quoted token so `--guard ""` yields an explicit empty value instead of disappearing.
+	let quoted = false;
 	let quote: '"' | "'" | null = null;
 	let escaped = false;
 
@@ -118,13 +136,15 @@ function tokenizeCli(input: string): TokenizeResult {
 
 		if (ch === '"' || ch === "'") {
 			quote = ch;
+			quoted = true;
 			continue;
 		}
 
 		if (/\s/.test(ch)) {
-			if (current) {
+			if (current || quoted) {
 				tokens.push(current);
 				current = "";
+				quoted = false;
 			}
 			continue;
 		}
@@ -134,7 +154,7 @@ function tokenizeCli(input: string): TokenizeResult {
 
 	if (escaped) current += "\\";
 	if (quote) return { error: "Unclosed quote in command." };
-	if (current) tokens.push(current);
+	if (current || quoted) tokens.push(current);
 	return { tokens };
 }
 
@@ -142,9 +162,9 @@ function extractVerb(tokens: string[]): { verb: string; args: string[] } {
 	if (tokens.length === 0) return { verb: "help", args: [] };
 	if (tokens[0] === "cron") {
 		if (tokens.length === 1) return { verb: "help", args: [] };
-		return { verb: tokens[1], args: tokens.slice(2) };
+		return { verb: tokens[1] || "help", args: tokens.slice(2) };
 	}
-	return { verb: tokens[0], args: tokens.slice(1) };
+	return { verb: tokens[0] || "help", args: tokens.slice(1) };
 }
 
 function parseBoolean(raw: string, option: string): boolean | { error: string } {
@@ -181,7 +201,7 @@ function parseOptions(args: string[], options: { allowPrompt: boolean }): Parsed
 		}
 
 		if (!token.startsWith("--")) {
-			positional.push(token);
+			if (token) positional.push(token);
 			continue;
 		}
 
@@ -268,6 +288,45 @@ function parseOptions(args: string[], options: { allowPrompt: boolean }): Parsed
 				} else {
 					params.once = true;
 				}
+				break;
+			}
+			case "guard": {
+				// An explicit empty value removes the guard, so "" is accepted here.
+				const value = inlineValue ?? args[i + 1];
+				if (value === undefined) {
+					return {
+						error:
+							"❌ --guard requires a quoted shell command (or \"\" to remove the guard)\n\n✓ Example: --guard 'test -s /tmp/ready'",
+					};
+				}
+				if (inlineValue === undefined && value.startsWith("--")) {
+					return {
+						error:
+							"❌ A guard command cannot start with `--` when passed as a separate argument. Use the `--guard=<cmd>` form.\n\n✓ Example: --guard='--flag-first-cmd arg'",
+					};
+				}
+				if (inlineValue === undefined) i++;
+				params.guard = value;
+				break;
+			}
+			case "guard-mode": {
+				const value = takeValue();
+				if (!value || !["exit", "changed"].includes(value)) {
+					return { error: `❌ Invalid --guard-mode: "${value ?? ""}"\n\nValid values: exit, changed` };
+				}
+				params.guardMode = value;
+				break;
+			}
+			case "guard-timeout": {
+				const value = takeValue();
+				const parsed = value && /^\d+$/.test(value) ? Number.parseInt(value, 10) : Number.NaN;
+				if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+					return { error: `❌ --guard-timeout requires a positive integer in milliseconds, got: "${value ?? ""}"` };
+				}
+				if (parsed > GUARD_MAX_TIMEOUT_MS) {
+					return { error: `❌ --guard-timeout must be at most ${GUARD_MAX_TIMEOUT_MS} ms, got: ${parsed}` };
+				}
+				params.guardTimeoutMs = parsed;
 				break;
 			}
 			case "include-prompt":

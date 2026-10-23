@@ -80,4 +80,62 @@ describe("cron CLI parser", () => {
 		expect(result.type).toBe("error");
 		if (result.type === "error") expect(result.message).toContain("update requires <id>");
 	});
+
+	it("parses guard options with nested quotes and an explicit empty guard", () => {
+		expect(
+			parseCronToolCommand(
+				`cron upsert --name watch --kind cron --schedule "*/10 * * * *" --guard 'python3 ~/.w/check.py "Product PR" --cleanup-only' --guard-mode changed --guard-timeout 5000 -- "prompt"`,
+			),
+		).toEqual({
+			type: "params",
+			params: {
+				action: "upsert",
+				name: "watch",
+				kind: "cron",
+				schedule: "*/10 * * * *",
+				guard: 'python3 ~/.w/check.py "Product PR" --cleanup-only',
+				guardMode: "changed",
+				guardTimeoutMs: 5000,
+				promptMarkdown: "prompt",
+			},
+		});
+		expect(parseCronToolCommand('cron update watch --guard ""')).toEqual({
+			type: "params",
+			params: { action: "update", id: "watch", guard: "" },
+		});
+		expect(parseCronToolCommand("cron update watch --guard= --enabled true")).toEqual({
+			type: "params",
+			params: { action: "update", id: "watch", guard: "", enabled: true },
+		});
+	});
+
+	it("ignores empty quoted positionals and treats an empty verb as help", () => {
+		expect(parseCronToolCommand('cron list ""')).toEqual({ type: "params", params: { action: "list" } });
+		expect(parseCronToolCommand('cron ""')).toEqual({ type: "help" });
+		expect(parseCronToolCommand('""')).toEqual({ type: "help" });
+	});
+
+	it("rejects malformed guard options", () => {
+		expect(parseCronToolCommand("cron update watch --guard")).toMatchObject({ type: "error" });
+		expect(parseCronToolCommand("cron update watch --guard --enabled true")).toMatchObject({ type: "error" });
+		expect(parseCronToolCommand("cron update watch --guard-mode sometimes")).toMatchObject({
+			type: "error",
+			message: expect.stringContaining("exit, changed"),
+		});
+		expect(parseCronToolCommand("cron update watch --guard-timeout 0")).toMatchObject({ type: "error" });
+		expect(parseCronToolCommand("cron update watch --guard-timeout 5s")).toMatchObject({ type: "error" });
+		expect(parseCronToolCommand("cron update watch --guard-timeout 120001")).toMatchObject({
+			type: "error",
+			message: expect.stringContaining("120000"),
+		});
+		expect(parseCronToolCommand("cron update watch --guard-timeout 120000")).toMatchObject({ type: "params" });
+		expect(parseCronToolCommand("cron update watch --guard --flag-first")).toMatchObject({
+			type: "error",
+			message: expect.stringContaining("--guard=<cmd>"),
+		});
+		expect(parseCronToolCommand("cron update watch --guard=--flag-first")).toEqual({
+			type: "params",
+			params: { action: "update", id: "watch", guard: "--flag-first" },
+		});
+	});
 });

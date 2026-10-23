@@ -1,4 +1,7 @@
 export const DAEMON_PROTOCOL_VERSION: number;
+export const GUARD_DEFAULT_TIMEOUT_MS: number;
+export const GUARD_MAX_TIMEOUT_MS: number;
+export const DAEMON_CAPABILITIES: readonly string[];
 
 export interface DaemonRuntimeOwner {
 	pid: number;
@@ -7,6 +10,8 @@ export interface DaemonRuntimeOwner {
 	protocolVersion: number;
 	daemonPath: string;
 	drainTimeoutMs?: number;
+	/** Absent on daemons released before capability negotiation. */
+	capabilities?: string[];
 }
 
 export function getDaemonPath(): string;

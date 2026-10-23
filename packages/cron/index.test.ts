@@ -5,12 +5,13 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const daemonClientMocks = vi.hoisted(() => ({
+	getDaemonStatus: vi.fn((): Record<string, unknown> => ({ running: false })),
 	scheduleDaemonUpgrade: vi.fn(() => ({ scheduled: false, message: "mock upgrade" })),
 	upgradeDaemon: vi.fn(async () => ({ ok: true, message: "mock update" })),
 }));
 
 vi.mock("./daemon-client.ts", () => ({
-	getDaemonStatus: () => ({ running: false }),
+	getDaemonStatus: daemonClientMocks.getDaemonStatus,
 	scheduleDaemonUpgrade: daemonClientMocks.scheduleDaemonUpgrade,
 	upgradeDaemon: daemonClientMocks.upgradeDaemon,
 	startDaemon: () => ({ message: "mock daemon" }),
@@ -380,5 +381,157 @@ describe("cron job removal", () => {
 		expect(history.content[0].text).toContain("Preserved reminder prompt");
 		expect(history.content[0].text).not.toContain("daily");
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("reminder"), "info");
+	});
+
+	describe("guard", () => {
+		const guardedUpsert = `cron upsert --name watch --kind cron --schedule "*/10 * * * *" --guard 'echo "PR list"' --guard-mode changed -- "notify"`;
+
+		it.each([
+			["a daemon without capabilities", { running: true, pid: 42, runtimeId: "old-runtime" }],
+			["a legacy pid-only daemon", { running: true, pid: 42, legacy: true }],
+		])("refuses a guarded job while %s is running, before writing anything", async (_label, status) => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue(status);
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+
+			await expect(
+				tools.get("cron").execute("upsert", { command: guardedUpsert }, undefined, undefined, makeCtx(false)),
+			).rejects.toThrow("cron update-runtime");
+			expect(findJob("watch")).toBeUndefined();
+			expect(fs.existsSync(path.join(tmpDir, "cron", "prompts", "watch.md"))).toBe(false);
+		});
+
+		it("refuses to add a guard to, or enable, a guarded job on an old daemon", async () => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue({ running: true, pid: 42, runtimeId: "old-runtime" });
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+			saveJobs([
+				makeJob(tmpDir, "plain"),
+				{ ...makeJob(tmpDir, "paused"), enabled: false, disabledReason: "user_disabled", guard: "exit 1" },
+			]);
+			const ctx = makeCtx(false);
+
+			await expect(
+				tools.get("cron").execute("u", { command: "cron update plain --guard 'exit 0'" }, undefined, undefined, ctx),
+			).rejects.toThrow("cron update-runtime");
+			expect(findJob("plain")?.guard).toBeUndefined();
+			await expect(
+				tools.get("cron").execute("e", { command: "cron enable paused" }, undefined, undefined, ctx),
+			).rejects.toThrow("cron update-runtime");
+			expect(findJob("paused")?.enabled).toBe(false);
+			// Disabled guarded jobs cannot run, so they may be edited on any daemon.
+			await tools
+				.get("cron")
+				.execute("u", { command: "cron update paused --guard-timeout 1000" }, undefined, undefined, ctx);
+			expect(findJob("paused")?.guardTimeoutMs).toBe(1000);
+		});
+
+		it("accepts guards on a guard-capable daemon and removes the guard with its state", async () => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue({
+				running: true,
+				pid: 42,
+				runtimeId: "new-runtime",
+				capabilities: ["guard"],
+			});
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+			const ctx = makeCtx(false);
+
+			const created = await tools.get("cron").execute("upsert", { command: guardedUpsert }, undefined, undefined, ctx);
+			expect(created.details.job).toMatchObject({ guard: 'echo "PR list"', guardMode: "changed" });
+			saveJobs([
+				{
+					...(findJob("watch") as CronJob),
+					lastGuardAt: "2026-01-01T00:00:00.000Z",
+					lastGuardExit: 0,
+					lastGuardHash: "abc",
+				},
+			]);
+			const listed = await tools.get("cron").execute("list", { command: "cron list" }, undefined, undefined, ctx);
+			expect(listed.content[0].text).toContain('guard: echo "PR list"');
+			expect(listed.content[0].text).toContain("guardMode: changed");
+			expect(listed.content[0].text).toContain("lastGuard: 2026-01-01T00:00:00.000Z · exit 0");
+
+			await tools.get("cron").execute("update", { command: 'cron update watch --guard ""' }, undefined, undefined, ctx);
+			const removed = findJob("watch") as CronJob;
+			for (const field of ["guard", "guardMode", "guardTimeoutMs", "lastGuardAt", "lastGuardExit", "lastGuardHash"]) {
+				expect(removed).not.toHaveProperty(field);
+			}
+		});
+
+		it.each([
+			["a daemon without capabilities", { running: true, pid: 42, runtimeId: "old-runtime" }],
+			["a legacy pid-only daemon", { running: true, pid: 42, legacy: true }],
+		])("warns at the top of cron list when %s would ignore enabled guards", async (_label, status) => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue(status);
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+			saveJobs([{ ...makeJob(tmpDir, "watch"), guard: "exit 0" }]);
+
+			const listed = await tools
+				.get("cron")
+				.execute("list", { command: "cron list" }, undefined, undefined, makeCtx(false));
+			const lines = String(listed.content[0].text).split("\n");
+			expect(lines[0]).toContain("cron update-runtime");
+			expect(lines[0]).toContain("PID 42");
+		});
+
+		it("lists guarded jobs without a warning on a capable or stopped daemon, or when the guard is disabled", async () => {
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+			const ctx = makeCtx(false);
+			saveJobs([{ ...makeJob(tmpDir, "watch"), guard: "exit 0" }]);
+
+			for (const status of [
+				{ running: true, pid: 42, runtimeId: "new", capabilities: ["guard"] },
+				{ running: false },
+			]) {
+				daemonClientMocks.getDaemonStatus.mockReturnValue(status);
+				const listed = await tools.get("cron").execute("list", { command: "cron list" }, undefined, undefined, ctx);
+				expect(listed.content[0].text).not.toContain("update-runtime");
+			}
+
+			saveJobs([{ ...makeJob(tmpDir, "watch"), guard: "exit 0", enabled: false, disabledReason: "user_disabled" }]);
+			daemonClientMocks.getDaemonStatus.mockReturnValue({ running: true, pid: 42, runtimeId: "old" });
+			const listed = await tools.get("cron").execute("list", { command: "cron list" }, undefined, undefined, ctx);
+			expect(listed.content[0].text).not.toContain("update-runtime");
+		});
+
+		it("counts enabled guarded jobs with a recorded guard error in cron status", async () => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue({
+				running: true,
+				pid: 42,
+				runtimeId: "new",
+				capabilities: ["guard"],
+			});
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+			const ctx = makeCtx(false);
+			saveJobs([
+				{ ...makeJob(tmpDir, "broken"), guard: "exit 2", lastGuardExit: 2, lastGuardError: "guard exited with code 2" },
+				{ ...makeJob(tmpDir, "broken-too"), guard: "exit 2", lastGuardError: "guard timed out after 1000ms" },
+				{ ...makeJob(tmpDir, "fine"), guard: "exit 0", lastGuardExit: 0 },
+				{ ...makeJob(tmpDir, "plain"), lastGuardError: "stale" },
+			]);
+
+			const status = await tools.get("cron").execute("s", { command: "cron status" }, undefined, undefined, ctx);
+			expect(status.content[0].text).toContain("Guard errors: 2 job(s) (see cron list)");
+
+			saveJobs([{ ...makeJob(tmpDir, "fine"), guard: "exit 0", lastGuardExit: 0 }]);
+			const clean = await tools.get("cron").execute("s", { command: "cron status" }, undefined, undefined, ctx);
+			expect(clean.content[0].text).not.toContain("Guard errors");
+		});
+
+		it("allows a guarded job with a warning when the daemon is stopped", async () => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue({ running: false });
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+
+			const result = await tools
+				.get("cron")
+				.execute("upsert", { command: guardedUpsert }, undefined, undefined, makeCtx(false));
+			expect(findJob("watch")?.guard).toBe('echo "PR list"');
+			expect(result.content[0].text).toContain("cron daemon is not running");
+		});
 	});
 });

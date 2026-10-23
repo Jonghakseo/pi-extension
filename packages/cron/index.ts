@@ -4,6 +4,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { CRON_CLI_HELP_TEXT, parseCronToolCommand } from "./cli.ts";
 import { getDaemonStatus, scheduleDaemonUpgrade, startDaemon, stopDaemon, upgradeDaemon } from "./daemon-client.ts";
+import { GUARD_DEFAULT_TIMEOUT_MS } from "./daemon-runtime.mjs";
 import { getLaunchdStatus, installLaunchAgent, uninstallLaunchAgent } from "./launchd.ts";
 import { resolveProjectId } from "./project-id.ts";
 import { calculateNextRun, validateCron } from "./schedule.ts";
@@ -23,7 +24,7 @@ import {
 	withStoreTransaction,
 	writePromptFile,
 } from "./store.ts";
-import type { CronJob, CronJobKind, CronScope } from "./types.ts";
+import type { CronGuardMode, CronJob, CronJobKind, CronScope } from "./types.ts";
 
 type CronAction =
 	| "list"
@@ -55,7 +56,38 @@ interface CronToolParams {
 	once?: boolean;
 	includePrompt?: boolean;
 	yes?: boolean;
+	/** Empty string removes the guard. */
+	guard?: string;
+	guardMode?: CronGuardMode;
+	guardTimeoutMs?: number;
 }
+
+const GUARD_CAPABILITY = "guard";
+
+/**
+ * Older daemons ignore `guard` and would call the model on every tick, so a guarded job may only become
+ * runnable when the live daemon advertises guard support. A stopped daemon is allowed because the next
+ * start (ours or launchd's) loads this package's daemon, which supports guards; the caller gets a warning.
+ */
+function checkGuardRuntime(): string | undefined {
+	const daemon = getDaemonStatus();
+	if (!daemon.running) {
+		return "⚠ cron daemon is not running. Guarded jobs need a daemon with guard support; the daemon started from this package has it. Check `cron status` after it starts.";
+	}
+	if (daemon.legacy || !daemon.capabilities?.includes(GUARD_CAPABILITY)) {
+		throw new Error(
+			`The running cron daemon (PID ${daemon.pid}) predates guard support and would run this job on every tick, ignoring the guard. Run \`cron update-runtime\` first, then retry.`,
+		);
+	}
+	return undefined;
+}
+
+const GUARD_STATE_RESET = {
+	lastGuardAt: undefined,
+	lastGuardExit: undefined,
+	lastGuardHash: undefined,
+	lastGuardError: undefined,
+} satisfies Partial<CronJob>;
 
 interface CronToolResult {
 	text: string;
@@ -65,7 +97,7 @@ interface CronToolResult {
 const CronParamsSchema = Type.Object({
 	command: Type.String({
 		description:
-			"CLI-style cron command. New jobs default to --scope user. Use --scope project for the current Git project or --scope session to deliver into this persisted Pi session. Examples: 'cron list --scope project', 'cron upsert --scope session --name follow-up --kind delay --run-at <iso> -- <promptMarkdown>'.",
+			"CLI-style cron command. New jobs default to --scope user. Use --scope project for the current Git project or --scope session to deliver into this persisted Pi session. Examples: 'cron list --scope project', 'cron upsert --scope session --name follow-up --kind delay --run-at <iso> -- <promptMarkdown>', 'cron upsert --name watch --kind cron --schedule \"*/10 * * * *\" --guard \"./check.sh\" --guard-mode changed -- <promptMarkdown>'.",
 	}),
 });
 
@@ -196,6 +228,18 @@ function formatJob(job: CronJob, includePrompt = false, historical = false): str
 		`  cwd: ${job.cwd}`,
 		`  promptFile: ${job.promptFile}`,
 	].filter((line): line is string => Boolean(line));
+	if (job.guard) {
+		lines.push(
+			`  guard: ${job.guard}`,
+			`  guardMode: ${job.guardMode ?? "exit"} · timeout ${job.guardTimeoutMs ?? GUARD_DEFAULT_TIMEOUT_MS}ms`,
+		);
+		if (job.lastGuardAt) {
+			const exit = job.lastGuardExit === undefined ? "no exit code" : `exit ${job.lastGuardExit}`;
+			lines.push(
+				`  lastGuard: ${job.lastGuardAt} · ${exit}${job.lastGuardError ? ` · error: ${job.lastGuardError}` : ""}`,
+			);
+		}
+	}
 	if (job.lastRunLog) lines.push(`  lastRunLog: ${job.lastRunLog}`);
 	if (job.lastDeliveryOutcome) lines.push(`  lastDeliveryOutcome: ${job.lastDeliveryOutcome}`);
 	if (job.lastDeliveryError) lines.push(`  lastDeliveryError: ${job.lastDeliveryError}`);
@@ -211,10 +255,25 @@ function formatJob(job: CronJob, includePrompt = false, historical = false): str
 	return lines.join("\n");
 }
 
+/** Warns when enabled guarded jobs are listed while the running daemon would ignore their guards. */
+function guardRuntimeListWarning(jobs: CronJob[]): string | undefined {
+	if (!jobs.some((job) => job.enabled && job.guard)) return undefined;
+	const daemon = getDaemonStatus();
+	if (!daemon.running) return undefined;
+	if (!daemon.legacy && daemon.capabilities?.includes(GUARD_CAPABILITY)) return undefined;
+	return `⚠ The running cron daemon (PID ${daemon.pid}) predates guard support and ignores guards, so guarded jobs run on every tick. Run \`cron update-runtime\`.`;
+}
+
 function formatJobList(ctx: ExtensionContext, scope?: CronScope, includePrompt = false): string {
 	const jobs = visibleJobs(loadJobs(), ctx, scope);
 	if (jobs.length === 0) return "No accessible current cron jobs configured.";
-	return [`Current cron jobs (${jobs.length})`, "", ...jobs.map((job) => formatJob(job, includePrompt))].join("\n");
+	const warning = guardRuntimeListWarning(jobs);
+	return [
+		...(warning ? [warning, ""] : []),
+		`Current cron jobs (${jobs.length})`,
+		"",
+		...jobs.map((job) => formatJob(job, includePrompt)),
+	].join("\n");
 }
 
 function formatHistory(ctx: ExtensionContext, scope?: CronScope, includePrompt = false): string {
@@ -229,12 +288,21 @@ function formatStatus(ctx: ExtensionContext, scope?: CronScope): string {
 	const jobs = visibleJobs(loadJobs(), ctx, scope);
 	const history = visibleJobs(loadHistory(), ctx, scope);
 	const active = jobs.filter((job) => job.enabled).length;
+	const guarded = jobs.filter((job) => job.guard).length;
+	const guardErrors = jobs.filter((job) => job.enabled && job.guard && job.lastGuardError).length;
+	const guardSupport = daemon.running
+		? daemon.capabilities?.includes(GUARD_CAPABILITY)
+			? "✅ supported"
+			: "❌ not supported by the running daemon (run `cron update-runtime`)"
+		: undefined;
 	return [
 		`Daemon (global): ${daemon.running ? `✅ running (PID ${daemon.pid})` : "⏸ not running"}`,
 		daemon.stalePid ? `Stale PID: ${daemon.stalePid}` : undefined,
+		guardSupport ? `Guard support: ${guardSupport}` : undefined,
 		`LaunchAgent (global): ${launchd.installed ? "✅ installed" : "⏸ not installed"} · ${launchd.loaded ? "loaded" : "not loaded"}`,
 		`LaunchAgent plist: ${launchd.plistPath}`,
-		`Accessible jobs: ${jobs.length} current · ${active} active · ${history.length} history${scope ? ` · scope ${scope}` : ""}`,
+		`Accessible jobs: ${jobs.length} current · ${active} active · ${guarded} guarded · ${history.length} history${scope ? ` · scope ${scope}` : ""}`,
+		guardErrors > 0 ? `Guard errors: ${guardErrors} job(s) (see cron list)` : undefined,
 	]
 		.filter((line): line is string => Boolean(line))
 		.join("\n");
@@ -259,6 +327,7 @@ function ensureLaunchdAndDaemon(): string[] {
 }
 
 function upsertFromParams(params: CronToolParams, ctx: ExtensionContext): { job: CronJob; messages: string[] } {
+	let guardWarning: string | undefined;
 	const job = withStoreTransaction((store) => {
 		const rawRequested = params.id ? store.jobs.find((job) => job.id === params.id) : undefined;
 		const provisionalName = params.name ?? rawRequested?.name ?? params.id;
@@ -285,10 +354,20 @@ function upsertFromParams(params: CronToolParams, ctx: ExtensionContext): { job:
 			: ownerForScope(scope, ctx);
 		const promptMarkdown = params.promptMarkdown;
 		if (!promptMarkdown && !existing) throw new Error("promptMarkdown is required for new cron jobs");
-		const promptFile = promptMarkdown ? writePromptFile(id, promptMarkdown) : existing?.promptFile;
-		if (!promptFile) throw new Error("promptFile could not be resolved");
 		const once = kind !== "cron" ? true : (params.once ?? existing?.once ?? false);
 		const enabled = params.enabled ?? existing?.enabled ?? true;
+		const guard = params.guard === undefined ? existing?.guard : params.guard.trim() || undefined;
+		if (!guard && (params.guardMode || params.guardTimeoutMs)) {
+			throw new Error("--guard-mode and --guard-timeout require a guard. Pass --guard '<cmd>'.");
+		}
+		const guardMode = guard ? (params.guardMode ?? existing?.guardMode) : undefined;
+		const guardTimeoutMs = guard ? (params.guardTimeoutMs ?? existing?.guardTimeoutMs) : undefined;
+		// Guard results only compare against the same command and mode; anything else starts fresh.
+		const guardIdentityChanged = guard !== existing?.guard || (guardMode ?? "exit") !== (existing?.guardMode ?? "exit");
+		// Checked before any prompt write so a refusal leaves the job and its prompt untouched.
+		if (guard && enabled) guardWarning = checkGuardRuntime();
+		const promptFile = promptMarkdown ? writePromptFile(id, promptMarkdown) : existing?.promptFile;
+		if (!promptFile) throw new Error("promptFile could not be resolved");
 		const baseJob: CronJob = {
 			id,
 			name,
@@ -312,6 +391,17 @@ function upsertFromParams(params: CronToolParams, ctx: ExtensionContext): { job:
 			lastRunLog: existing?.lastRunLog,
 			disabledReason: enabled ? undefined : existing?.disabledReason,
 			completedAt: enabled ? undefined : existing?.completedAt,
+			guard,
+			guardMode,
+			guardTimeoutMs,
+			...(guardIdentityChanged
+				? GUARD_STATE_RESET
+				: {
+						lastGuardAt: existing?.lastGuardAt,
+						lastGuardExit: existing?.lastGuardExit,
+						lastGuardHash: existing?.lastGuardHash,
+						lastGuardError: existing?.lastGuardError,
+					}),
 		};
 		const job = { ...baseJob, nextRunAt: calculateNextRun(baseJob, new Date()) };
 		const index = store.jobs.findIndex((item) => item.id === id);
@@ -319,7 +409,9 @@ function upsertFromParams(params: CronToolParams, ctx: ExtensionContext): { job:
 		else store.jobs[index] = job;
 		return job;
 	});
-	return { job, messages: ensureLaunchdAndDaemon() };
+	const messages = ensureLaunchdAndDaemon();
+	if (guardWarning) messages.push(guardWarning);
+	return { job, messages };
 }
 
 function requireId(params: CronToolParams, action: string): string {
@@ -372,11 +464,14 @@ const toolHandlers: Record<
 	},
 	enable: (params, ctx) => {
 		const id = requireId(params, "enable");
+		let warning: string | undefined;
 		const job = updateAccessibleJob(id, ctx, params.scope, (current) => {
+			if (current.guard) warning = checkGuardRuntime();
 			const enabled = { ...current, enabled: true, disabledReason: undefined, completedAt: undefined };
 			return { ...enabled, nextRunAt: calculateNextRun(enabled, new Date()) };
 		});
-		return { text: `✓ Enabled cron job "${job.id}". Next run: ${job.nextRunAt ?? "—"}`, details: { job } };
+		const text = `✓ Enabled cron job "${job.id}". Next run: ${job.nextRunAt ?? "—"}`;
+		return { text: warning ? `${text}\n${warning}` : text, details: { job } };
 	},
 	disable: (params, ctx) => {
 		const id = requireId(params, "disable");
@@ -390,14 +485,14 @@ const toolHandlers: Record<
 	},
 	run: (params, ctx) => {
 		const id = requireId(params, "run");
-		const job = updateAccessibleJob(id, ctx, params.scope, (current) => ({
-			...current,
-			enabled: true,
-			nextRunAt: new Date().toISOString(),
-			disabledReason: undefined,
-		}));
+		let warning: string | undefined;
+		const job = updateAccessibleJob(id, ctx, params.scope, (current) => {
+			if (current.guard) warning = checkGuardRuntime();
+			return { ...current, enabled: true, nextRunAt: new Date().toISOString(), disabledReason: undefined };
+		});
 		const daemon = startDaemon();
-		return { text: `✓ Queued cron job "${job.id}" for immediate run. ${daemon.message}`, details: { job, daemon } };
+		const text = `✓ Queued cron job "${job.id}" for immediate run${job.guard ? " (its guard still decides)" : ""}. ${daemon.message}`;
+		return { text: warning ? `${text}\n${warning}` : text, details: { job, daemon } };
 	},
 	start_daemon: () => {
 		const result = startDaemon();
@@ -524,6 +619,7 @@ export default function (pi: ExtensionAPI) {
 			"New jobs default to user scope. Use `--scope project` for the current Git project. Use `--scope session` only when work must retain this session history and session-scoped memory.",
 			"User and project jobs run headlessly and need self-contained promptMarkdown after `--`. Session jobs are delivered to the original session; their archived result means delivery was accepted or queued, not that the task succeeded.",
 			"Scope changes are intentionally rejected. Create a new job in the target scope instead.",
+			"For frequent schedules, add `--guard '<shell cmd>'` so the daemon runs the model only when the check passes (`--guard-mode exit`: exit 0) or prints new output (`--guard-mode changed`). Guard stdout is appended to the run prompt. `--guard \"\"` removes it.",
 		],
 		parameters: CronParamsSchema,
 		async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx) {

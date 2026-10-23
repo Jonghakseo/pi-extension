@@ -68,8 +68,8 @@ cron help
 cron status [--scope <user|project|session>]
 cron list [--scope <user|project|session>] [--include-prompt]       # current jobs only
 cron history [--scope <user|project|session>] [--include-prompt]    # completed one-shot jobs
-cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--scope <user|project|session>] [--cwd <path>] [--enabled <true|false>] [--once] -- <promptMarkdown>
-cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [-- <promptMarkdown>]
+cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--scope <user|project|session>] [--cwd <path>] [--enabled <true|false>] [--once] [--guard <cmd>] [--guard-mode <exit|changed>] [--guard-timeout <ms>] -- <promptMarkdown>
+cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [--guard <cmd>|--guard ""] [--guard-mode <exit|changed>] [--guard-timeout <ms>] [-- <promptMarkdown>]
 cron run <id> [--scope <user|project|session>]
 cron enable <id> [--scope <user|project|session>]
 cron disable <id> [--scope <user|project|session>]
@@ -115,6 +115,41 @@ For a one-shot session job, history records delivery acceptance or queueing, not
 After the first execution attempt, a one-shot job is atomically removed from the current `jobs` array and appended to the `history` array in `jobs.json`. The archived entry keeps its full metadata, prompt file, exit code, completion timestamp, and run log path. Waiting for a session owner to become ready or finish a handoff does not consume that attempt.
 
 `cron list` and `/cron list` show current jobs only. Use `cron history [--include-prompt]` or `/cron history` to inspect completed one-shot jobs. Existing version 1 stores are migrated in memory, so previously completed one-shot jobs appear in history after upgrading.
+
+## Guards
+
+A guard is a shell command the daemon runs before each execution. It decides whether Pi is called at all, so a job can poll every 10 minutes and still spend a model call only when something happened.
+
+```text
+cron upsert --name pr-cleanup-watch --kind cron --schedule "*/10 * * * *" --scope session --guard 'python3 ~/bin/check-prs.py "Product PR" --cleanup-only' --guard-mode changed -- <prompt>
+```
+
+The daemon runs `/bin/sh -c <guard>` in the job `cwd` with the same environment as a headless run. The guard has its own process group, so a timeout stops the commands it started too. `--guard-timeout` defaults to 60000 ms and is capped at 120000 ms (the CLI rejects larger values, the daemon clamps stored ones). After the timeout the daemon sends SIGTERM, then SIGKILL, and stops waiting on the output pipes, so a descendant that left the process group cannot hold the job.
+
+| Mode | Runs when | Skips when | Guard error |
+| --- | --- | --- | --- |
+| `exit` (default) | exit 0 | exit 1 | exit 2 or higher, timeout, spawn failure |
+| `changed` | exit 0, non-empty trimmed stdout, and its SHA-256 differs from `lastGuardHash` | exit 1, empty stdout, same output as the last successful run | same as `exit` |
+
+When the job runs, trimmed guard stdout is appended to that run's prompt copy as a `## Guard output` section (first 16 KB, with a truncation note past that). The daemon captures at most 1 MiB of guard stdout; in `changed` mode the hash covers only what was captured. A one-line note under the heading says the block is data printed by the guard, to be treated as input and not as instructions. Headless runs and session deliveries read the same copy. The job's own prompt file is never changed. An empty stdout in `exit` mode adds no section.
+
+In `changed` mode, `lastGuardHash` advances only after the run succeeds: a headless exit 0, or a session delivery the session accepted (`queued`, `settled`, or `aborted`). A failed run is retried on the next schedule slot with the same output. An empty output clears the hash, so the same list showing up again later is reported again.
+
+A skip, including a guard error, does not start Pi, does not deliver to a session, and does not write a run log. It atomically releases the claim, deletes the claimed prompt copy, moves `nextRunAt` to the next schedule slot, and records `lastGuardAt`, `lastGuardExit` (a number or `"timeout"`), and `lastGuardError`. `lastRunAt`, `lastRunLog`, `lastExitCode`, and `lastDeliveryOutcome` keep describing the last real run. `daemon.log` gets one `job guard skip` line. Guard errors never disable the job; check `cron list` for `lastGuard`.
+
+One-shot jobs are not consumed by a skip; they stay in the current job list. A due `at` or `delay` job would otherwise be re-checked on every 30-second tick, so after a skip its `nextRunAt` moves at least 60 seconds ahead while `runAt` stays unchanged. A `once` cron job waits for its next schedule slot. When a session delivery is deferred because the session owner is starting or handing off, the guard result is reused for up to two minutes instead of running the guard again on each retry.
+
+`cron update <id> --guard ""` removes the guard and its recorded state. A guard command that starts with `--` must be written as `--guard=<cmd>`. Changing the guard command or mode also clears the recorded state. `cron run <id>` still goes through the guard.
+
+### Older daemons
+
+A daemon from before guards ignores the `guard` field and would call the model on every tick. The daemon now advertises `capabilities: ["guard"]` in `cron/daemon.runtime.json`, and `cron status` shows `Guard support`. Cron refuses to create, update, enable, or run an enabled guarded job while the running daemon does not advertise guard support, and asks you to run `cron update-runtime` first. Disabled guarded jobs can still be edited.
+
+When the daemon is stopped, the command is allowed with a warning. The daemon that `upsert` starts, or that launchd restarts, loads this package's runtime from the same install path, so it supports guards. If your LaunchAgent points to a different, older install, migrate it as described in [Updating the package](#updating-the-package).
+
+A daemon with guard support runs jobs without a `guard` field exactly as before.
+
+Guards are arbitrary shell commands that the daemon runs as your user, unattended, on every due slot. Treat a guard like a crontab entry: anyone who can write `jobs.json` or call the `cron` tool can make the daemon run commands.
 
 ## Safety
 
