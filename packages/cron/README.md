@@ -135,7 +135,7 @@ When the job runs, trimmed guard stdout is appended to that run's prompt copy as
 
 In `changed` mode, `lastGuardHash` advances only after the run succeeds: a headless exit 0, or a session delivery the session accepted (`queued`, `settled`, or `aborted`). A failed run is retried on the next schedule slot with the same output. An empty output clears the hash, so the same list showing up again later is reported again.
 
-A skip, including a guard error, does not start Pi, does not deliver to a session, and does not write a run log. It atomically releases the claim, deletes the claimed prompt copy, moves `nextRunAt` to the next schedule slot, and records `lastGuardAt`, `lastGuardExit` (a number or `"timeout"`), and `lastGuardError`. `lastRunAt`, `lastRunLog`, `lastExitCode`, and `lastDeliveryOutcome` keep describing the last real run. `daemon.log` gets one `job guard skip` line. Guard errors never disable the job; check `cron list` for `lastGuard`.
+A skip, including a guard error, does not start Pi, does not deliver to a session, and does not write a run log. It atomically releases the claim, deletes the claimed prompt copy, moves `nextRunAt` to the next schedule slot, and records `lastGuardAt`, `lastGuardExit` (a number or `"timeout"`), and `lastGuardError`. `lastRunAt`, `lastRunLog`, `lastExitCode`, and `lastDeliveryOutcome` keep describing the last real run. `daemon.log` gets one `job guard skip` line. Guard errors never disable the job. Consecutive errors are counted in `guardErrorStreak`, with the streak start in `guardErrorSince`; any guard result that is not an error clears both. Check `cron list` for `lastGuard`.
 
 One-shot jobs are not consumed by a skip; they stay in the current job list. A due `at` or `delay` job would otherwise be re-checked on every 30-second tick, so after a skip its `nextRunAt` moves at least 60 seconds ahead while `runAt` stays unchanged. A `once` cron job waits for its next schedule slot. When a session delivery is deferred because the session owner is starting or handing off, the guard result is reused for up to two minutes instead of running the guard again on each retry.
 
@@ -150,6 +150,17 @@ When the daemon is stopped, the command is allowed with a warning. The daemon th
 A daemon with guard support runs jobs without a `guard` field exactly as before.
 
 Guards are arbitrary shell commands that the daemon runs as your user, unattended, on every due slot. Treat a guard like a crontab entry: anyone who can write `jobs.json` or call the `cron` tool can make the daemon run commands.
+
+## Session start banner
+
+User and project jobs run headlessly, so no session sees their failures, and a guard skip never produces a run at all. When an interactive Pi session starts, cron shows one warning banner for accessible jobs that need attention:
+
+- an enabled guard job whose guard failed 3 or more times in a row, with how long it has been failing, the exit code, and the error
+- enabled guard jobs while the running daemon does not support guards
+- a current job whose last headless run exited non-zero, or whose last session delivery failed (skipped for jobs you disabled yourself)
+- a one-shot job archived in the last 24 hours after a failed run
+
+Each item stays in the banner until the job recovers, so it can repeat on every new session. That is intentional: a broken job should be hard to miss. The banner is skipped on `/reload`, in sessions without a UI (such as `pi -p`), and in sessions the daemon resumes over RPC.
 
 ## Safety
 

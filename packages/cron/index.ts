@@ -87,6 +87,8 @@ const GUARD_STATE_RESET = {
 	lastGuardExit: undefined,
 	lastGuardHash: undefined,
 	lastGuardError: undefined,
+	guardErrorStreak: undefined,
+	guardErrorSince: undefined,
 } satisfies Partial<CronJob>;
 
 interface CronToolResult {
@@ -264,6 +266,79 @@ function guardRuntimeListWarning(jobs: CronJob[]): string | undefined {
 	return `⚠ The running cron daemon (PID ${daemon.pid}) predates guard support and ignores guards, so guarded jobs run on every tick. Run \`cron update-runtime\`.`;
 }
 
+/** A guard must fail this many times in a row before the session-start banner mentions it. */
+const GUARD_ERROR_BANNER_STREAK = 3;
+/** Failed one-shot runs stay in the banner this long after they were archived. */
+const HISTORY_FAILURE_BANNER_MS = 24 * 60 * 60 * 1000;
+
+function formatElapsed(ms: number): string {
+	const minutes = Math.max(0, Math.floor(ms / 60_000));
+	if (minutes < 60) return `${minutes}분`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return minutes % 60 ? `${hours}시간 ${minutes % 60}분` : `${hours}시간`;
+	return `${Math.floor(hours / 24)}일`;
+}
+
+function shorten(text: string, max = 160): string {
+	const oneLine = text.replace(/\s+/g, " ").trim();
+	return oneLine.length > max ? `${oneLine.slice(0, max - 3)}...` : oneLine;
+}
+
+/** Describes a recorded run or delivery failure, or undefined when the last attempt did not fail. */
+function runFailure(job: CronJob): string | undefined {
+	if (job.lastDeliveryOutcome === "failed") {
+		return `세션 전달 실패${job.lastDeliveryError ? `: ${shorten(job.lastDeliveryError)}` : ""}`;
+	}
+	if (jobScope(job) !== "session" && job.lastExitCode !== undefined && job.lastExitCode !== 0) {
+		return `실행 실패 (exit ${job.lastExitCode})`;
+	}
+	return undefined;
+}
+
+/**
+ * Builds the session-start banner for cron problems nobody would otherwise see: headless user/project
+ * jobs have no owning session, and guard skips never produce a run. Returns undefined when all is well.
+ */
+function buildCronAttentionBanner(ctx: ExtensionContext, now = new Date()): string | undefined {
+	const jobs = visibleJobs(loadJobs(), ctx);
+	const history = visibleJobs(loadHistory(), ctx);
+	const lines: string[] = [];
+
+	const guardRuntime = guardRuntimeListWarning(jobs);
+	if (guardRuntime) {
+		const count = jobs.filter((job) => job.enabled && job.guard).length;
+		const pid = getDaemonStatus().pid;
+		lines.push(
+			`- 실행 중인 cron 데몬(PID ${pid})이 guard를 지원하지 않아 guard 작업 ${count}개가 매 주기 LLM을 호출합니다. \`cron update-runtime\`을 실행하세요.`,
+		);
+	}
+
+	for (const job of jobs) {
+		if (!job.enabled || !job.guard || (job.guardErrorStreak ?? 0) < GUARD_ERROR_BANNER_STREAK) continue;
+		const since = job.guardErrorSince ? new Date(job.guardErrorSince).getTime() : Number.NaN;
+		const elapsed = Number.isNaN(since) ? "" : `${formatElapsed(now.getTime() - since)}째 `;
+		const exit = job.lastGuardExit === undefined ? "" : ` · exit ${job.lastGuardExit}`;
+		lines.push(
+			`- ${job.id}: ${elapsed}guard 실패 (${job.guardErrorStreak}회 연속${exit})${job.lastGuardError ? ` · ${shorten(job.lastGuardError)}` : ""}`,
+		);
+	}
+
+	for (const job of jobs) {
+		if (job.disabledReason === "user_disabled") continue;
+		const failure = runFailure(job);
+		if (failure) lines.push(`- ${job.id}: ${job.lastRunAt ?? "최근"} ${failure}`);
+	}
+	for (const job of history) {
+		const completedAt = new Date(job.completedAt ?? job.lastRunAt ?? "").getTime();
+		if (Number.isNaN(completedAt) || now.getTime() - completedAt > HISTORY_FAILURE_BANNER_MS) continue;
+		const failure = runFailure(job);
+		if (failure) lines.push(`- ${job.id} (한 번 실행): ${job.lastRunAt ?? "최근"} ${failure}`);
+	}
+
+	if (lines.length === 0) return undefined;
+	return [`Cron: 확인이 필요한 작업 ${lines.length}건`, ...lines, "자세히 보기: cron list · cron history"].join("\n");
+}
+
 function formatJobList(ctx: ExtensionContext, scope?: CronScope, includePrompt = false): string {
 	const jobs = visibleJobs(loadJobs(), ctx, scope);
 	if (jobs.length === 0) return "No accessible current cron jobs configured.";
@@ -401,6 +476,8 @@ function upsertFromParams(params: CronToolParams, ctx: ExtensionContext): { job:
 						lastGuardExit: existing?.lastGuardExit,
 						lastGuardHash: existing?.lastGuardHash,
 						lastGuardError: existing?.lastGuardError,
+						guardErrorStreak: existing?.guardErrorStreak,
+						guardErrorSince: existing?.guardErrorSince,
 					}),
 		};
 		const job = { ...baseJob, nextRunAt: calculateNextRun(baseJob, new Date()) };
@@ -586,6 +663,13 @@ export default function (pi: ExtensionAPI) {
 			}, 0);
 		}
 		const sessionEvent = event as { reason?: string; previousSessionFile?: string };
+		// Show once per real session start. Reloads repeat often, and a cron-resumed RPC session has no reader.
+		if (ctx.hasUI && sessionEvent.reason !== "reload" && !process.env.PI_CRON_SESSION_RESERVATION) {
+			try {
+				const banner = buildCronAttentionBanner(ctx);
+				if (banner) ctx.ui.notify(banner, "warning");
+			} catch {}
+		}
 		let allowDrainingHandoff = sessionEvent.reason === "reload";
 		if (sessionEvent.previousSessionFile && ["new", "resume", "fork"].includes(sessionEvent.reason ?? "")) {
 			try {

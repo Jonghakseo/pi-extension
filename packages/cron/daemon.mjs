@@ -1003,6 +1003,7 @@ function skipGuardedJob(job, guard, now) {
 		store.jobs[index] = {
 			...current,
 			...guard.state,
+			...guardErrorStreakFields(current, guard.state),
 			running: false,
 			runToken: undefined,
 			runPromptFile: undefined,
@@ -1013,10 +1014,21 @@ function skipGuardedJob(job, guard, now) {
 	});
 }
 
+/** Consecutive guard errors, so a guard that keeps failing is visible as a streak rather than one last result. */
+function guardErrorStreakFields(current, state) {
+	if (!state.lastGuardError) return { guardErrorStreak: undefined, guardErrorSince: undefined };
+	return {
+		guardErrorStreak: (current.guardErrorStreak ?? 0) + 1,
+		guardErrorSince: current.guardErrorSince ?? state.lastGuardAt,
+	};
+}
+
 /** Guard state to persist with a finished run. The changed-mode hash advances only after a successful run. */
 function guardCompletionFields(guard, succeeded) {
 	if (!guard) return {};
-	return succeeded && guard.hash ? { ...guard.state, lastGuardHash: guard.hash } : guard.state;
+	// A guard that let the job run did not fail, so any error streak ends here.
+	const state = { ...guard.state, guardErrorStreak: undefined, guardErrorSince: undefined };
+	return succeeded && guard.hash ? { ...state, lastGuardHash: guard.hash } : state;
 }
 
 async function executeJob(candidate) {

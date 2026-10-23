@@ -54,6 +54,10 @@ export interface CronJob {
 	/** SHA-256 of trimmed guard stdout from the last successful run in `changed` mode. */
 	lastGuardHash?: string;
 	lastGuardError?: string;
+	/** Consecutive guard errors (exit 2+, timeout, spawn failure). Cleared by any non-error guard result. */
+	guardErrorStreak?: number;
+	/** When the current guard error streak started. */
+	guardErrorSince?: string;
 }
 
 export interface CronStoreFile {

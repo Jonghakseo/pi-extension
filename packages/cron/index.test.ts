@@ -534,4 +534,113 @@ describe("cron job removal", () => {
 			expect(result.content[0].text).toContain("cron daemon is not running");
 		});
 	});
+
+	describe("session start attention banner", () => {
+		async function startSession(ctx: ReturnType<typeof makeCtx>, reason = "startup") {
+			const { pi, events } = createPi();
+			registerCron(pi as never);
+			try {
+				await events.get("session_start")({ reason }, ctx);
+			} finally {
+				await events.get("session_shutdown")();
+			}
+		}
+
+		function bannerText(ctx: ReturnType<typeof makeCtx>): string | undefined {
+			const call = ctx.ui.notify.mock.calls.find((args: unknown[]) =>
+				String(args[0]).startsWith("Cron: 확인이 필요한"),
+			);
+			return call?.[0] as string | undefined;
+		}
+
+		const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+		let previousSuppression: string | undefined;
+
+		beforeEach(() => {
+			previousSuppression = process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE;
+			process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE = "1";
+		});
+
+		afterEach(() => {
+			if (previousSuppression === undefined) delete process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE;
+			else process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE = previousSuppression;
+		});
+
+		it("lists repeated guard errors, run and delivery failures, and recent failed one-shots", async () => {
+			const sessionFile = path.join(tmpDir, "session-a.jsonl");
+			saveStore({
+				version: 2,
+				jobs: [
+					{
+						...makeJob(tmpDir, "pr-watch"),
+						guard: "python3 check.py",
+						guardErrorStreak: 13,
+						guardErrorSince: hoursAgo(2),
+						lastGuardExit: 127,
+						lastGuardError: "guard exited with code 127: python3: command not found",
+					},
+					{ ...makeJob(tmpDir, "flaky-guard"), guard: "check", guardErrorStreak: 2, lastGuardError: "boom" },
+					{ ...makeJob(tmpDir, "nightly"), lastRunAt: hoursAgo(1), lastExitCode: 124 },
+					{
+						...makeJob(tmpDir, "follow-up"),
+						scope: "session",
+						sessionId: "session-a",
+						sessionFile,
+						lastDeliveryOutcome: "failed",
+						lastDeliveryError: "connect ECONNREFUSED",
+					},
+					{ ...makeJob(tmpDir, "paused"), enabled: false, disabledReason: "user_disabled", lastExitCode: 1 },
+					{ ...makeJob(tmpDir, "healthy"), lastExitCode: 0 },
+				],
+				history: [
+					{ ...makeJob(tmpDir, "reminder"), enabled: false, completedAt: hoursAgo(3), lastExitCode: 1 },
+					{ ...makeJob(tmpDir, "old-reminder"), enabled: false, completedAt: hoursAgo(30), lastExitCode: 1 },
+				],
+			});
+			const ctx = makeCtx(true);
+
+			await startSession(ctx);
+
+			const banner = bannerText(ctx) as string;
+			expect(ctx.ui.notify).toHaveBeenCalledWith(banner, "warning");
+			expect(banner).toContain("Cron: 확인이 필요한 작업 4건");
+			expect(banner).toContain("pr-watch: 2시간째 guard 실패 (13회 연속 · exit 127)");
+			expect(banner).toContain("python3: command not found");
+			expect(banner).toContain("nightly:");
+			expect(banner).toContain("실행 실패 (exit 124)");
+			expect(banner).toContain("follow-up:");
+			expect(banner).toContain("세션 전달 실패: connect ECONNREFUSED");
+			expect(banner).toContain("reminder (한 번 실행)");
+			for (const quiet of ["flaky-guard", "paused", "healthy", "old-reminder"]) expect(banner).not.toContain(quiet);
+		});
+
+		it("warns that guarded jobs run unguarded while an old daemon is running", async () => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue({ running: true, pid: 809, runtimeId: "old-runtime" });
+			saveJobs([{ ...makeJob(tmpDir, "pr-watch"), guard: "check" }]);
+			const ctx = makeCtx(true);
+
+			await startSession(ctx);
+
+			expect(bannerText(ctx)).toContain("PID 809");
+			expect(bannerText(ctx)).toContain("cron update-runtime");
+		});
+
+		it("stays silent when nothing needs attention, on reload, and without a UI", async () => {
+			saveJobs([{ ...makeJob(tmpDir, "nightly"), lastExitCode: 0 }]);
+			const healthy = makeCtx(true);
+			await startSession(healthy);
+			expect(bannerText(healthy)).toBeUndefined();
+
+			saveJobs([{ ...makeJob(tmpDir, "nightly"), lastExitCode: 1 }]);
+			const reloaded = makeCtx(true);
+			await startSession(reloaded, "reload");
+			expect(bannerText(reloaded)).toBeUndefined();
+			const headless = makeCtx(false);
+			await startSession(headless);
+			expect(bannerText(headless)).toBeUndefined();
+			const fresh = makeCtx(true);
+			await startSession(fresh);
+			expect(bannerText(fresh)).toContain("nightly:");
+		});
+	});
 });

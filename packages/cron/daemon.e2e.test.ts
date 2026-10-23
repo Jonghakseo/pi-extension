@@ -990,6 +990,32 @@ upsertJob({ id: "same-id", name: "replacement", enabled: true, kind: "at", once:
 			expect(piCalls()).toBe(0);
 		});
 
+		it("counts consecutive guard errors and clears the streak once the guard recovers", async () => {
+			const fakePi = writeFakePi();
+			writeFileSync(join(tempAgentDir, "guard-code.txt"), "3");
+			writeStore(guardJob("streak", { guard: 'exit "$(cat guard-code.txt)"' }));
+			startDaemon(fakePi);
+
+			let current = await waitForGuardAfter("streak", undefined);
+			expect(current).toMatchObject({ guardErrorStreak: 1, lastGuardExit: 3 });
+			const since = current.guardErrorSince;
+			expect(since).toBe(current.lastGuardAt);
+			for (const expected of [2, 3]) {
+				makeDueAgain("streak");
+				current = await waitForGuardAfter("streak", current.lastGuardAt);
+				expect(current.guardErrorStreak).toBe(expected);
+				expect(current.guardErrorSince).toBe(since);
+			}
+
+			writeFileSync(join(tempAgentDir, "guard-code.txt"), "1");
+			makeDueAgain("streak");
+			current = await waitForGuardAfter("streak", current.lastGuardAt);
+			expect(current.lastGuardExit).toBe(1);
+			expect(current.guardErrorStreak).toBeUndefined();
+			expect(current.guardErrorSince).toBeUndefined();
+			expect(piCalls()).toBe(0);
+		});
+
 		it("keeps a skipped one-shot job pending and re-checks it no sooner than the retry delay", async () => {
 			const fakePi = writeFakePi();
 			const marker = join(tempAgentDir, "ready");
