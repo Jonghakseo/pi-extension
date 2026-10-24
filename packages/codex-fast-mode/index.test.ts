@@ -26,7 +26,7 @@ import codexFastMode, {
 	shouldUseCodexFastBadge,
 } from "./index.ts";
 
-const SUPPORTED_MODEL_LABEL = "gpt-5.5 ~ gpt-5.6, gpt-6, gpt-6.1-sol";
+const SUPPORTED_MODEL_LABEL = "gpt-5.6, gpt-6, gpt-6.1-sol";
 const SECOND_SUPPORTED_MODEL_ID = "gpt-5.6-sol";
 const GPT_56_SUPPORTED_MODEL_ID = "gpt-5.6-luna";
 const GPT_6_MODEL_IDS = ["gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"] as const;
@@ -198,6 +198,9 @@ describe("codex fast mode", () => {
 		await expect(onPayload("raw", { provider: "openai-codex", id: SUPPORTED_MODEL_ID })).resolves.toBe("raw");
 		await expect(onPayload({ text: {} }, { provider: "other", id: SUPPORTED_MODEL_ID })).resolves.toEqual({ text: {} });
 		await expect(onPayload({ text: {} }, { provider: "openai-codex", id: "gpt-5.4" })).resolves.toEqual({
+			text: {},
+		});
+		await expect(onPayload({ text: {} }, { provider: "openai-codex", id: "gpt-5.5" })).resolves.toEqual({
 			text: {},
 		});
 		await expect(onPayload({ text: {} }, { provider: "openai-codex", id: SUPPORTED_MODEL_ID })).resolves.toEqual({

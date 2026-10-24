@@ -2,6 +2,26 @@
 
 이 문서는 `pi-extension` 모노레포를 Pi 본체의 다음 릴리스에 맞춰 업데이트할 때 같은 조사를 반복하지 않기 위한 기준 문서다.
 
+## 1.4.0 업데이트 조사 (2026-10-24)
+
+전역 CLI와 npm 최신이 모두 `1.4.0`이다. 저장소 SDK를 `1.2.0 → 1.4.0`으로 올렸고 전역 설치는 바꾸지 않았다. 공식 coding-agent, pi-ai, pi-tui, agent CHANGELOG의 `1.3.0`, `1.4.0`을 확인했다.
+
+| 변경 내역 | 저장소 영향과 조치 |
+| --- | --- |
+| pi-ai `1.4.0`: `openai-codex`에서 `gpt-5.5`, `gpt-5.3-codex-spark` 제거([#11173](https://github.com/earendil-works/pi/pull/11173)) | `codex-fast-mode` 카탈로그 테스트가 `getModel("openai-codex", "gpt-5.5")` 타입 오류로 실패. ChatGPT 계정에서 항상 거부되는 모델이라 대상 목록·라벨·README에서 제거하고 비대상 payload 테스트에 추가. |
+| pi-ai `1.4.0` Breaking: `telemetryContext` → `telemetry`, `getPiUserAgent()` 제거, `resolveTranscriptTools()` 인자 변경 | 사용처 없음. |
+| pi-ai `1.3.0` Breaking: `AssistantMessageFrame*`, `reduceAssistantMessageFrames()` 제거 | 사용처 없음. |
+| attribution 헤더가 client identity로 이동, `before_provider_headers`에서 일부 헤더가 보이지 않음 | `before_provider_headers` 사용처 없음. |
+| `generateSummary*()`가 `reserveTokens` 무시 | 사용처 없음. `vcc-ko`는 자체 compaction 경로라 무관. |
+| 동시 extension dialog, overlay `done()`이 자기 overlay를 닫도록 수정, resume 시 extension tool 활성 유지 | 이 버그를 우회하는 코드가 저장소에 없어 단순화 대상 없음. |
+| `@earendil-works/pi-ai/models` subpath import 수정, codemode worker 대기, `grep --no-config`, Rex 터미널 등 | 저장소 코드와 무관. |
+
+적용:
+- 루트 `devDependencies` 3개와 `pnpm.overrides` 4개를 `1.4.0`으로 변경. peer 범위 유지.
+- `1.4.0` `bash.js`에도 `fsAccess()`와 `spawn()` 사이 중단 확인이 없어 patch를 내용 변경 없이 `patches/pi-coding-agent@1.4.0.patch`로 옮기고 `pnpm-workspace.yaml`을 갱신. 설치본에 hunk 적용 확인. Unreleased의 macOS bash abort 수정([#11252](https://github.com/earendil-works/pi/issues/11252))은 다른 경로라 다음 릴리스에서 다시 확인한다.
+- 검증: `pnpm run verify:strict`의 typecheck·test·check 통과(154개 파일, 1,843개 테스트). 같은 실행의 coverage 단계에서 부하성 실패 2건(`web-access/storage`, `bash-async/index`)이 났고, 단독 재실행과 `pnpm run coverage:check` 재실행은 모두 통과했다. `env -i` 격리 환경에서 `discoverAndLoadExtensions()`로 27개 entrypoint 로드, errors 0건.
+- 보류: `codex-large-context`는 provider 구분 없이 `gpt-5.5` prefix를 대상으로 하므로 `openai` API 경로 사용자를 위해 유지.
+
 ## 1.2.0 업데이트 조사 (2026-10-12)
 
 전역 CLI는 `1.1.0`, npm 최신은 `1.2.0`이다. 저장소 SDK를 `1.1.0 → 1.2.0`으로 올렸고 전역 설치는 바꾸지 않았다. 공식 coding-agent, pi-ai, pi-tui, agent CHANGELOG의 `1.2.0`을 확인했다(agent는 항목 없음).
