@@ -15,6 +15,10 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 const TIMEOUT = 15000;
+// Synchronous page script is terminated after this long so a runaway loop does
+// not freeze the user's tab. Kept below TIMEOUT so the termination is reported
+// before the CDP request itself times out.
+const EVAL_SYNC_TIMEOUT = 12000;
 const NAVIGATION_TIMEOUT = 30000;
 const IDLE_TIMEOUT = 20 * 60 * 1000;
 const DAEMON_CONNECT_RETRIES = 20;
@@ -311,19 +315,40 @@ async function snapshotStr(cdp, sid, compact = false) {
 	return lines.join("\n");
 }
 
+const TERMINATED_MESSAGE = `Script was stopped after ${EVAL_SYNC_TIMEOUT / 1000}s of synchronous execution (executionStopped: true). Changes it made before stopping remain.`;
+const LATE_EFFECTS_MESSAGE = `Script did not finish within ${TIMEOUT / 1000}s. Synchronous code still running at ${EVAL_SYNC_TIMEOUT / 1000}s was stopped, but if it was awaiting a promise it may still be running and change the page later (mayHaveLateEffects: true). Check the page state before retrying anything with side effects.`;
+
 async function evalStr(cdp, sid, expression) {
 	await cdp.send("Runtime.enable", {}, sid);
-	const result = await cdp.send(
-		"Runtime.evaluate",
-		{
-			expression,
-			returnByValue: true,
-			awaitPromise: true,
-		},
-		sid,
-	);
+	let result;
+	const startedAt = Date.now();
+	try {
+		result = await cdp.send(
+			"Runtime.evaluate",
+			{
+				expression,
+				returnByValue: true,
+				awaitPromise: true,
+				// Terminates only the synchronous part; promise waits are not covered.
+				timeout: EVAL_SYNC_TIMEOUT,
+			},
+			sid,
+		);
+	} catch (e) {
+		// With awaitPromise, Chrome reports the termination as a generic "Internal error".
+		// This mapping depends on current Chrome behavior; the elapsed-time check keeps
+		// unrelated internal errors from being mislabeled.
+		const terminated =
+			e.message === "Execution was terminated" ||
+			(e.message === "Internal error" && Date.now() - startedAt >= EVAL_SYNC_TIMEOUT - 500);
+		if (terminated) throw new Error(TERMINATED_MESSAGE);
+		if (e.message === "Timeout: Runtime.evaluate") throw new Error(LATE_EFFECTS_MESSAGE);
+		throw e;
+	}
 	if (result.exceptionDetails) {
-		throw new Error(result.exceptionDetails.text || result.exceptionDetails.exception?.description);
+		const message = result.exceptionDetails.text || result.exceptionDetails.exception?.description;
+		if (/Execution was terminated/.test(message || "")) throw new Error(TERMINATED_MESSAGE);
+		throw new Error(message);
 	}
 	const val = result.result.value;
 	return typeof val === "object" ? JSON.stringify(val, null, 2) : String(val ?? "");
@@ -444,40 +469,176 @@ async function netStr(cdp, sid) {
 		.join("\n");
 }
 
-// Click element by CSS selector
-async function clickStr(cdp, sid, selector) {
+// Page-side helpers shared by the click hit-test and its verification.
+const PAGE_HELPERS = `
+      const describe = (n) => {
+        if (!n) return 'nothing';
+        let s = n.tagName ? n.tagName.toLowerCase() : String(n.nodeName);
+        if (n.id) s += '#' + n.id;
+        if (typeof n.className === 'string' && n.className.trim()) s += '.' + n.className.trim().split(/\\s+/).slice(0, 2).join('.');
+        return s;
+      };
+      const deepHit = (x, y) => {
+        let hit = document.elementFromPoint(x, y);
+        while (hit && hit.shadowRoot) {
+          const inner = hit.shadowRoot.elementFromPoint(x, y);
+          if (!inner || inner === hit) break;
+          hit = inner;
+        }
+        return hit;
+      };
+`;
+
+function assertLive(ctx) {
+	if (ctx.cancelled) throw new Error("Cancelled: a JavaScript dialog opened before the input was sent");
+}
+
+// Click element by CSS selector.
+// Uses real mouse input at the element center when a hit-test proves the click
+// lands on the element itself, then verifies the element saw it. Otherwise falls
+// back to el.click(), the previous behavior, so covered, zero-size, or wrapper
+// targets behave as before. The hit-test never clicks; the input is sent only
+// after ctx.cancelled has been checked, so a dialog cannot cause a ghost click.
+async function clickStr(cdp, sid, selector, ctx) {
 	if (!selector) throw new Error("CSS selector required");
+	const sel = JSON.stringify(selector);
 	const expr = `
-    (function() {
-      const el = document.querySelector(${JSON.stringify(selector)});
-      if (!el) return { ok: false, error: 'Element not found: ' + ${JSON.stringify(selector)} };
-      el.scrollIntoView({ block: 'center' });
-      el.click();
-      return { ok: true, tag: el.tagName, text: el.textContent.trim().substring(0, 80) };
+    (async function() {
+      const el = document.querySelector(${sel});
+      if (!el) return { ok: false, error: 'Element not found: ' + ${sel} };
+      if (el.matches(':disabled')) return { ok: false, error: 'Element is disabled: ' + ${sel} };
+      el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      const info = { ok: true, tag: el.tagName, text: (el.textContent || '').trim().substring(0, 80) };
+      ${PAGE_HELPERS}
+      const jsMode = (reason) => ({ ...info, mode: 'js', reason });
+      // Native pickers (select popup, file/color chooser) open on real mouse
+      // input but not on el.click(); keep the old behavior for them.
+      if (el.matches('select, option, input[type=file], input[type=color]')) return jsMode('native picker control');
+      if (window.visualViewport && window.visualViewport.scale !== 1) return jsMode('page is pinch-zoomed');
+      // Let sticky headers and lazy layout settle after the scroll. The timer keeps
+      // hidden tabs, where requestAnimationFrame is paused, from hanging.
+      const frame = () => new Promise((r) => { requestAnimationFrame(r); setTimeout(r, 100); });
+      await frame();
+      await frame();
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return jsMode('element has no size');
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) return jsMode('center is outside the viewport');
+      const hit = deepHit(x, y);
+      const parentOf = (n) => n.assignedSlot || n.parentElement || (n.parentNode && n.parentNode.host) || null;
+      // Nodes inside el's own shadow tree are part of el itself, not a nested control.
+      const inOwnShadow = (n) => {
+        let root = n.getRootNode && n.getRootNode();
+        while (root && root.host) {
+          if (root.host === el) return true;
+          root = root.host.getRootNode();
+        }
+        return false;
+      };
+      const interactive = 'a[href], button, input, select, textarea, label, summary, [role=button], [role=link], [role=checkbox], [role=radio], [role=switch], [role=tab], [role=menuitem], [role=option], [onclick]';
+      let cur = hit;
+      let nested = null;
+      while (cur && cur !== el) {
+        if (!nested && cur.matches && cur.matches(interactive) && !inOwnShadow(cur)) nested = cur;
+        cur = parentOf(cur);
+      }
+      if (cur !== el) return jsMode('center is covered by ' + describe(hit));
+      // A real click would activate the nested control instead of el.
+      if (nested) return jsMode('center hits nested ' + describe(nested));
+      // Probe so the verification step can tell whether the click reached el.
+      if (window.__cdpClickProbe) window.__cdpClickProbe.remove();
+      const flags = { mousedown: false, click: false };
+      const onDown = () => { flags.mousedown = true; };
+      const onClick = () => { flags.click = true; };
+      el.addEventListener('mousedown', onDown, true);
+      el.addEventListener('click', onClick, true);
+      window.__cdpClickProbe = {
+        flags,
+        remove() {
+          el.removeEventListener('mousedown', onDown, true);
+          el.removeEventListener('click', onClick, true);
+        },
+      };
+      return { ...info, mode: 'mouse', x, y };
     })()
   `;
-	const result = await evalStr(cdp, sid, expr);
-	const r = JSON.parse(result);
+	const r = JSON.parse(await evalStr(cdp, sid, expr));
 	if (!r.ok) throw new Error(r.error);
-	return `Clicked <${r.tag}> "${r.text}"`;
+	const label = `Clicked <${r.tag}> "${r.text}"`;
+	assertLive(ctx);
+
+	if (r.mode === "js") {
+		const jsExpr = `(function() {
+      const el = document.querySelector(${sel});
+      if (!el) return { ok: false, error: 'Element not found: ' + ${sel} };
+      el.click();
+      return { ok: true };
+    })()`;
+		ctx.dispatched = true;
+		const res = JSON.parse(await evalStr(cdp, sid, jsExpr));
+		if (!res.ok) throw new Error(res.error);
+		return `${label} (el.click(): ${r.reason})`;
+	}
+
+	await dispatchClick(cdp, sid, r.x, r.y, ctx);
+	if (ctx.cancelled) return "";
+	const at = `CSS ${Math.round(r.x)},${Math.round(r.y)}`;
+	const verifyExpr = `(function() {
+      const p = window.__cdpClickProbe;
+      if (!p) return { probe: false };
+      delete window.__cdpClickProbe;
+      p.remove();
+      ${PAGE_HELPERS}
+      return { probe: true, mousedown: p.flags.mousedown, click: p.flags.click, top: describe(deepHit(${r.x}, ${r.y})) };
+    })()`;
+	let v;
+	try {
+		v = JSON.parse(await evalStr(cdp, sid, verifyExpr));
+	} catch (e) {
+		return `${label} (mouse at ${at}; verification failed: ${e.message})`;
+	}
+	if (!v.probe) return `${label} (mouse at ${at}; page changed before verification)`;
+	if (v.click) return `${label} (mouse at ${at})`;
+	if (v.mousedown) {
+		return `${label} (mouse at ${at}; mousedown reached the element but no click event fired)`;
+	}
+	throw new Error(
+		`Mouse click at ${at} did not reach <${r.tag.toLowerCase()}>; the topmost element at that point is now ${v.top}. The input WAS sent, so check the page state before retrying. Do not repeat it blindly.`,
+	);
+}
+
+// If a mousedown handler opens a dialog, the mousePressed response only arrives once
+// the dialog is handled, and a release sent meanwhile is dropped. So the release
+// waits for the press to settle (success or failure) and is always sent after it,
+// otherwise the button stays pressed in the page.
+async function dispatchClick(cdp, sid, x, y, ctx) {
+	const base = { x, y, button: "left", clickCount: 1, modifiers: 0 };
+	const send = (type) => cdp.send("Input.dispatchMouseEvent", { ...base, type }, sid);
+	await send("mouseMoved");
+	if (ctx.cancelled) return;
+	ctx.dispatched = true;
+	const pressed = send("mousePressed");
+	pressed.catch(() => {});
+	await sleep(50);
+	const pressResult = (await Promise.allSettled([pressed]))[0];
+	await send("mouseReleased");
+	if (pressResult.status === "rejected") throw pressResult.reason;
 }
 
 // Click at CSS pixel coordinates using Input.dispatchMouseEvent
-async function clickXyStr(cdp, sid, x, y) {
+async function clickXyStr(cdp, sid, x, y, ctx) {
 	const cx = parseFloat(x);
 	const cy = parseFloat(y);
 	if (Number.isNaN(cx) || Number.isNaN(cy)) throw new Error("x and y must be numbers (CSS pixels)");
-	const base = { x: cx, y: cy, button: "left", clickCount: 1, modifiers: 0 };
-	await cdp.send("Input.dispatchMouseEvent", { ...base, type: "mouseMoved" }, sid);
-	await cdp.send("Input.dispatchMouseEvent", { ...base, type: "mousePressed" }, sid);
-	await sleep(50);
-	await cdp.send("Input.dispatchMouseEvent", { ...base, type: "mouseReleased" }, sid);
+	await dispatchClick(cdp, sid, cx, cy, ctx);
 	return `Clicked at CSS (${cx}, ${cy})`;
 }
 
 // Type text using Input.insertText (works in cross-origin iframes, unlike eval)
-async function typeStr(cdp, sid, text) {
+async function typeStr(cdp, sid, text, ctx) {
 	if (text == null || text === "") throw new Error("text required");
+	ctx.dispatched = true;
 	await cdp.send("Input.insertText", { text }, sid);
 	return `Typed ${text.length} characters`;
 }
@@ -547,6 +708,79 @@ async function runDaemon(targetId) {
 		process.exit(1);
 	}
 
+	// Track JS dialogs. Page must be enabled before a dialog opens, otherwise
+	// Page.handleJavaScriptDialog reports "No dialog is showing" and the tab
+	// stays blocked for every Runtime call.
+	let openDialog = null;
+	cdp.onEvent("Page.javascriptDialogOpening", (params, msg) => {
+		if (msg.sessionId === sessionId) openDialog = { type: params.type, message: params.message };
+	});
+	cdp.onEvent("Page.javascriptDialogClosed", (_params, msg) => {
+		if (msg.sessionId === sessionId) openDialog = null;
+	});
+	// Not awaited: if a dialog is already open, Page.enable blocks until it is
+	// handled, and the CLI only waits a few seconds for the daemon socket.
+	cdp.send("Page.enable", {}, sessionId).catch(() => {});
+
+	const DIALOG_HINT = `Handle it with: evalraw <target> Page.handleJavaScriptDialog '{"accept":false}' (or {"accept":true})`;
+	const describeDialog = (d) => `JavaScript ${d.type} dialog ${JSON.stringify(String(d.message ?? "").slice(0, 200))}`;
+	// Every page command except evalraw hangs while a dialog is open, so they fail fast.
+	const DIALOG_BLOCKED = new Set([
+		"eval",
+		"html",
+		"net",
+		"network",
+		"click",
+		"clickxy",
+		"type",
+		"loadall",
+		"snap",
+		"snapshot",
+		"shot",
+		"screenshot",
+		"nav",
+		"navigate",
+	]);
+	// Commands that may open a dialog themselves. They return as soon as it opens
+	// instead of hanging until the CDP timeout.
+	const DIALOG_RACED = new Set(["eval", "click", "clickxy", "type"]);
+
+	// ctx is shared with the command: the dialog listener sets ctx.cancelled
+	// synchronously so the command can stop before sending any further input, and
+	// the command sets ctx.dispatched once input that may trigger the action is sent.
+	async function raceDialog(cmd, ctx, work) {
+		let off;
+		const opened = new Promise((res) => {
+			off = cdp.onEvent("Page.javascriptDialogOpening", (params, msg) => {
+				if (msg.sessionId !== sessionId) return;
+				ctx.cancelled = true;
+				res(params);
+			});
+		});
+		const running = work();
+		// If the dialog wins, the original request may reject later; swallow it.
+		running.catch(() => {});
+		try {
+			const winner = await Promise.race([running.then((value) => ({ value })), opened.then((dialog) => ({ dialog }))]);
+			if (!winner.dialog) return winner.value;
+			const what = describeDialog(winner.dialog);
+			if (cmd === "eval") {
+				throw new Error(
+					`Script paused: a ${what} opened, so no result is available. Once the dialog is handled the script resumes and may still change the page.\n${DIALOG_HINT}`,
+				);
+			}
+			if (!ctx.dispatched) {
+				throw new Error(
+					`A ${what} opened before the input was sent. The action was NOT performed and will not be sent later. Handle the dialog, then re-check the page state before retrying.\n${DIALOG_HINT}`,
+				);
+			}
+			// The input was delivered; report success so callers do not repeat the action.
+			return `Input was sent, then a ${what} opened. How the page handled the input is not verified; do not repeat the action. The page is blocked until the dialog is handled.\n${DIALOG_HINT}`;
+		} finally {
+			off();
+		}
+	}
+
 	// Shutdown helpers
 	let alive = true;
 	function shutdown() {
@@ -579,67 +813,92 @@ async function runDaemon(targetId) {
 		idleTimer = setTimeout(shutdown, IDLE_TIMEOUT);
 	}
 
+	// Run one page command and return its output string
+	async function runCommand(cmd, args, ctx) {
+		switch (cmd) {
+			case "list":
+				return formatPageList(await getPages(cdp));
+			case "list_raw":
+				return JSON.stringify(await getPages(cdp));
+			case "snap":
+			case "snapshot":
+				return snapshotStr(cdp, sessionId, true);
+			case "eval":
+				return evalStr(cdp, sessionId, args[0]);
+			case "shot":
+			case "screenshot":
+				return shotStr(cdp, sessionId, args[0], targetId);
+			case "html":
+				return htmlStr(cdp, sessionId, args[0]);
+			case "nav":
+			case "navigate":
+				return navStr(cdp, sessionId, args[0]);
+			case "net":
+			case "network":
+				return netStr(cdp, sessionId);
+			case "click":
+				return clickStr(cdp, sessionId, args[0], ctx);
+			case "clickxy":
+				return clickXyStr(cdp, sessionId, args[0], args[1], ctx);
+			case "type":
+				return typeStr(cdp, sessionId, args[0], ctx);
+			case "loadall":
+				return loadAllStr(cdp, sessionId, args[0], args[1] ? parseInt(args[1], 10) : 1500);
+			case "evalraw": {
+				const handlesDialog = args[0] === "Page.handleJavaScriptDialog";
+				try {
+					const out = await evalRawStr(cdp, sessionId, args[0], args[1]);
+					if (handlesDialog) openDialog = null;
+					return out;
+				} catch (e) {
+					// Keep the flag on other failures (e.g. timeout): the dialog may still be open.
+					if (handlesDialog && /No dialog is showing/i.test(e.message)) openDialog = null;
+					throw e;
+				}
+			}
+		}
+		return undefined;
+	}
+
+	const KNOWN_COMMANDS = new Set([
+		"list",
+		"list_raw",
+		"snap",
+		"snapshot",
+		"eval",
+		"shot",
+		"screenshot",
+		"html",
+		"nav",
+		"navigate",
+		"net",
+		"network",
+		"click",
+		"clickxy",
+		"type",
+		"loadall",
+		"evalraw",
+	]);
+
 	// Handle a command
 	async function handleCommand({ cmd, args }) {
 		resetIdle();
+		if (cmd === "stop") return { ok: true, result: "", stopAfter: true };
+		if (!KNOWN_COMMANDS.has(cmd)) return { ok: false, error: `Unknown command: ${cmd}` };
+		if (openDialog && DIALOG_BLOCKED.has(cmd)) {
+			return { ok: false, error: `A ${describeDialog(openDialog)} is open and blocks this command.\n${DIALOG_HINT}` };
+		}
 		try {
-			let result;
-			switch (cmd) {
-				case "list": {
-					const pages = await getPages(cdp);
-					result = formatPageList(pages);
-					break;
-				}
-				case "list_raw": {
-					const pages = await getPages(cdp);
-					result = JSON.stringify(pages);
-					break;
-				}
-				case "snap":
-				case "snapshot":
-					result = await snapshotStr(cdp, sessionId, true);
-					break;
-				case "eval":
-					result = await evalStr(cdp, sessionId, args[0]);
-					break;
-				case "shot":
-				case "screenshot":
-					result = await shotStr(cdp, sessionId, args[0], targetId);
-					break;
-				case "html":
-					result = await htmlStr(cdp, sessionId, args[0]);
-					break;
-				case "nav":
-				case "navigate":
-					result = await navStr(cdp, sessionId, args[0]);
-					break;
-				case "net":
-				case "network":
-					result = await netStr(cdp, sessionId);
-					break;
-				case "click":
-					result = await clickStr(cdp, sessionId, args[0]);
-					break;
-				case "clickxy":
-					result = await clickXyStr(cdp, sessionId, args[0], args[1]);
-					break;
-				case "type":
-					result = await typeStr(cdp, sessionId, args[0]);
-					break;
-				case "loadall":
-					result = await loadAllStr(cdp, sessionId, args[0], args[1] ? parseInt(args[1], 10) : 1500);
-					break;
-				case "evalraw":
-					result = await evalRawStr(cdp, sessionId, args[0], args[1]);
-					break;
-				case "stop":
-					return { ok: true, result: "", stopAfter: true };
-				default:
-					return { ok: false, error: `Unknown command: ${cmd}` };
-			}
+			const ctx = { dispatched: false, cancelled: false };
+			const work = () => runCommand(cmd, args, ctx);
+			const result = DIALOG_RACED.has(cmd) ? await raceDialog(cmd, ctx, work) : await work();
 			return { ok: true, result: result ?? "" };
 		} catch (e) {
-			return { ok: false, error: e.message };
+			let error = e.message;
+			if (openDialog && !error.includes("Page.handleJavaScriptDialog")) {
+				error += `\nA ${describeDialog(openDialog)} is blocking the page.\n${DIALOG_HINT}`;
+			}
+			return { ok: false, error };
 		}
 	}
 
@@ -819,12 +1078,15 @@ Usage: cdp <command> [args]
 
   list                              List open pages (shows unique target prefixes)
   snap  <target>                    Accessibility tree snapshot
-  eval  <target> <expr>             Evaluate JS expression
+  eval  <target> <expr>             Evaluate JS expression. Synchronous code is stopped after 12s;
+                                    a promise still pending after 15s is reported (it may keep running)
   shot  <target> [file]             Screenshot (default: screenshot-<target>.png in runtime dir); prints coordinate mapping
   html  <target> [selector]         Get HTML (full page or CSS selector)
   nav   <target> <url>              Navigate to URL and wait for load completion
   net   <target>                    Network performance entries
-  click   <target> <selector>       Click an element by CSS selector
+  click   <target> <selector>       Click an element by CSS selector. Uses real mouse input when the
+                                    element center is hit-testable (and reports if it did not reach the
+                                    element), otherwise falls back to el.click(). Disabled elements error
   clickxy <target> <x> <y>          Click at CSS pixel coordinates (see coordinate note below)
   type    <target> <text>           Type text at current focus via Input.insertText
                                     Works in cross-origin iframes unlike eval-based approaches
@@ -849,6 +1111,16 @@ COORDINATE SYSTEM
   shot prints the DPR and an example conversion for the current page.
   Typical Retina (DPR=2): CSS px ≈ screenshot px × 0.5
   If your viewer rescales the image further, account for that scaling too.
+
+JAVASCRIPT DIALOGS
+  If eval/click/clickxy/type opens alert/confirm/prompt, the command returns at
+  once and names the dialog. A click that hit the dialog BEFORE its input was
+  sent reports an error and is not performed; once the input was sent it reports
+  success (do not repeat it). While a dialog is open every page command except
+  evalraw/list/stop fails fast. Handle it with:
+    evalraw <target> Page.handleJavaScriptDialog '{"accept":false}'
+  A dialog that was already open before the tab's daemon started cannot be
+  handled from raw mode; ask the user to close it in Chrome.
 
 EVAL SAFETY NOTE
   Avoid index-based DOM selection (querySelectorAll(...)[i]) across multiple
