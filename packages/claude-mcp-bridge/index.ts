@@ -5,7 +5,13 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { Client, SSEClientTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import {
+	Client,
+	SdkError,
+	SdkErrorCode,
+	SSEClientTransport,
+	StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { Type } from "@sinclair/typebox";
 
@@ -259,13 +265,35 @@ export class McpConnection {
 			throw new Error(`MCP tool '${this.server.name}/${toolName}' changed schema while connecting; retry the call`);
 		}
 
-		return this.client.callTool(
-			{ name: toolName, arguments: args },
-			{
-				signal: options.signal,
-				timeout: options.timeoutMs ?? toolTimeoutMs(),
-			},
-		);
+		const client = this.client;
+		try {
+			return await client.callTool(
+				{ name: toolName, arguments: args },
+				{
+					signal: options.signal,
+					timeout: options.timeoutMs ?? toolTimeoutMs(),
+				},
+			);
+		} catch (error) {
+			if (
+				this.server.type === "stdio" &&
+				this.client === client &&
+				error instanceof SdkError &&
+				error.code === SdkErrorCode.RequestTimeout
+			) {
+				// Graceful close flushes buffered stdin, so stop the child before closing the transport.
+				const pid = this.transport instanceof StdioClientTransport ? this.transport.pid : null;
+				if (pid) {
+					try {
+						process.kill(pid, "SIGTERM");
+					} catch (killError) {
+						if ((killError as NodeJS.ErrnoException).code !== "ESRCH") throw killError;
+					}
+				}
+				await this.disconnect();
+			}
+			throw error;
+		}
 	}
 
 	private async doConnect(attempt: number, controller: AbortController, timeoutMs: number): Promise<void> {
