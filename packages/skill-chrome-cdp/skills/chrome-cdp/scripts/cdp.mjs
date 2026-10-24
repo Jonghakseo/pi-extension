@@ -9,6 +9,7 @@
 // daemon (= once per tab). Daemons auto-exit after 20min idle.
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { homedir } from "node:os";
@@ -316,7 +317,7 @@ async function snapshotStr(cdp, sid, compact = false) {
 }
 
 const TERMINATED_MESSAGE = `Script was stopped after ${EVAL_SYNC_TIMEOUT / 1000}s of synchronous execution (executionStopped: true). Changes it made before stopping remain.`;
-const LATE_EFFECTS_MESSAGE = `Script did not finish within ${TIMEOUT / 1000}s. Synchronous code still running at ${EVAL_SYNC_TIMEOUT / 1000}s was stopped, but if it was awaiting a promise it may still be running and change the page later (mayHaveLateEffects: true). Check the page state before retrying anything with side effects.`;
+const LATE_EFFECTS_MESSAGE = `Script did not finish within ${TIMEOUT / 1000}s (mayHaveLateEffects: true). It may have been stopped (synchronous code past ${EVAL_SYNC_TIMEOUT / 1000}s), may still be awaiting a promise, or may be blocked by a dialog. Check the page state before retrying anything with side effects.`;
 
 async function evalStr(cdp, sid, expression) {
 	await cdp.send("Runtime.enable", {}, sid);
@@ -469,7 +470,7 @@ async function netStr(cdp, sid) {
 		.join("\n");
 }
 
-// Page-side helpers shared by the click hit-test and its verification.
+// Page-side helpers shared by the click hit-test, its recheck, and its verification.
 const PAGE_HELPERS = `
       const describe = (n) => {
         if (!n) return 'nothing';
@@ -478,6 +479,7 @@ const PAGE_HELPERS = `
         if (typeof n.className === 'string' && n.className.trim()) s += '.' + n.className.trim().split(/\\s+/).slice(0, 2).join('.');
         return s;
       };
+      const parentOf = (n) => n.assignedSlot || n.parentElement || (n.parentNode && n.parentNode.host) || null;
       const deepHit = (x, y) => {
         let hit = document.elementFromPoint(x, y);
         while (hit && hit.shadowRoot) {
@@ -495,13 +497,17 @@ function assertLive(ctx) {
 
 // Click element by CSS selector.
 // Uses real mouse input at the element center when a hit-test proves the click
-// lands on the element itself, then verifies the element saw it. Otherwise falls
-// back to el.click(), the previous behavior, so covered, zero-size, or wrapper
-// targets behave as before. The hit-test never clicks; the input is sent only
-// after ctx.cancelled has been checked, so a dialog cannot cause a ghost click.
+// lands on the element itself, then checks whether the click reached it. Otherwise
+// falls back to el.click(), the previous behavior, so covered, zero-size, or
+// wrapper targets behave as before. The hit-test never clicks; the input is sent
+// only after ctx.cancelled has been checked, so a dialog cannot cause a ghost click.
+// Outcomes: verified success, "UNVERIFIED:" (input sent, effect not confirmed, an
+// ok result so the caller does not retry blindly), or an error meaning no input was sent.
 async function clickStr(cdp, sid, selector, ctx) {
 	if (!selector) throw new Error("CSS selector required");
 	const sel = JSON.stringify(selector);
+	// Unique per command so parallel clicks cannot overwrite each other's probe.
+	const key = JSON.stringify(`__cdpClickProbe_${randomBytes(6).toString("hex")}`);
 	const expr = `
     (async function() {
       const el = document.querySelector(${sel});
@@ -515,9 +521,9 @@ async function clickStr(cdp, sid, selector, ctx) {
       // input but not on el.click(); keep the old behavior for them.
       if (el.matches('select, option, input[type=file], input[type=color]')) return jsMode('native picker control');
       if (window.visualViewport && window.visualViewport.scale !== 1) return jsMode('page is pinch-zoomed');
-      // Let sticky headers and lazy layout settle after the scroll. The timer keeps
-      // hidden tabs, where requestAnimationFrame is paused, from hanging.
-      const frame = () => new Promise((r) => { requestAnimationFrame(r); setTimeout(r, 100); });
+      // Let sticky headers and lazy layout settle after the scroll. Hidden tabs
+      // pause requestAnimationFrame, so they skip the wait instead of stalling.
+      const frame = () => document.hidden ? Promise.resolve() : new Promise((r) => { requestAnimationFrame(r); setTimeout(r, 100); });
       await frame();
       await frame();
       const r = el.getBoundingClientRect();
@@ -526,7 +532,6 @@ async function clickStr(cdp, sid, selector, ctx) {
       const y = r.top + r.height / 2;
       if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) return jsMode('center is outside the viewport');
       const hit = deepHit(x, y);
-      const parentOf = (n) => n.assignedSlot || n.parentElement || (n.parentNode && n.parentNode.host) || null;
       // Nodes inside el's own shadow tree are part of el itself, not a nested control.
       const inOwnShadow = (n) => {
         let root = n.getRootNode && n.getRootNode();
@@ -546,66 +551,130 @@ async function clickStr(cdp, sid, selector, ctx) {
       if (cur !== el) return jsMode('center is covered by ' + describe(hit));
       // A real click would activate the nested control instead of el.
       if (nested) return jsMode('center hits nested ' + describe(nested));
-      // Probe so the verification step can tell whether the click reached el.
-      if (window.__cdpClickProbe) window.__cdpClickProbe.remove();
+      // Probe so the verification step can tell whether the click reached el. It
+      // listens on window in the capture phase, so an ancestor that stops
+      // propagation cannot hide the event. It removes itself after 30s.
+      const key = ${key};
+      if (window[key]) window[key].remove();
       const flags = { mousedown: false, click: false };
-      const onDown = () => { flags.mousedown = true; };
-      const onClick = () => { flags.click = true; };
-      el.addEventListener('mousedown', onDown, true);
-      el.addEventListener('click', onClick, true);
-      window.__cdpClickProbe = {
+      const seen = (name) => (ev) => {
+        if (ev.composedPath && ev.composedPath().includes(el)) flags[name] = true;
+      };
+      const onDown = seen('mousedown');
+      const onClick = seen('click');
+      window.addEventListener('mousedown', onDown, true);
+      window.addEventListener('click', onClick, true);
+      const probe = {
+        el,
         flags,
         remove() {
-          el.removeEventListener('mousedown', onDown, true);
-          el.removeEventListener('click', onClick, true);
+          clearTimeout(timer);
+          window.removeEventListener('mousedown', onDown, true);
+          window.removeEventListener('click', onClick, true);
+          if (window[key] === probe) delete window[key];
         },
       };
+      const timer = setTimeout(() => probe.remove(), 30000);
+      window[key] = probe;
       return { ...info, mode: 'mouse', x, y };
     })()
   `;
-	const r = JSON.parse(await evalStr(cdp, sid, expr));
-	if (!r.ok) throw new Error(r.error);
-	const label = `Clicked <${r.tag}> "${r.text}"`;
-	assertLive(ctx);
+	let probeInstalled = false;
+	try {
+		let r = JSON.parse(await evalStr(cdp, sid, expr));
+		if (!r.ok) throw new Error(r.error);
+		assertLive(ctx);
+		probeInstalled = r.mode === "mouse";
 
-	if (r.mode === "js") {
-		const jsExpr = `(function() {
+		if (probeInstalled) {
+			// Layout can shift between the hit-test and the input (late banners, lazy
+			// images). Recheck right before sending; if the target moved, use el.click().
+			const recheckExpr = `(function() {
+      const p = window[${key}];
+      const moved = () => { if (p) p.remove(); return { ok: false }; };
+      if (!p || !p.el.isConnected) return moved();
+      ${PAGE_HELPERS}
+      let cur = deepHit(${r.x}, ${r.y});
+      while (cur && cur !== p.el) cur = parentOf(cur);
+      return cur === p.el ? { ok: true } : moved();
+    })()`;
+			const re = JSON.parse(await evalStr(cdp, sid, recheckExpr));
+			assertLive(ctx);
+			if (!re.ok) {
+				probeInstalled = false;
+				r = { ...r, mode: "js", reason: "target moved before the click" };
+			}
+		}
+
+		const label = `Clicked <${r.tag}> "${r.text}"`;
+		if (r.mode === "js") {
+			const jsExpr = `(function() {
       const el = document.querySelector(${sel});
       if (!el) return { ok: false, error: 'Element not found: ' + ${sel} };
       el.click();
       return { ok: true };
     })()`;
-		ctx.dispatched = true;
-		const res = JSON.parse(await evalStr(cdp, sid, jsExpr));
-		if (!res.ok) throw new Error(res.error);
-		return `${label} (el.click(): ${r.reason})`;
-	}
+			ctx.dispatched = true;
+			const res = JSON.parse(await evalStr(cdp, sid, jsExpr));
+			if (!res.ok) throw new Error(res.error);
+			return `${label} (el.click(): ${r.reason})`;
+		}
 
-	await dispatchClick(cdp, sid, r.x, r.y, ctx);
-	if (ctx.cancelled) return "";
-	const at = `CSS ${Math.round(r.x)},${Math.round(r.y)}`;
-	const verifyExpr = `(function() {
-      const p = window.__cdpClickProbe;
+		await dispatchClick(cdp, sid, r.x, r.y, ctx);
+		if (ctx.cancelled) return "";
+		const at = `CSS ${Math.round(r.x)},${Math.round(r.y)}`;
+		const verifyExpr = `(function() {
+      const p = window[${key}];
       if (!p) return { probe: false };
-      delete window.__cdpClickProbe;
       p.remove();
       ${PAGE_HELPERS}
       return { probe: true, mousedown: p.flags.mousedown, click: p.flags.click, top: describe(deepHit(${r.x}, ${r.y})) };
     })()`;
-	let v;
-	try {
-		v = JSON.parse(await evalStr(cdp, sid, verifyExpr));
-	} catch (e) {
-		return `${label} (mouse at ${at}; verification failed: ${e.message})`;
+		// The verification eval removes the probe, or the 30s expiry does if it fails.
+		probeInstalled = false;
+		let v;
+		try {
+			v = JSON.parse(await evalStr(cdp, sid, verifyExpr));
+		} catch (e) {
+			return `${label} (mouse at ${at}; verification failed: ${e.message})`;
+		}
+		if (!v.probe) return `${label} (mouse at ${at}; page changed before verification, effect not confirmed)`;
+		if (v.click) return `${label} (mouse at ${at})`;
+		if (v.mousedown) {
+			return `${label} (mouse at ${at}; mousedown reached the element but no click event fired)`;
+		}
+		// Not an error: the input was sent, and an error would invite a blind retry.
+		return `UNVERIFIED: mouse input was sent at ${at} but no click event was observed on <${r.tag.toLowerCase()}> "${r.text}" (the topmost element there is now ${v.top}). Do not repeat the click blindly; check the page state first.`;
+	} finally {
+		// Best effort: a dialog opened by this command leaves cleanup to the 30s expiry.
+		if (probeInstalled && !ctx.cancelled) {
+			await evalStr(cdp, sid, `(function() { const p = window[${key}]; if (p) p.remove(); })()`).catch(() => {});
+		}
 	}
-	if (!v.probe) return `${label} (mouse at ${at}; page changed before verification)`;
-	if (v.click) return `${label} (mouse at ${at})`;
-	if (v.mousedown) {
-		return `${label} (mouse at ${at}; mousedown reached the element but no click event fired)`;
-	}
-	throw new Error(
-		`Mouse click at ${at} did not reach <${r.tag.toLowerCase()}>; the topmost element at that point is now ${v.top}. The input WAS sent, so check the page state before retrying. Do not repeat it blindly.`,
+}
+
+// Old-style click: el.click() only, no mouse input. Use when real mouse input
+// misbehaves or the layout keeps moving.
+async function clickJsStr(cdp, sid, selector, ctx) {
+	if (!selector) throw new Error("CSS selector required");
+	const sel = JSON.stringify(selector);
+	ctx.dispatched = true;
+	const r = JSON.parse(
+		await evalStr(
+			cdp,
+			sid,
+			`(function() {
+      const el = document.querySelector(${sel});
+      if (!el) return { ok: false, error: 'Element not found: ' + ${sel} };
+      if (el.matches(':disabled')) return { ok: false, error: 'Element is disabled: ' + ${sel} };
+      el.scrollIntoView({ block: 'center' });
+      el.click();
+      return { ok: true, tag: el.tagName, text: (el.textContent || '').trim().substring(0, 80) };
+    })()`,
+		),
 	);
+	if (!r.ok) throw new Error(r.error);
+	return `Clicked <${r.tag}> "${r.text}"`;
 }
 
 // If a mousedown handler opens a dialog, the mousePressed response only arrives once
@@ -644,13 +713,13 @@ async function typeStr(cdp, sid, text, ctx) {
 }
 
 // Load-more: repeatedly click a button/selector until it disappears
-async function loadAllStr(cdp, sid, selector, intervalMs = 1500) {
+async function loadAllStr(cdp, sid, selector, intervalMs = 1500, ctx) {
 	if (!selector) throw new Error("CSS selector required");
 	let clicks = 0;
 	const deadline = Date.now() + 5 * 60 * 1000; // 5-minute hard cap
-	while (Date.now() < deadline) {
+	while (Date.now() < deadline && !ctx.cancelled) {
 		const exists = await evalStr(cdp, sid, `!!document.querySelector(${JSON.stringify(selector)})`);
-		if (exists !== "true") break;
+		if (exists !== "true" || ctx.cancelled) break;
 		const clickExpr = `
       (function() {
         const el = document.querySelector(${JSON.stringify(selector)});
@@ -660,9 +729,12 @@ async function loadAllStr(cdp, sid, selector, intervalMs = 1500) {
         return true;
       })()
     `;
+		ctx.dispatched = true;
 		const clicked = await evalStr(cdp, sid, clickExpr);
 		if (clicked !== "true") break;
 		clicks++;
+		ctx.progress = clicks;
+		if (ctx.cancelled) break;
 		await sleep(intervalMs);
 	}
 	return `Clicked "${selector}" ${clicks} time(s) until it disappeared`;
@@ -712,8 +784,12 @@ async function runDaemon(targetId) {
 	// Page.handleJavaScriptDialog reports "No dialog is showing" and the tab
 	// stays blocked for every Runtime call.
 	let openDialog = null;
+	// Bumped on every opening so a late "handled" reply cannot clear a newer dialog.
+	let dialogGen = 0;
 	cdp.onEvent("Page.javascriptDialogOpening", (params, msg) => {
-		if (msg.sessionId === sessionId) openDialog = { type: params.type, message: params.message };
+		if (msg.sessionId !== sessionId) return;
+		dialogGen++;
+		openDialog = { type: params.type, message: params.message };
 	});
 	cdp.onEvent("Page.javascriptDialogClosed", (_params, msg) => {
 		if (msg.sessionId === sessionId) openDialog = null;
@@ -731,6 +807,7 @@ async function runDaemon(targetId) {
 		"net",
 		"network",
 		"click",
+		"clickjs",
 		"clickxy",
 		"type",
 		"loadall",
@@ -743,7 +820,7 @@ async function runDaemon(targetId) {
 	]);
 	// Commands that may open a dialog themselves. They return as soon as it opens
 	// instead of hanging until the CDP timeout.
-	const DIALOG_RACED = new Set(["eval", "click", "clickxy", "type"]);
+	const DIALOG_RACED = new Set(["eval", "click", "clickjs", "clickxy", "type", "loadall"]);
 
 	// ctx is shared with the command: the dialog listener sets ctx.cancelled
 	// synchronously so the command can stop before sending any further input, and
@@ -774,8 +851,12 @@ async function runDaemon(targetId) {
 					`A ${what} opened before the input was sent. The action was NOT performed and will not be sent later. Handle the dialog, then re-check the page state before retrying.\n${DIALOG_HINT}`,
 				);
 			}
-			// The input was delivered; report success so callers do not repeat the action.
-			return `Input was sent, then a ${what} opened. How the page handled the input is not verified; do not repeat the action. The page is blocked until the dialog is handled.\n${DIALOG_HINT}`;
+			// Input was sent (or may have been). Report an ok result, not a failure, so callers do not retry blindly.
+			const progress =
+				cmd === "loadall"
+					? ` loadall stopped after ${ctx.progress ?? 0} completed click(s); one more click may have been in flight.`
+					: "";
+			return `Input was sent, then a ${what} opened.${progress} The page may have triggered the dialog, or the dialog may have dropped the input; how it was handled is unknown. Do not repeat the action blindly: handle the dialog, then check the page state before deciding whether to repeat. The page is blocked until the dialog is handled.\n${DIALOG_HINT}`;
 		} finally {
 			off();
 		}
@@ -842,17 +923,21 @@ async function runDaemon(targetId) {
 				return clickXyStr(cdp, sessionId, args[0], args[1], ctx);
 			case "type":
 				return typeStr(cdp, sessionId, args[0], ctx);
+			case "clickjs":
+				return clickJsStr(cdp, sessionId, args[0], ctx);
 			case "loadall":
-				return loadAllStr(cdp, sessionId, args[0], args[1] ? parseInt(args[1], 10) : 1500);
+				return loadAllStr(cdp, sessionId, args[0], args[1] ? parseInt(args[1], 10) : 1500, ctx);
 			case "evalraw": {
 				const handlesDialog = args[0] === "Page.handleJavaScriptDialog";
+				const genAtRequest = dialogGen;
 				try {
 					const out = await evalRawStr(cdp, sessionId, args[0], args[1]);
-					if (handlesDialog) openDialog = null;
+					if (handlesDialog && genAtRequest === dialogGen) openDialog = null;
 					return out;
 				} catch (e) {
 					// Keep the flag on other failures (e.g. timeout): the dialog may still be open.
-					if (handlesDialog && /No dialog is showing/i.test(e.message)) openDialog = null;
+					// Also keep it if another dialog opened meanwhile (alert(1); alert(2)).
+					if (handlesDialog && genAtRequest === dialogGen && /No dialog is showing/i.test(e.message)) openDialog = null;
 					throw e;
 				}
 			}
@@ -874,6 +959,7 @@ async function runDaemon(targetId) {
 		"net",
 		"network",
 		"click",
+		"clickjs",
 		"clickxy",
 		"type",
 		"loadall",
@@ -881,7 +967,22 @@ async function runDaemon(targetId) {
 	]);
 
 	// Handle a command
-	async function handleCommand({ cmd, args }) {
+	// Input commands share one mouse/keyboard state per tab. Running two at once
+	// interleaves their press/release events so neither click lands, so they run
+	// one at a time. The queue waits for the reported result (which returns early
+	// when a dialog opens), never for work blocked behind a dialog, so evalraw
+	// Page.handleJavaScriptDialog is never queued behind a stuck input.
+	const INPUT_COMMANDS = new Set(["click", "clickjs", "clickxy", "type", "loadall"]);
+	let inputQueue = Promise.resolve();
+
+	function handleCommand(req) {
+		if (!INPUT_COMMANDS.has(req.cmd)) return executeCommand(req);
+		const run = inputQueue.then(() => executeCommand(req));
+		inputQueue = run.catch(() => {});
+		return run;
+	}
+
+	async function executeCommand({ cmd, args }) {
 		resetIdle();
 		if (cmd === "stop") return { ok: true, result: "", stopAfter: true };
 		if (!KNOWN_COMMANDS.has(cmd)) return { ok: false, error: `Unknown command: ${cmd}` };
@@ -889,7 +990,7 @@ async function runDaemon(targetId) {
 			return { ok: false, error: `A ${describeDialog(openDialog)} is open and blocks this command.\n${DIALOG_HINT}` };
 		}
 		try {
-			const ctx = { dispatched: false, cancelled: false };
+			const ctx = { dispatched: false, cancelled: false, progress: 0 };
 			const work = () => runCommand(cmd, args, ctx);
 			const result = DIALOG_RACED.has(cmd) ? await raceDialog(cmd, ctx, work) : await work();
 			return { ok: true, result: result ?? "" };
@@ -1085,8 +1186,11 @@ Usage: cdp <command> [args]
   nav   <target> <url>              Navigate to URL and wait for load completion
   net   <target>                    Network performance entries
   click   <target> <selector>       Click an element by CSS selector. Uses real mouse input when the
-                                    element center is hit-testable (and reports if it did not reach the
-                                    element), otherwise falls back to el.click(). Disabled elements error
+                                    element center is hit-testable and checks that the click reached the
+                                    element (UNVERIFIED: means input was sent but not confirmed, do not
+                                    repeat blindly), otherwise falls back to el.click(). Disabled elements error
+  clickjs <target> <selector>       Old-style click: el.click() only, no mouse input. Use when real mouse
+                                    input misbehaves or the layout keeps moving
   clickxy <target> <x> <y>          Click at CSS pixel coordinates (see coordinate note below)
   type    <target> <text>           Type text at current focus via Input.insertText
                                     Works in cross-origin iframes unlike eval-based approaches
@@ -1113,10 +1217,11 @@ COORDINATE SYSTEM
   If your viewer rescales the image further, account for that scaling too.
 
 JAVASCRIPT DIALOGS
-  If eval/click/clickxy/type opens alert/confirm/prompt, the command returns at
-  once and names the dialog. A click that hit the dialog BEFORE its input was
-  sent reports an error and is not performed; once the input was sent it reports
-  success (do not repeat it). While a dialog is open every page command except
+  If eval/click/clickjs/clickxy/type/loadall opens alert/confirm/prompt, the command
+  returns at once and names the dialog. A click that hit the dialog BEFORE its input
+  was sent reports an error and is NOT performed; once the input was sent it reports
+  an ok result saying the input may have been dropped by the dialog (check the page
+  state before repeating it). While a dialog is open every page command except
   evalraw/list/stop fails fast. Handle it with:
     evalraw <target> Page.handleJavaScriptDialog '{"accept":false}'
   A dialog that was already open before the tab's daemon started cannot be
@@ -1134,7 +1239,7 @@ DAEMON IPC (for advanced use / scripting)
     Request:  {"id":<number>, "cmd":"<command>", "args":["arg1","arg2",...]}
     Response: {"id":<number>, "ok":true,  "result":"<string>"}
            or {"id":<number>, "ok":false, "error":"<message>"}
-  Commands mirror the CLI: snap, eval, shot, html, nav, net, click, clickxy,
+  Commands mirror the CLI: snap, eval, shot, html, nav, net, click, clickjs, clickxy,
   type, loadall, evalraw, stop. Use evalraw to send arbitrary CDP methods.
   The socket disappears after 20 min of inactivity or when the tab closes.
 `;
@@ -1151,6 +1256,7 @@ const NEEDS_TARGET = new Set([
 	"net",
 	"network",
 	"click",
+	"clickjs",
 	"clickxy",
 	"type",
 	"loadall",

@@ -53,11 +53,11 @@ CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS=1 chrome-devtools start --autoConnect --
 
 사용자가 진행 상황을 보거나 중간에 이어받을 수 있는 페이지를 고른다. 아래 순서로 판단한다.
 
-1. 사용자가 탭을 지목했거나("이 페이지에서", "지금 보는 탭") 이미 열린 탭에서 이어 하는 작업이면, 그 탭을 그대로 쓴다. 지목한 탭은 보통 이미 앞에 있으니 읽기만 하는 조사는 `select_page <pageId>`로 충분하다. `--bringToFront`는 사용자가 지켜보거나 직접 해야 할 때(핸드오프, 제출 직전 확인, 결과 보여 주기)만 그 시점에 한 번 쓴다. 사용자 포커스를 불필요하게 뺏지 않는다.
+1. 사용자가 탭을 지목했거나("이 페이지에서", "지금 보는 탭") 이미 열린 탭에서 이어 하는 작업이면, 그 탭을 그대로 쓴다. 지목한 탭은 보통 이미 앞에 있으니 읽기만 하는 조사는 `select_page <pageId>`로 충분하다. `--bringToFront`는 사용자가 지켜보거나 직접 해야 할 때(핸드오프, 제출 직전 확인, 결과 보여 주기)만 그 시점에 한 번 쓴다. 사용자 포커스를 불필요하게 뺏지 않는다. 탭이 앞에 있어도 Chrome 창 자체가 다른 앱 뒤에 가려져 있으면 그 탭도 백그라운드처럼 타이머와 입력이 느려진다.
 2. 새 페이지가 필요하고 사용자가 결과를 보거나 이어받을 수 있으면(로그인, 폼 제출 직전 확인, 결과 화면 보여 주기) 포그라운드로 연다. `new_page <url>`의 기본값이 포그라운드다.
 3. 사용자가 다른 일을 하는 동안 텍스트로만 결과를 보고하는 보조 수집(여러 URL 일괄 조회 등)만 `new_page <url> --background`로 열고, 끝나면 닫는다. 백그라운드 탭은 Chrome이 타이머와 입력 처리를 늦춘다(측정: 2초 폴링이 13초, raw 클릭이 0.1초에서 7.7초로 느려졌다). 느리다고 같은 명령을 반복하지 말고, 시간이 중요하면 포그라운드로 연다.
 
-로그인, 2FA, CAPTCHA, 결제 승인처럼 사용자가 직접 해야 하는 단계가 나오면 핸드오프한다. 해당 탭을 `select_page <pageId> --bringToFront`로 앞에 두고, 무엇을 해야 하는지 한 줄로 안내한 뒤 턴을 끝낸다. 사용자가 끝냈다고 하면 같은 pageId에서 스냅샷을 새로 찍고 이어 간다. 우회하거나 대신 입력하지 않는다.
+로그인, 2FA, CAPTCHA, 결제 승인처럼 사용자가 직접 해야 하는 단계가 나오면 핸드오프한다. 해당 탭을 `select_page <pageId> --bringToFront`로 앞에 두고, 무엇을 해야 하는지 한 줄로 안내한 뒤 턴을 끝낸다. 안내에는 어느 탭인지(제목이나 URL)와 Chrome 창을 앞으로 가져와 달라는 말을 포함한다. 사용자가 끝냈다고 하면 같은 pageId에서 스냅샷을 새로 찍고 이어 간다. SSO 때문에 새 탭에서 로그인이 끝났다면 pageId가 사라졌을 수 있으니, 이어 가기 전에 `list_pages`로 pageId를 다시 찾는다. 우회하거나 대신 입력하지 않는다.
 
 ### 3. 조사와 조작
 
@@ -111,6 +111,7 @@ chrome-devtools close_page <pageId>
 
 - 새 탭을 여는 클릭(`target=_blank`, `window.open`)은 클릭 전 `list_pages` 결과를 기억해 두고, 클릭 후 다시 `list_pages`로 비교해 새 pageId를 찾는다. 선택된 페이지가 새 탭으로 바뀌었다고 가정하지 않는다.
 - `evaluate_script`는 실행 중 뜬 alert/confirm/prompt를 **기본으로 accept**한다. 버튼 클릭처럼 부작용이 생길 수 있는 스크립트는 `--dialogAction dismiss`를 붙이고, 다이얼로그 내용을 확인한 뒤 결정한다.
+- CLI의 `click`, `fill`, `press_key`에는 다이얼로그 옵션이 없다. 제출이나 삭제처럼 confirm이 뜰 수 있는 조작이면 다이얼로그가 뜬다고 예상하고, `list_pages`나 스냅샷으로 확인해 `handle_dialog`로 처리한다. 클릭 호출이 에러나 타임아웃으로 끝나도 클릭은 이미 수행됐다고 보고, 같은 클릭을 다시 하지 말고 상태를 먼저 확인한다.
 - 조작 뒤 다이얼로그가 열려 있으면 `handle_dialog <pageId> accept|dismiss`로 먼저 처리한다. 삭제, 결제, 전송처럼 되돌릴 수 없는 확인 창은 사용자가 요청한 범위 안일 때만 accept한다.
 - `navigate_page`는 beforeunload(저장하지 않은 변경 경고)를 **기본으로 accept**한다. 사용자가 입력하던 탭에서 이동하면 그 내용이 사라진다. 사용자 탭에서 이동해야 하면 `--handleBeforeUnload dismiss`를 붙이거나 먼저 묻는다.
 
@@ -135,6 +136,7 @@ scripts/cdp.mjs html <target> [selector]
 scripts/cdp.mjs nav <target> <url>
 scripts/cdp.mjs net <target>
 scripts/cdp.mjs click <target> <selector>
+scripts/cdp.mjs clickjs <target> <selector>   # el.click()만 사용
 scripts/cdp.mjs clickxy <target> <x> <y>
 scripts/cdp.mjs type <target> <text>
 scripts/cdp.mjs loadall <target> <selector> [ms]
@@ -146,14 +148,18 @@ scripts/cdp.mjs stop [target]
 주의:
 
 - 탭마다 데몬이 따로 뜨고, 처음 붙는 탭마다 Allow 창이 뜬다. 데몬은 20분 동안 쓰지 않으면 스스로 종료된다. 작업이 끝나면 `stop`으로 정리하고, `open`으로 연 탭은 `evalraw <target> Page.close`로 닫는다.
-- `eval`, `click`, `clickxy`, `type` 도중 JS 다이얼로그가 뜨면 15초를 기다리지 않고 바로 반환하며 다이얼로그 내용을 알려 준다. 다이얼로그가 열려 있는 동안 `evalraw`, `list`, `stop`을 뺀 모든 페이지 명령(`snap`, `shot`, `nav`, `html`, `net`, `loadall` 포함)이 즉시 실패한다. `evalraw <target> Page.handleJavaScriptDialog '{"accept":false}'`로 닫으면 풀린다(accept 기준은 CLI 모드와 같다).
-- 클릭이 다이얼로그를 만났을 때 결과가 둘로 갈린다. 입력을 보내기 **전에** 다이얼로그가 떴으면 에러로 보고하고 클릭은 수행하지 않으며 나중에도 보내지 않는다. 다이얼로그를 처리한 뒤 페이지 상태를 보고 다시 시도한다. 입력을 보낸 **뒤에** 떴으면 성공으로 보고하니 같은 클릭을 반복하지 않는다.
+- `eval`, `click`, `clickjs`, `clickxy`, `type`, `loadall` 도중 JS 다이얼로그가 뜨면 15초를 기다리지 않고 바로 반환하며 다이얼로그 내용을 알려 준다. 다이얼로그가 열려 있는 동안 `evalraw`, `list`, `stop`을 뺀 모든 페이지 명령(`snap`, `shot`, `nav`, `html`, `net` 포함)이 즉시 실패한다. `evalraw <target> Page.handleJavaScriptDialog '{"accept":false}'`로 닫으면 풀린다(accept 기준은 CLI 모드와 같다).
+- 클릭류(`click`, `clickjs`, `clickxy`, `type`, `loadall`)가 다이얼로그를 만났을 때 결과가 둘로 갈린다. 입력을 보내기 **전에** 다이얼로그가 떴으면 "NOT performed" 에러로 보고하고 입력은 나중에도 보내지 않는다. 다이얼로그를 처리한 뒤 페이지 상태를 보고 다시 시도해도 된다. 입력을 보낸 **뒤에** 떴으면 에러가 아닌 결과로 보고하는데, 입력을 다이얼로그가 버렸을 수도 있어서 처리됐는지 알 수 없다. 다이얼로그를 처리한 뒤 페이지 상태를 확인하고, 그다음에 반복할지 정한다. `loadall`은 그때까지 끝낸 클릭 수를 알려 주고 멈춘다.
 - 탭 데몬이 붙기 전부터 떠 있던 다이얼로그는 raw 모드로 닫을 수 없다. 먼저 사용자에게 Chrome에서 닫아 달라고 요청한다.
 - 저장하지 않은 변경이 있는 탭에서 `nav`를 하면 beforeunload 다이얼로그가 뜰 수 있다. 이때 `nav`는 15초 뒤 Timeout으로 끝나고 다이얼로그 안내가 붙는다. `{"accept":false}`로 처리하면 이동이 취소되어 사용자가 입력한 내용이 남는다.
-- `click`은 요소 중심을 hit-test해서 그 요소에 실제로 닿을 때만 실제 마우스 입력을 보내고, 가려졌거나 크기가 0이거나 안쪽 링크·버튼에 닿거나 select·file 입력이면 예전처럼 `el.click()`을 쓴다. 출력 끝의 괄호에 어느 쪽을 썼는지 나온다. 마우스 입력을 보낸 뒤에는 요소가 실제로 받았는지 확인해, 못 받았으면 에러로 알린다(입력은 이미 나간 상태이니 상태를 확인한 뒤 재시도한다). `disabled` 요소는 에러를 돌려준다. 마우스 입력이 문제를 일으키면 `eval "document.querySelector('<selector>').click()"`으로 예전 방식을 직접 쓴다.
+- `click`은 요소 중심을 hit-test해서 그 요소에 실제로 닿을 때만 실제 마우스 입력을 보내고, 가려졌거나 크기가 0이거나 안쪽 링크·버튼에 닿거나 select·file 입력이거나 입력 직전에 요소가 움직였으면 `el.click()`을 쓴다. 출력 끝의 괄호에 어느 쪽을 썼는지 나온다. `disabled` 요소는 에러를 돌려준다. 결과는 셋으로 나뉜다.
+  - **확인됨**: `Clicked <TAG> "..." (mouse at CSS x,y)`. 요소가 click 이벤트를 받은 것을 봤다. (`mousedown`만 봤거나 페이지가 바뀌어 확인하지 못했다는 설명이 붙을 수 있다.)
+  - **UNVERIFIED**: 출력이 `UNVERIFIED:`로 시작한다. 입력은 나갔지만 요소가 받았는지 확인하지 못했다. 에러가 아니다. 같은 클릭을 반복하지 말고 페이지 상태를 먼저 확인한다. 되돌릴 수 없는 동작이면 반복하지 말고 사용자에게 보고한다.
+  - **NOT performed**: 입력을 보내기 전에 중단됐다(다이얼로그가 먼저 뜬 경우, 요소 없음, disabled). 처리한 뒤 다시 시도해도 된다.
+- 마우스 입력이 문제를 일으키거나 레이아웃이 계속 움직이면 `clickjs <target> <selector>`로 예전 방식(`el.click()`만, 마우스 입력 없음)을 쓴다. 이 명령도 다이얼로그가 뜨면 바로 반환한다.
 - 실제 마우스 입력이라 `target=_blank` 링크가 진짜 새 탭을 연다. 클릭 전후 `list`를 비교해 새 탭을 찾고, 에이전트가 연 탭만 `evalraw <target> Page.close`로 닫는다.
 - `eval`의 동기 코드는 12초 뒤 강제로 멈추고 `executionStopped`를 알린다. 15초 안에 끝나지 않으면 `mayHaveLateEffects`를 알린다. Promise를 기다리던 스크립트는 계속 돌며 나중에 페이지를 바꿀 수 있으니, 부작용이 있는 작업을 재시도하기 전에 페이지 상태를 확인한다.
-- `open`으로 연 탭은 포그라운드로 열린다. 페이지 선택 기준은 위 "작업할 페이지 정하기"를 따른다.
+- `open`은 항상 포그라운드로 탭을 열고 백그라운드로 열 수 없다. 여러 URL을 백그라운드로 모으는 작업은 CLI 모드(`new_page --background`)를 쓴다. 탭을 앞으로 가져오려면 `evalraw <target> Page.bringToFront`를 쓰는데, 사용자 포커스를 뺏으니 핸드오프처럼 필요한 때만 쓴다. 페이지 선택 기준은 위 "작업할 페이지 정하기"를 따른다.
 - DOM이 바뀔 수 있으면 호출 사이에 `querySelectorAll(...)[i]` 같은 인덱스 선택을 피한다. 한 번의 `eval`로 모아서 수집하거나 안정적인 셀렉터를 쓴다.
 - `shot`은 네이티브 해상도 픽셀로 찍히고 CDP 입력 좌표는 CSS 픽셀이다. 이미지 좌표를 DPR로 나눠서 쓴다.
 - cross-origin iframe에 텍스트를 입력할 때는 `eval` 대신 `type`을 쓴다.
