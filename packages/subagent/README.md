@@ -209,6 +209,8 @@ A nearest project `.pi/subagent.json` overrides global values:
 
 Set `PI_SUBAGENT_CONTEXT_GUARD_TOKENS` to a positive integer to override the proactive context limit for child runs. Set it to `0` or an empty value to disable the guard.
 
+Set `PI_SUBAGENT_PI_BIN` to an executable path to launch child runs with that binary instead of `pi` from `PATH`. Apps that bundle their own Pi wrapper use this so subagents work without a global Pi install. The path is passed directly to the process (no shell), so spaces are fine. An unset, empty, or whitespace-only value falls back to `pi`.
+
 ## Escalation
 
 Children receive an `ask_master` tool. Calling it reports a decision or blocker to the parent and immediately terminates the child run. Use it only when the child cannot proceed safely.

@@ -32,6 +32,12 @@ import {
 	matchSubCommandAgent as matchSubCommandAgentUtil,
 } from "./utils/agent-utils.js";
 
+/** Executable used for child runs. `PI_SUBAGENT_PI_BIN` overrides `pi` when set to a non-blank value. */
+export function resolvePiBinary(env: NodeJS.ProcessEnv = process.env): string {
+	const override = env.PI_SUBAGENT_PI_BIN;
+	return override?.trim() ? override : "pi";
+}
+
 export interface RunSingleAgentSessionConfig {
 	asyncRunId?: number;
 	sessionFile?: string;
@@ -318,7 +324,7 @@ async function runPiAgent(
 
 		const exitCode = await new Promise<number>((resolve) => {
 			if (signal?.aborted) throw new Error("Subagent was aborted");
-			const proc = spawn("pi", args, { cwd: defaultCwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+			const proc = spawn(resolvePiBinary(), args, { cwd: defaultCwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
 			observeResource("active");
 			let buffer = "";
 			let procExited = false;
