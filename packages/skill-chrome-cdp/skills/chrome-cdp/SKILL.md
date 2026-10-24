@@ -75,6 +75,9 @@ chrome-devtools new_page <url>
 - 페이지를 조작하기 전에 `take_snapshot`으로 UID를 확보한다. UID가 사라졌다면 DOM이 바뀐 것이니 다시 스냅샷을 찍는다.
 - 명령 사용법이 불확실하면 `chrome-devtools <tool> --help`를 먼저 읽는다. 프로그램으로 파싱해야 할 때만 `--output-format=json`을 쓴다.
 - `wait_for`와 `fill_form`은 CLI에 없다. 대기는 `evaluate_script` 폴링으로, 여러 필드 입력은 `fill`을 필드마다 호출해 처리한다.
+- 프로필이 여러 개 열려 있으면 `list_pages`는 모든 프로필의 탭을 섞어 보여 주고, `new_page`는 프로필을 지정할 수 없어 마지막으로 포커스된 창에 탭을 연다. 특정 프로필에 열려면 그 프로필로 확인된 기존 탭에서 `chrome-devtools evaluate_script "() => { window.open('<url>', '_blank'); return 1 }" --pageId <pageId>`를 실행한다.
+- 탭을 조작하거나 "회사/개인 탭"이라고 보고하기 전에 페이지의 로그인 이메일, 계정 도메인, 창 제목(`... - Chrome - <프로필명>`)으로 프로필을 확인한다. 확인할 수 없으면 어느 프로필 창인지 사용자에게 한 줄로 묻는다.
+- cross-origin iframe 안은 페이지 컨텍스트의 `evaluate_script`로 접근할 수 없다. `take_snapshot`에서 얻은 iframe 내부 요소 UID를 `--args`로 넘기면 함수가 그 요소의 프레임에서 실행된다. 예: `chrome-devtools evaluate_script "(el) => el.ownerDocument.defaultView.location.href" --pageId <pageId> --args <uid>`
 
 ### 3. 정리
 
