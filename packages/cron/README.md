@@ -174,7 +174,19 @@ Each item stays in the banner until the job recovers, so it can repeat on every 
 - A live session must load the updated extension before it can accept scheduled messages through the local bridge. Its lease moves through `starting`, `active`, and `draining`; the daemon defers, rather than fails, jobs while it is not ready or is handing off. When a compatible host pauses external delivery, such as during voice input or PTT, due session jobs also remain pending for a later attempt.
 - On `session_shutdown`, the lease remains `draining` until Pi emits the documented successor `session_start` event or the owner process is provably gone. A host that disposes a session without either signal fails closed, so its due session jobs remain deferred rather than being resumed concurrently. The host must complete a documented session replacement or exit its process before cron can resume that session.
 - Lease and transaction-lock cleanup check the process start identity as well as PID (`/proc` boot ID plus start time on Linux, `/bin/ps -o lstart` on macOS). If the PID is live but its recorded start identity cannot be checked, ownership is not stolen.
+- A host that stops a session's process while the session stays open to its user (Picky puts idle Pickles to sleep this way) can keep the lease with `session-delegate.mjs` instead of letting the daemon resume the session over RPC behind the host's back. See [Session delegate for hosts](#session-delegate-for-hosts).
 - A connection lost after sending a prompt may hide an accepted delivery. Cron records a failed delivery instead of automatically resending it. Check the original session before retrying manually.
+
+### Session delegate for hosts
+
+A host process that embeds Pi asks the extension, on the Pi event bus, whether it may hold the session: it emits `cron.session-delegate.query` and the extension answers synchronously on `cron.session-delegate.info` with `{ version: 1, available: true, modulePath, agentDir, sessionId, sessionFile }` while its bridge owns the session, or `{ version: 1, available: false }`. After the session's process has exited, the host imports `modulePath` (plain ESM, no Pi dependency) and calls:
+
+- `claimDelegatedSessionOwner({ agentDir, sessionId, sessionFile, onDeferred })`: takes the lease only from a missing or provably dead owner (`SessionDelegateBusyError` otherwise). Every delivery is answered `deferred`, so the daemon retries on its next tick, and `onDeferred` tells the host to start the session's process. The delegate never sees the prompt and never reports `queued`.
+- `reserveForSuccessor()`: before the host starts that process. The lease becomes a `reserved` record of the host, which the daemon defers on, and the returned string goes into the new process's `PI_CRON_SESSION_RESERVATION`. The extension adopts it as it adopts a cron RPC reservation, and the daemon then delivers live (`queued`).
+- `releaseReservation()`: when the successor exited or never adopted. It removes only a reservation that is still the host's.
+- `stop()`: when the host quits. The daemon falls back to RPC resume, as it does for a dead owner after a host crash.
+
+An older extension never answers the query, so the host keeps its old behavior.
 
 The handoff uses Pi's [documented session lifecycle](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#session_shutdown). Closed-session delivery follows the [RPC contract](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md).
 

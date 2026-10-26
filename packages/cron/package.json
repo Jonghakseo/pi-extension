@@ -33,6 +33,8 @@
 		"process-identity.mjs",
 		"process-identity.d.mts",
 		"session-bridge.ts",
+		"session-delegate.mjs",
+		"session-delegate.d.mts",
 		"store.ts",
 		"store-lock.mjs",
 		"store-lock.d.mts",

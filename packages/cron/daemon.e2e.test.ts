@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ownProcessStartIdentity } from "./process-identity.mjs";
 import { SessionBridge } from "./session-bridge.ts";
+import { claimDelegatedSessionOwner } from "./session-delegate.mjs";
 import { updateJob } from "./store.ts";
 import { writeAtomicFile } from "./store-lock.mjs";
 import type { CronJob, CronStoreFile } from "./types.js";
@@ -630,6 +631,78 @@ upsertJob({ id: "same-id", name: "replacement", enabled: true, kind: "at", once:
 			expect(existsSync(join(tempAgentDir, "fake-pi-args.log"))).toBe(false);
 		} finally {
 			await bridge.stop();
+			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		}
+	});
+
+	it("defers to a delegated owner and delivers live once the woken session adopts its reservation", async () => {
+		const sessionId = "sleeping-session";
+		const sessionFile = join(tempAgentDir, "sleeping.jsonl");
+		const job: CronJob = {
+			id: "sleeping-session-job",
+			name: "Sleeping session job",
+			enabled: true,
+			kind: "at",
+			once: true,
+			runAt: new Date(Date.now() - 1000).toISOString(),
+			timezone: "UTC",
+			cwd: tempAgentDir,
+			promptFile: join(tempAgentDir, "cron", "prompts", "sleeping-session-job.md"),
+			scope: "session",
+			sessionId,
+			sessionFile,
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+		};
+		writeStore(job);
+		const fakePi = writeFakePi();
+		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = tempAgentDir;
+		const delivered: string[] = [];
+		let bridge: SessionBridge | undefined;
+		let wake: Promise<void> | undefined;
+		const deferrals: string[] = [];
+		// The host holds the lease while the session's process sleeps; a delivery wakes it, as Picky's Host does.
+		const delegate = await claimDelegatedSessionOwner({
+			agentDir: tempAgentDir,
+			sessionId,
+			sessionFile,
+			onDeferred: ({ id }) => {
+				deferrals.push(id);
+				wake ??= (async () => {
+					process.env.PI_CRON_SESSION_RESERVATION = await delegate.reserveForSuccessor();
+					bridge = new SessionBridge(sessionId, sessionFile, {
+						sendUserMessage: (message: string) => delivered.push(message),
+					} as never);
+					await bridge.start();
+				})();
+			},
+		});
+		try {
+			const child = spawn(process.execPath, [daemonPath], {
+				cwd: tempAgentDir,
+				stdio: "ignore",
+				env: {
+					...process.env,
+					PI_CODING_AGENT_DIR: tempAgentDir,
+					PI_CRON_PI_BIN: fakePi,
+					PI_CRON_TICK_INTERVAL_MS: "50",
+					PI_CRON_RETRY_LOCK_INTERVAL_MS: "50",
+				},
+			});
+			childPid = child.pid;
+			const finalStore = await waitFor(readStore, (store) => store.jobs.length === 0 && store.history.length === 1);
+			await wake;
+			expect(deferrals).toHaveLength(1);
+			expect(delivered).toEqual(["# Test prompt\n\nSay hello from cron."]);
+			expect(finalStore.history[0].lastDeliveryOutcome).toBe("queued");
+			expect(existsSync(join(tempAgentDir, "fake-pi-args.log"))).toBe(false);
+			expect(delegate.releaseReservation()).toBe("adopted");
+		} finally {
+			delete process.env.PI_CRON_SESSION_RESERVATION;
+			await bridge?.stop();
+			await delegate.stop();
 			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 		}

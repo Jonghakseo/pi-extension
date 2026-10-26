@@ -144,6 +144,39 @@ describe("cron job removal", () => {
 		}
 	});
 
+	it("tells a host which delegate module may hold the session only while its bridge owns the session", async () => {
+		const previousSuppression = process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE;
+		process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE = "1";
+		const { pi, events } = createPi();
+		registerCron(pi as never);
+		const answers: unknown[] = [];
+		pi.events.on("cron.session-delegate.info", (value) => answers.push(value));
+		const ask = () => {
+			pi.events.emit("cron.session-delegate.query", undefined);
+			return answers.pop();
+		};
+		try {
+			expect(ask()).toEqual({ version: 1, available: false });
+			const ctx = makeCtx(false);
+			await events.get("session_start")({ reason: "startup" }, ctx);
+			const info = ask() as Record<string, unknown>;
+			expect(info).toMatchObject({
+				version: 1,
+				available: true,
+				agentDir: tmpDir,
+				sessionId: "session-a",
+				sessionFile: fs.realpathSync(ctx.sessionManager.getSessionFile()),
+			});
+			const delegate = await import(info.modulePath as string);
+			expect(typeof delegate.claimDelegatedSessionOwner).toBe("function");
+			await events.get("session_shutdown")();
+			expect(ask()).toEqual({ version: 1, available: false });
+		} finally {
+			if (previousSuppression === undefined) delete process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE;
+			else process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE = previousSuppression;
+		}
+	});
+
 	it("does not schedule a detached upgrade inside the awaited runtime update RPC", async () => {
 		vi.useFakeTimers();
 		const previousSuppression = process.env.PI_CRON_SUPPRESS_AUTO_UPGRADE;

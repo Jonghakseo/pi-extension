@@ -221,6 +221,13 @@ export class SessionBridge {
 		};
 	}
 
+	/** The session this bridge serves, while it is the active owner. */
+	get identity(): { sessionId: string; sessionFile: string } | undefined {
+		return this.owner.state === "active"
+			? { sessionId: this.owner.sessionId, sessionFile: this.owner.sessionFile }
+			: undefined;
+	}
+
 	private reserveRegistry(): void {
 		const registryPath = sessionOwnerPath(this.owner.sessionId);
 		const reservation = readReservationFromEnvironment();

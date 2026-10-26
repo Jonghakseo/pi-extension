@@ -16,8 +16,15 @@ import {
 	validatePersistedSessionFile,
 } from "./session-bridge.ts";
 import {
+	getSessionDelegatePath,
+	SESSION_DELEGATE_INFO_CHANNEL,
+	SESSION_DELEGATE_QUERY_CHANNEL,
+	SESSION_DELEGATE_VERSION,
+} from "./session-delegate.mjs";
+import {
 	allocateJobIdFromStore,
 	findJob,
+	getAgentDir,
 	loadHistory,
 	loadJobs,
 	readPromptFile,
@@ -619,6 +626,24 @@ export default function (pi: ExtensionAPI) {
 	// Extension instances are recreated by Pi reload/rebind. Ask the per-runtime
 	// host bus for its current state so a reload during PTT stays paused.
 	pi.events.emit(PICKY_EXTERNAL_DELIVERY_PAUSE_QUERY_CHANNEL, undefined);
+	// A host about to stop this process asks whether it may hold the session lease meanwhile (session-delegate.mjs).
+	// Answered synchronously, and only while this process's bridge owns the session.
+	pi.events.on(SESSION_DELEGATE_QUERY_CHANNEL, () => {
+		const identity = shuttingDown ? undefined : sessionBridge?.identity;
+		pi.events.emit(
+			SESSION_DELEGATE_INFO_CHANNEL,
+			identity
+				? {
+						version: SESSION_DELEGATE_VERSION,
+						available: true,
+						modulePath: getSessionDelegatePath(),
+						agentDir: getAgentDir(),
+						sessionId: identity.sessionId,
+						sessionFile: identity.sessionFile,
+					}
+				: { version: SESSION_DELEGATE_VERSION, available: false },
+		);
+	});
 
 	async function ensureSessionBridge(ctx: ExtensionContext, allowDrainingHandoff = false): Promise<void> {
 		if (shuttingDown || sessionBridge) return;
