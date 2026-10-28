@@ -1,5 +1,19 @@
 # pi-extension monorepo
 
+## Sponsor
+
+[![Picky: A Mac AI app for asking about what is on your screen](https://picky.day/images/01-hero.jpg)](https://picky.day/)
+
+[Picky](https://picky.day/) is a Mac AI app for asking about what is on your screen, built on pi.
+
+- Hold Control + Option, ask by voice, and release to send.
+- Read the answer as a numbered card next to the menu item you need to click.
+- Hand longer work, such as comparing two quotes or changing code in a project, to a background Pickle and review the diff in Picky.
+
+Conversations stay on your Mac. Learn more at [picky.day](https://picky.day/).
+
+---
+
 Standalone pi extensions managed in one repository and published as separate npm packages.
 
 ## Structure
