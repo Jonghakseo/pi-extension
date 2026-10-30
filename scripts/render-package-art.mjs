@@ -575,6 +575,71 @@ const SCENES = {
 			m.appear("bd", 6, 30, 95) +
 			m.blink("bc", 1),
 	},
+	"enhanced-bash": {
+		kind: "extension",
+		desc: "A bash tool with UI titles that moves commands outliving their timeout to the background.",
+		draw(s) {
+			s.plate(0, 0, 13, 9);
+			s.line([1, 1.6, 0.01], [12, 1.6, 0.01], "lo");
+			s.line([1, 3.4, 0.01], [12, 3.4, 0.01], "lo");
+			[1.8, 5.2].forEach((x, i) => {
+				s.group([x + 0.9, 2.5, 0.7], () => {
+					s.box(x, 1.8, 0, 1.8, 1.4, 1.2, "sil");
+					s.line([x + 0.2, 2.5, 1.21], [x + 1.6, 2.5, 1.21], "lo");
+					s.anim(`eb${i}`, () => s.line([x + 0.2, 2.5, 1.21], [x + 1.6, 2.5, 1.21], "hi"), { draw: true });
+				});
+			});
+			s.anim("ej", () => {
+				s.group([9.5, 2.5, 0.7], () => {
+					s.box(8.6, 1.8, 0, 1.8, 1.4, 1.2, "hi");
+					s.line([8.8, 2.5, 1.21], [10.2, 2.5, 1.21], "lo");
+				});
+			});
+			s.anim("ep", () => s.line([8.8, 2.5, 1.22], [10.2, 2.5, 1.22], "hi"), { draw: true, layer: 2 });
+			s.anim("ed", () => {
+				s.line([9.5, 2.5, 1.3], [9.5, 2.5, 2.9], "hi");
+				s.dot([9.5, 2.5, 3.0]);
+				s.text([9.5, 2.5, 3.55], "done", "tx hi");
+			});
+			windowPanel(s, 1.2, 5.6, 0.15, 6, 3.6, {
+				content(yf) {
+					s.text([1.75, yf, 2.25], "$", "tx hi", { anchor: "start" });
+					s.line([2.3, yf, 2.35], [5.6, yf, 2.35], "hi");
+					barsXZ(s, 1.8, yf, 1.7, [3.2], 0.55, "lo");
+					s.line([1.8, yf, 0.8], [6.6, yf, 0.8], "lo");
+					s.anim("et", () => s.line([1.8, yf, 0.8], [6.6, yf, 0.8], "hi"), { draw: true });
+				},
+			});
+			s.text([1.3, 5.6, 4.35], "title: run e2e tests", "tx hi", { anchor: "start", size: 11 });
+			s.path(
+				[
+					[7.2, 5.6, 0.4],
+					[9.5, 5.6, 0.4],
+					[9.5, 3.2, 0.4],
+				],
+				"dash march",
+			);
+		},
+		motion: (m) =>
+			m.drawIn("eb0", 6, 0, 70, { end: 95, ease: "linear" }) +
+			m.drawIn("eb1", 6, 0, 40, { end: 95, ease: "linear" }) +
+			m.drawIn("et", 6, 4, 44, { end: 50, ease: "linear" }) +
+			m.travel(
+				"ej",
+				6,
+				[
+					[0, [0, 3.4, 0], 0],
+					[45, [0, 3.4, 0], 0],
+					[48, [0, 3.4, 0], 1],
+					[62, [0, 0, 0], 1],
+					[94, [0, 0, 0], 1],
+					[100, [0, 0, 0], 0],
+				],
+				{ ease: "linear" },
+			) +
+			m.drawIn("ep", 6, 62, 82, { end: 94, ease: "linear" }) +
+			m.appear("ed", 6, 82, 94),
+	},
 	"cc-system-prompt": {
 		kind: "extension",
 		desc: "Swaps pi's system prompt for Claude Code's when a Claude model is selected.",

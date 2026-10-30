@@ -1,0 +1,120 @@
+import { existsSync } from "node:fs";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
+
+export interface ShellOptions {
+	shellPath?: string;
+	commandPrefix?: string;
+}
+
+export interface ShellEnvironment {
+	platform?: NodeJS.Platform;
+	env?: NodeJS.ProcessEnv;
+	exists?: (path: string) => boolean;
+	readSettings?: (cwd: string) => ShellOptions;
+}
+
+/** Homebrew installs bash 5 here; macOS's own /bin/bash is 3.2 and lacks mapfile and associative arrays. */
+export const MODERN_BASH_CANDIDATES = ["/opt/homebrew/bin/bash", "/usr/local/bin/bash"];
+
+/**
+ * Project settings are ignored on purpose: an extension cannot tell whether the project is trusted, and a
+ * project-level shellPath would otherwise run any binary a cloned repository names.
+ */
+function readPiSettings(cwd: string): ShellOptions {
+	try {
+		const settings = SettingsManager.create(cwd, undefined, { projectTrusted: false });
+		return { shellPath: settings.getShellPath(), commandPrefix: settings.getShellCommandPrefix() };
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * Picks the shell the way pi's built-in bash does, except that on macOS a Homebrew bash replaces /bin/bash
+ * when nothing is configured. PI_ENHANCED_BASH_SHELL overrides everything, so `/bin/bash` restores pi's choice.
+ */
+export function resolveShellOptions(cwd: string, environment: ShellEnvironment = {}): ShellOptions {
+	const env = environment.env ?? process.env;
+	const platform = environment.platform ?? process.platform;
+	const exists = environment.exists ?? existsSync;
+	const settings = (environment.readSettings ?? readPiSettings)(cwd);
+	const override = env.PI_ENHANCED_BASH_SHELL?.trim();
+	if (override) return { ...settings, shellPath: override };
+	if (settings.shellPath) return settings;
+	if (platform === "darwin") {
+		const modern = MODERN_BASH_CANDIDATES.find((candidate) => exists(candidate));
+		if (modern) return { ...settings, shellPath: modern };
+	}
+	return settings;
+}
+
+/** True when the resolved shell is macOS's bash 3.2, so bash 4+ builtins must be avoided. */
+export function usesLegacyMacBash(options: ShellOptions, platform: NodeJS.Platform = process.platform): boolean {
+	if (platform !== "darwin") return false;
+	return options.shellPath === undefined || options.shellPath === "/bin/bash";
+}
+
+/** Tells the model up front which GNU habits fail here, so it does not learn them from errors. */
+export function platformGuidance(options: ShellOptions, platform: NodeJS.Platform = process.platform): string {
+	if (platform !== "darwin") return "";
+	const shell = usesLegacyMacBash(options, platform)
+		? " The shell is macOS's bash 3.2: mapfile, readarray, and associative arrays (declare -A) are unavailable."
+		: "";
+	return `This machine runs macOS with BSD command-line tools, not GNU. sed -i needs a suffix argument (sed -i '' 's/a/b/' file), and sed has no \\U or \\L. There is no timeout command; use this tool's timeout parameter. grep -P is unsupported; use grep -E or perl. head rejects 0 and negative counts; use sed '$d' to drop the last line. Use date -v or date -j -f instead of date -d, stat -f instead of stat -c, and -exec instead of find -printf.${shell}`;
+}
+
+interface FailureHint {
+	pattern: RegExp;
+	hint: string;
+}
+
+const FAILURE_HINTS: FailureHint[] = [
+	{
+		pattern: /sed: \d+: [\s\S]*?(invalid command code|unterminated substitute|extra characters at the end)/,
+		hint: "BSD sed -i takes a suffix argument: use sed -i '' 's/a/b/' file.",
+	},
+	{
+		pattern: /\b(g?timeout): command not found/,
+		hint: "macOS has no timeout command: drop it and set this tool's timeout parameter instead.",
+	},
+	{
+		pattern: /grep: invalid option -- P/,
+		hint: "BSD grep has no -P: use grep -E, or perl -ne 'print if /re/'.",
+	},
+	{
+		pattern: /head: illegal (line|byte) count -- (0|-)/,
+		hint: "BSD head rejects 0 and negative counts: use sed '$d' to drop the last line, or skip head entirely for zero lines.",
+	},
+	{
+		pattern: /tail: illegal offset/,
+		hint: "BSD tail accepts only -n N, -n +N, -c N, or -c +N with a plain number.",
+	},
+	{
+		pattern: /\b(mapfile|readarray): command not found|declare: -A: invalid option/,
+		hint: "This bash is 3.2: read lines with while IFS= read -r line; do ...; done, and avoid associative arrays.",
+	},
+	{
+		pattern: /date: illegal option -- d/,
+		hint: "BSD date has no -d: use date -v-1d for relative dates or date -j -f FORMAT VALUE to parse.",
+	},
+	{
+		pattern: /stat: illegal option -- c/,
+		hint: "BSD stat uses -f: for example stat -f %z FILE for the size.",
+	},
+	{
+		pattern: /find: -printf: unknown primary/,
+		hint: "BSD find has no -printf: use -print, or -exec stat -f FORMAT {} +.",
+	},
+];
+
+/** Hints for BSD/GNU mismatches recognised in a failed command's output, in a stable order. */
+export function failureHints(output: string): string[] {
+	return FAILURE_HINTS.filter(({ pattern }) => pattern.test(output)).map(({ hint }) => hint);
+}
+
+/** Appends recognised hints to failed output; output with no known mismatch is returned unchanged. */
+export function withFailureHints(output: string): string {
+	const hints = failureHints(output);
+	if (hints.length === 0) return output;
+	return `${output}\n\n[macOS hint] ${hints.join(" ")}`;
+}

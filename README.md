@@ -36,6 +36,7 @@ packages/
   cron/
   delayed-action/
   diff-review/
+  enhanced-bash/
   generative-ui/
   headroom/              (deprecated)
   idle-screensaver/
@@ -138,6 +139,7 @@ pi install npm:@ryan_nookpi/pi-extension-cross-agent
 pi install npm:@ryan_nookpi/pi-extension-cron
 pi install npm:@ryan_nookpi/pi-extension-delayed-action
 pi install npm:@ryan_nookpi/pi-extension-diff-review
+pi install npm:@ryan_nookpi/pi-extension-enhanced-bash
 pi install npm:@ryan_nookpi/pi-extension-generative-ui
 pi install npm:@ryan_nookpi/pi-extension-idle-screensaver
 pi install npm:@ryan_nookpi/pi-extension-memory-layer

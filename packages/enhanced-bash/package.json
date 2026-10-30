@@ -1,0 +1,59 @@
+{
+	"name": "@ryan_nookpi/pi-extension-enhanced-bash",
+	"version": "0.1.0",
+	"description": "A bash tool with Korean UI titles and optional background execution for pi.",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Jonghakseo/pi-extension.git",
+		"directory": "packages/enhanced-bash"
+	},
+	"bugs": {
+		"url": "https://github.com/Jonghakseo/pi-extension/issues"
+	},
+	"homepage": "https://github.com/Jonghakseo/pi-extension/tree/main/packages/enhanced-bash#readme",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"bash",
+		"background-jobs"
+	],
+	"files": [
+		"index.ts",
+		"bash-tool.ts",
+		"bash-ui.ts",
+		"foreground.ts",
+		"platform.ts",
+		"background/*.ts",
+		"!background/*.test.ts",
+		"README.md"
+	],
+	"pi": {
+		"extensions": [
+			"./index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"typebox": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-ai": {
+			"optional": true
+		},
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		},
+		"@earendil-works/pi-tui": {
+			"optional": true
+		},
+		"typebox": {
+			"optional": true
+		}
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
