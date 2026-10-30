@@ -45,7 +45,7 @@ describe("BSD failure hints", () => {
 	// Messages captured from macOS 27 tools and /bin/bash 3.2.
 	it.each([
 		['sed: 1: "f\n": invalid command code f', "sed -i ''"],
-		["/bin/bash: timeout: command not found", "timeout parameter"],
+		["/bin/bash: timeout: command not found", "runInBackground with timeout"],
 		["grep: invalid option -- P", "grep -E"],
 		["head: illegal line count -- 0", "sed '$d'"],
 		["head: illegal line count -- -1", "sed '$d'"],

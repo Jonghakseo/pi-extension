@@ -1,6 +1,6 @@
 /** biome-ignore-all lint/suspicious/noExplicitAny: tool results are read through lightweight fixtures. */
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BashOperations, ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -98,7 +98,7 @@ describe("foreground bash", () => {
 		await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 	});
 
-	async function setup() {
+	async function setup(contextOverrides: Record<string, unknown> = {}) {
 		vi.stubEnv("PI_ENHANCED_BASH_SYNC_WINDOW_MS", "0");
 		const cwd = await mkdtemp(join(tmpdir(), "enhanced-bash-foreground-"));
 		directories.push(cwd);
@@ -119,6 +119,7 @@ describe("foreground bash", () => {
 			hasUI: false,
 			model: undefined,
 			sessionManager: { getSessionId: () => "foreground-test", getSessionFile: () => undefined },
+			...contextOverrides,
 		} as unknown as ExtensionContext;
 		type Run = (params: Record<string, unknown>, signal?: AbortSignal) => Promise<any>;
 		const call =
@@ -224,6 +225,86 @@ describe("foreground bash", () => {
 	});
 });
 
+describe("foreground bash adoption races", () => {
+	const directories: string[] = [];
+
+	afterEach(async () => {
+		vi.unstubAllEnvs();
+		await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+	});
+
+	async function setup(contextOverrides: (cwd: string) => Record<string, unknown> = () => ({})) {
+		vi.stubEnv("PI_ENHANCED_BASH_SYNC_WINDOW_MS", "0");
+		const cwd = await mkdtemp(join(tmpdir(), "enhanced-bash-adopt-"));
+		directories.push(cwd);
+		const tools: Record<string, ToolDefinition> = {};
+		const handlers = new Map<string, () => unknown>();
+		const sendMessage = vi.fn();
+		const host = {
+			on: (event: string, handler: () => unknown) => handlers.set(event, handler),
+			sendMessage,
+			registerTool(definition: ToolDefinition) {
+				tools[definition.name] = definition;
+			},
+		};
+		enhancedBash(host as unknown as ExtensionAPI);
+		const context = {
+			cwd,
+			mode: "print",
+			hasUI: false,
+			model: undefined,
+			sessionManager: { getSessionId: () => "adopt-race-test", getSessionFile: () => undefined },
+			...contextOverrides(cwd),
+		} as unknown as ExtensionContext;
+		return {
+			cwd,
+			bash: (params: Record<string, unknown>, signal?: AbortSignal) =>
+				(tools.bash?.execute as any)("call", params, signal, undefined, context),
+			sendMessage,
+			shutdown: () => handlers.get("session_shutdown")?.(),
+		};
+	}
+
+	it("kills the command and reports nothing when the call is aborted while the background accepts it", async () => {
+		const controller = new AbortController();
+		let armed = false;
+		// The job is built synchronously after the last abort check, so aborting there lands inside acceptance.
+		const { bash, cwd, sendMessage, shutdown } = await setup(() => ({
+			isProjectTrusted: () => {
+				if (armed) controller.abort();
+				return false;
+			},
+		}));
+		try {
+			const pidFile = join(cwd, "pid");
+			setTimeout(() => {
+				armed = true;
+			}, 100);
+			await expect(
+				bash({ command: `echo $$ > ${pidFile}; exec sleep 30`, title: "race", timeout: 0.3 }, controller.signal),
+			).rejects.toThrow("Command aborted");
+			const pid = Number((await readFile(pidFile, "utf8")).trim());
+			await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 5_000 });
+			await new Promise((resolve) => setTimeout(resolve, 600));
+			expect(sendMessage).not.toHaveBeenCalled();
+		} finally {
+			await shutdown();
+		}
+	}, 15_000);
+
+	it("accepts a background start with a timeout beyond the timer range", async () => {
+		const { bash, shutdown } = await setup();
+		try {
+			const started = await bash({ command: "true", title: "huge", runInBackground: true, timeout: 1e12 });
+			expect(started.details.error).toBeUndefined();
+			expect(started.details.jobId).toBeTruthy();
+			await vi.waitFor(async () => expect(await bash({ command: "true", title: "noop" })).toBeTruthy());
+		} finally {
+			await shutdown();
+		}
+	});
+});
+
 describe("foreground move boundary", () => {
 	const context = {
 		cwd: tmpdir(),
@@ -305,10 +386,32 @@ describe("foreground move boundary", () => {
 		expect(MAX_TIMER_SECONDS * 1000).toBeLessThanOrEqual(2 ** 31 - 1);
 	});
 
+	it("keeps only the end of a huge unterminated preview when the command moves", async () => {
+		const adopt = vi.fn(async (_moved: AdoptRequest) => ({ content: [], details: {} }));
+		// 700 KB of progress updates separated by lone carriage returns, the last one being "step 9999".
+		const progress = `${Array.from({ length: 10_000 }, (_, i) => `step ${i} ${"#".repeat(60)}`).join("\r")}`;
+		await runForeground(request({ operations: hangingOperations(progress), adopt }));
+		const recent = adopt.mock.calls[0]?.[0].recentLines ?? [];
+		expect(Buffer.byteLength(recent.join("\n"))).toBeLessThanOrEqual(8 * 1024);
+		expect(recent.length).toBeLessThanOrEqual(20);
+		expect(recent.at(-1)).toContain("step 9999");
+	});
+
+	it("caps the output carried by an adoption failure", async () => {
+		const adopt = async () => {
+			throw new Error("background bash is shutting down");
+		};
+		const progress = "x".repeat(600_000);
+		const error = await runForeground(request({ operations: hangingOperations(progress), adopt })).catch((e) => e);
+		expect(error.message).toContain("background bash is shutting down");
+		expect(Buffer.byteLength(error.message)).toBeLessThan(9 * 1024);
+	});
+
 	it("ignores a non-finite timeout", () => {
 		expect(
 			prepareBashArguments({ command: "x", title: "t", timeout: Number.POSITIVE_INFINITY }).timeout,
 		).toBeUndefined();
 		expect(prepareBashArguments({ command: "x", title: "t", timeout: 5 }).timeout).toBe(5);
+		expect(prepareBashArguments({ command: "x", title: "t", timeout: 1e12 }).timeout).toBe(MAX_TIMER_SECONDS);
 	});
 });

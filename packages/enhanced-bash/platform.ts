@@ -64,7 +64,7 @@ export function platformGuidance(options: ShellOptions, platform: NodeJS.Platfor
 	const shell = usesLegacyMacBash(options, platform)
 		? " The shell is macOS's bash 3.2: mapfile, readarray, and associative arrays (declare -A) are unavailable."
 		: "";
-	return `This machine runs macOS with BSD command-line tools, not GNU. sed -i needs a suffix argument (sed -i '' 's/a/b/' file), and sed has no \\U or \\L. There is no timeout command; use this tool's timeout parameter. grep -P is unsupported; use grep -E or perl. head rejects 0 and negative counts; use sed '$d' to drop the last line. Use date -v or date -j -f instead of date -d, stat -f instead of stat -c, and -exec instead of find -printf.${shell}`;
+	return `This machine runs macOS with BSD command-line tools, not GNU. sed -i needs a suffix argument (sed -i '' 's/a/b/' file), and sed has no \\U or \\L. There is no timeout command; to cap how long a command may run, use runInBackground with timeout (the job is killed at the limit), and stop jobs with bash_stop. grep -P is unsupported; use grep -E or perl. head rejects 0 and negative counts; use sed '$d' to drop the last line. Use date -v or date -j -f instead of date -d, stat -f instead of stat -c, and -exec instead of find -printf.${shell}`;
 }
 
 interface FailureHint {
@@ -79,7 +79,7 @@ const FAILURE_HINTS: FailureHint[] = [
 	},
 	{
 		pattern: /\b(g?timeout): command not found/,
-		hint: "macOS has no timeout command: drop it and set this tool's timeout parameter instead.",
+		hint: "macOS has no timeout command: drop it, or to cap the run time use runInBackground with timeout (the job is killed at the limit).",
 	},
 	{
 		pattern: /grep: invalid option -- P/,

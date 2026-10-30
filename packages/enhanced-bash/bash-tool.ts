@@ -19,7 +19,7 @@ import {
 	renderExpandedOutput,
 	reuseText,
 } from "./bash-ui.js";
-import { runForeground } from "./foreground.js";
+import { MAX_TIMER_SECONDS, runForeground } from "./foreground.js";
 import { platformGuidance, resolveShellOptions } from "./platform.js";
 
 export const FOREGROUND_DEFAULT_TIMEOUT_SECONDS = 300;
@@ -70,7 +70,11 @@ export function prepareBashArguments(args: unknown): EnhancedBashParams {
 	const a = args as Record<string, unknown>;
 	const command = typeof a.command === "string" ? a.command : "";
 	const title = typeof a.title === "string" && a.title.length > 0 ? a.title : deriveTitle(command);
-	const timeout = typeof a.timeout === "number" && Number.isFinite(a.timeout) && a.timeout >= 0 ? a.timeout : undefined;
+	// Both the foreground wait and a background job's limit end up in a timer, so neither may exceed its range.
+	const timeout =
+		typeof a.timeout === "number" && Number.isFinite(a.timeout) && a.timeout >= 0
+			? Math.min(a.timeout, MAX_TIMER_SECONDS)
+			: undefined;
 	const runInBackground = a.runInBackground === true;
 	return { command, title, timeout, runInBackground };
 }

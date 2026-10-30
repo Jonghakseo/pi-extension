@@ -294,8 +294,9 @@ export function registerBackgroundRuntime(host: ExtensionAPI): BackgroundRuntime
 		const jobId = started.details.jobId;
 		if (params.signal?.aborted) {
 			// The user interrupted while the job was being accepted; a detached job would wake the agent again.
-			await manager.kill(jobId);
-			acknowledge(jobId);
+			const killed = await manager.kill(jobId);
+			// Same rule as bash_stop: a job that finished on its own keeps its completion.
+			if (killed?.status === "killed") acknowledge(jobId);
 			throw new Error("Command aborted");
 		}
 		jobSessions.set(jobId, sessionId);

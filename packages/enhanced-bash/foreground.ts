@@ -18,6 +18,9 @@ export const MAX_ADOPTED_BACKLOG_BYTES = 1024 * 1024;
 /** setTimeout stores its delay in 32 bits, and a larger value fires after 1ms instead of waiting. */
 export const MAX_TIMER_SECONDS = 2_147_483;
 const RECENT_LINES = 20;
+/** A lone-\r progress bar can be one 1 MiB "line", so the preview is capped by bytes as well as lines. */
+const RECENT_OUTPUT_BYTES = 8 * 1024;
+const RECENT_CUT_PREFIX = "...";
 const BACKLOG_DROPPED_MARKER = Buffer.from("[earlier output omitted when the command moved to the background]\n");
 
 export interface AdoptRequest {
@@ -47,6 +50,16 @@ export interface ForegroundRequest {
 	operations?: BashOperations;
 }
 
+/** Keeps the end of `value` within `maxBytes`, cutting on a character boundary and marking the cut. */
+function tailUtf8(value: string, maxBytes: number): string {
+	const bytes = Buffer.from(value, "utf8");
+	if (bytes.length <= maxBytes) return value;
+	let start = bytes.length - (maxBytes - RECENT_CUT_PREFIX.length);
+	// Skip UTF-8 continuation bytes so the cut never lands inside a character.
+	while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start++;
+	return RECENT_CUT_PREFIX + bytes.subarray(start).toString("utf8");
+}
+
 /**
  * Keeps the tail of the output seen before a command moves to the background, so the job log starts with
  * the lines that led up to it instead of whatever arrives after the move.
@@ -69,8 +82,13 @@ class Backlog {
 	recentLines(count: number): string[] {
 		const text = Buffer.concat(this.chunks)
 			.toString("utf8")
-			.replace(/\r?\n$/, "");
-		return text === "" ? [] : text.split(/\r?\n/).slice(-count);
+			.replace(/(\r\n|\r|\n)$/, "");
+		if (text === "") return [];
+		const joined = text
+			.split(/\r\n|\r|\n/)
+			.slice(-count)
+			.join("\n");
+		return tailUtf8(joined, RECENT_OUTPUT_BYTES).split("\n");
 	}
 
 	drain(): Buffer[] {
