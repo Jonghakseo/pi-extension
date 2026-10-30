@@ -34,34 +34,19 @@ export interface EnhancedBashParams {
 function description(syncWindowMs: number): string {
 	const platform = platformGuidance(resolveShellOptions(process.cwd()));
 	const wait =
-		syncWindowMs > 0
-			? ` A background start waits up to ${formatSyncWindow(syncWindowMs)} and returns the result inline if the command finishes by then.`
-			: "";
-	return `Execute a bash command in the current working directory.
-
-Title is a short one-sentence summary of what the command does, shown in the UI. Write the title in the language the user is using.
-
-A foreground command that is still running when its timeout (default ${FOREGROUND_DEFAULT_TIMEOUT_SECONDS}s) ends is not killed: it moves to the background and keeps running for up to ${BACKGROUND_DEFAULT_TIMEOUT_SECONDS}s more.
-
-Set runInBackground to true for finite, non-interactive commands when the next action does not need the result immediately.${wait} Background results arrive automatically; do not sleep or poll to wait. Stop a background job with bash_stop. TUI, REPL, and commands requiring stdin are unsupported.${platform ? `\n\n${platform}` : ""}`;
+		syncWindowMs > 0 ? ` (runInBackground returns inline if done within ${formatSyncWindow(syncWindowMs)})` : "";
+	return `Run a bash command. A foreground command still running at its timeout moves to the background instead of being killed. Background results arrive automatically${wait}; do not sleep or poll. No TUI, REPL, or stdin.${platform ? `\n\n${platform}` : ""}`;
 }
 
 export const bashParameters = Type.Object({
-	command: Type.String({ description: "The bash command to execute" }),
-	title: Type.String({
-		description: "A short one-sentence summary of what the command does, written in the user's language.",
-	}),
+	command: Type.String(),
+	title: Type.String({ description: "Short UI summary, in the user's language." }),
 	timeout: Type.Optional(
 		Type.Number({
-			description: `Seconds to wait in the foreground before the command moves to the background (default ${FOREGROUND_DEFAULT_TIMEOUT_SECONDS}), or with runInBackground the seconds the job may run (default ${BACKGROUND_DEFAULT_TIMEOUT_SECONDS}). 0 removes the limit.`,
+			description: `Seconds. Foreground: wait before moving to the background (default ${FOREGROUND_DEFAULT_TIMEOUT_SECONDS}). Background: run limit (default ${BACKGROUND_DEFAULT_TIMEOUT_SECONDS}). 0: no limit; never 0 for servers or watchers.`,
 		}),
 	),
-	runInBackground: Type.Optional(
-		Type.Boolean({
-			description:
-				"Run as a background job whose result is reported automatically when it finishes. Defaults to false.",
-		}),
-	),
+	runInBackground: Type.Optional(Type.Boolean()),
 });
 
 /** Fills a missing title so the UI header and background job list always have something to show. */
@@ -85,11 +70,7 @@ export function registerBashTool(pi: ExtensionAPI, background: BackgroundRuntime
 		label: "Bash",
 		description: description(background.syncWindowMs),
 		parameters: bashParameters,
-		promptSnippet: "Execute commands in a bash shell; use title to describe the command's purpose",
-		promptGuidelines: [
-			"Always provide a concise title for bash commands describing what the command accomplishes, written in the language the user is using.",
-			"Use bash with runInBackground: true for long finite commands whose result is not needed immediately. Background results arrive automatically, so do not sleep or poll; stop a job with bash_stop.",
-		],
+		promptSnippet: "Run bash commands",
 		prepareArguments: prepareBashArguments,
 		renderCall(args, theme, context) {
 			const params = args as Partial<EnhancedBashParams>;

@@ -2,7 +2,7 @@ import { formatSyncWindow } from "./tool-schema.js";
 import type { BashAsyncJob, StartResultDetails, StatusResultDetails } from "./types.js";
 
 export const BACKGROUND_GUIDANCE =
-	"Do not sleep or poll to wait. Continue only with work that does not depend on this job; otherwise end the turn. The result arrives automatically when the job succeeds, fails, or times out. Read the log only if early output is needed. Stop the job with bash_stop; a stopped job is not reported.";
+	"The result arrives automatically; do not sleep or poll. Read the log only for early output. Stop with bash_stop.";
 
 export function renderStart(details: StartResultDetails, syncWindowMs = 0): string {
 	const still = syncWindowMs > 0 ? ` and is still ${details.status} after ${formatSyncWindow(syncWindowMs)}` : "";

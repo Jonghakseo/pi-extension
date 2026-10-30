@@ -242,8 +242,8 @@ describe("background bash start sync window", () => {
 			vi.stubEnv("PI_ENHANCED_BASH_SYNC_WINDOW_MS", value);
 			return register().bash;
 		};
-		expect(registerWith("3000").description).toContain("waits up to 3s");
-		expect(registerWith("0").description).not.toMatch(/waits up to/);
+		expect(registerWith("3000").description).toContain("within 3s");
+		expect(registerWith("0").description).not.toMatch(/inline if done/);
 	});
 
 	it("returns a command that finishes within the window inline and never reports it again", async () => {

@@ -61,10 +61,8 @@ export function usesLegacyMacBash(options: ShellOptions, platform: NodeJS.Platfo
 /** Tells the model up front which GNU habits fail here, so it does not learn them from errors. */
 export function platformGuidance(options: ShellOptions, platform: NodeJS.Platform = process.platform): string {
 	if (platform !== "darwin") return "";
-	const shell = usesLegacyMacBash(options, platform)
-		? " The shell is macOS's bash 3.2: mapfile, readarray, and associative arrays (declare -A) are unavailable."
-		: "";
-	return `This machine runs macOS with BSD command-line tools, not GNU. sed -i needs a suffix argument (sed -i '' 's/a/b/' file), and sed has no \\U or \\L. There is no timeout command; to cap how long a command may run, use runInBackground with timeout (the job is killed at the limit), and stop jobs with bash_stop. grep -P is unsupported; use grep -E or perl. head rejects 0 and negative counts; use sed '$d' to drop the last line. Use date -v or date -j -f instead of date -d, stat -f instead of stat -c, and -exec instead of find -printf.${shell}`;
+	const shell = usesLegacyMacBash(options, platform) ? " bash 3.2: no mapfile, readarray, or declare -A." : "";
+	return `macOS BSD tools: sed -i '' (no \\U/\\L); no timeout command (use runInBackground + timeout); no grep -P (use -E); head -n needs a positive count; date -v, stat -f; no find -printf.${shell}`;
 }
 
 interface FailureHint {

@@ -207,13 +207,9 @@ export function registerBackgroundRuntime(host: ExtensionAPI): BackgroundRuntime
 	pi.registerTool({
 		name: STOP_TOOL_NAME,
 		label: "Bash Stop",
-		description:
-			"Stop a background bash job by its job ID. A job you stop is not reported again. Background jobs come from bash with runInBackground, or from a foreground command that outlived its timeout.",
-		parameters: Type.Object({
-			jobId: Type.String({ description: "Job ID returned when the command moved to the background." }),
-		}),
+		description: "Stop a background bash job.",
+		parameters: Type.Object({ jobId: Type.String() }),
 		executionMode: "parallel",
-		promptSnippet: "Stop a background bash job with bash_stop.",
 		renderCall(args, theme) {
 			const jobId = (args as { jobId?: unknown }).jobId;
 			const label = theme.fg("toolTitle", theme.bold(STOP_TOOL_NAME));
