@@ -350,21 +350,6 @@ describe("background bash start sync window", () => {
 		}
 	});
 
-	it("does not spend the window on a job queued behind the concurrency limit", async () => {
-		vi.stubEnv("PI_ENHANCED_BASH_SYNC_WINDOW_MS", "200");
-		vi.stubEnv("PI_ENHANCED_BASH_MAX_CONCURRENCY", "1");
-		const { start, shutdown } = await setup();
-		try {
-			await start("sleep 30");
-			const begun = Date.now();
-			const queued = await start("printf queued");
-			expect(Date.now() - begun).toBeLessThan(150);
-			expect(queued.details).toMatchObject({ status: "queued" });
-		} finally {
-			await shutdown();
-		}
-	});
-
 	it("kills the job when the tool call is interrupted during the window", async () => {
 		vi.stubEnv("PI_ENHANCED_BASH_SYNC_WINDOW_MS", "10000");
 		const { start, shutdown, sendMessage } = await setup();

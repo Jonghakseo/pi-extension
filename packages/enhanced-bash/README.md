@@ -20,7 +20,7 @@ Do not load this package alongside `bash-async` or another extension that regist
 | --- | --- |
 | `command` | Command to run. |
 | `title` | Short summary shown in the UI, written in the user's language. A missing title falls back to the command's first word. |
-| `timeout` | Seconds. In the foreground, how long to wait before the command moves to the background (default 300). With `runInBackground`, how long the job may run (default 3,600). `0` removes the limit. |
+| `timeout` | Seconds. In the foreground, how long to wait before the command moves to the background (default 300). With `runInBackground`, how long the job may run (default 3,600). `0` removes the limit: a foreground command then waits until it finishes and never moves to the background, and a background job runs until it finishes or is stopped. |
 | `runInBackground` | Start a background job instead of waiting. Defaults to `false`. |
 
 A foreground command runs through pi's built-in bash tool, so streaming, output truncation, and error text match the built-in. When it is still running at its timeout, it is not killed. It becomes a background job, the tool returns the job ID and the last 20 lines printed so far, and the command may keep running for up to 3,600 more seconds.
@@ -41,7 +41,7 @@ On macOS the tool description also lists the GNU habits that fail with BSD tools
 
 ## Limits and retention
 
-- Up to four background jobs started with `runInBackground` run at once; more wait in a queue. Set `PI_ENHANCED_BASH_MAX_CONCURRENCY` to change the limit. Commands that move to the background from the foreground do not wait, but each occupies one of these slots while it runs.
+- Background jobs are not limited in how many run at once.
 - The background start window is 10 seconds. Set `PI_ENHANCED_BASH_SYNC_WINDOW_MS` to another value up to 60,000, or to `0` to always return immediately.
 - At most 20 active or queued jobs are retained.
 - Job logs are written under the operating system's temporary directory in `pi-enhanced-bash`, kept for up to 24 hours, and share a 1 GiB quota. Each log stops at 20 MiB.

@@ -250,8 +250,7 @@ export function registerBackgroundRuntime(host: ExtensionAPI): BackgroundRuntime
 		if (!started.ok) return errorResult(started.error);
 		const jobId = started.details.jobId;
 		jobSessions.set(jobId, sessionId);
-		// start drains synchronously, so a job still queued here waits for a concurrency slot, not for a moment.
-		// Blocking on it would spend the whole window and learn nothing.
+		// start drains synchronously, so a job that is not running yet will not start within the window.
 		if (windowMs <= 0 || started.details.status !== "running")
 			return result(renderStart(started.details), started.details);
 		const terminal = await manager.waitForTerminal(jobId, windowMs, signal);

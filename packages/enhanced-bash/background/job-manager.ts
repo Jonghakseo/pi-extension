@@ -22,7 +22,8 @@ import {
 	terminalStatusForCause,
 } from "./types.js";
 
-export const DEFAULT_MAX_CONCURRENCY = 4;
+/** Background jobs are not throttled by default; a finite limit exists only for tests that exercise the queue. */
+export const DEFAULT_MAX_CONCURRENCY = Number.POSITIVE_INFINITY;
 export const MAX_RETAINED_JOBS = 20;
 export const COMPLETED_JOB_TTL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_KILL_GRACE_MS = 5_000;
@@ -280,8 +281,9 @@ export class JobManager {
 	private admissionClosed = false;
 
 	constructor(private readonly options: JobManagerOptions = {}) {
-		const configured = options.maxConcurrency ?? Number(process.env.PI_ENHANCED_BASH_MAX_CONCURRENCY);
-		this.maxConcurrency = Number.isInteger(configured) && configured > 0 ? configured : DEFAULT_MAX_CONCURRENCY;
+		const configured = options.maxConcurrency;
+		this.maxConcurrency =
+			configured !== undefined && Number.isInteger(configured) && configured > 0 ? configured : DEFAULT_MAX_CONCURRENCY;
 		this.logsDirectory = options.logsDirectory ?? join(tmpdir(), "pi-enhanced-bash");
 		this.now = options.now ?? Date.now;
 		this.executeAdapter = options.execute ?? executeWithPi;
