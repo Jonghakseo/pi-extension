@@ -1,7 +1,7 @@
 {
 	"name": "@ryan_nookpi/pi-extension-enhanced-bash",
 	"version": "0.1.0",
-	"description": "A bash tool with Korean UI titles and optional background execution for pi.",
+	"description": "A bash tool with UI titles and optional background execution for pi.",
 	"license": "MIT",
 	"repository": {
 		"type": "git",

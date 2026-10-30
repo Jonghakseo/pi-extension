@@ -10,8 +10,13 @@ import type { ExecutionAdapter } from "./background/job-manager.js";
 import { resolveShellOptions, withFailureHints } from "./platform.js";
 
 const DETACHED = "enhanced-bash:detached";
-/** Output kept for the background log once a command moves there; older output stays only in the tool result. */
+/**
+ * Output kept for the background log once a command moves there. Older output beyond this is dropped: the
+ * log gets a marker line in its place, and only the tool result's last lines show what came before.
+ */
 export const MAX_ADOPTED_BACKLOG_BYTES = 1024 * 1024;
+/** setTimeout stores its delay in 32 bits, and a larger value fires after 1ms instead of waiting. */
+export const MAX_TIMER_SECONDS = 2_147_483;
 const RECENT_LINES = 20;
 const BACKLOG_DROPPED_MARKER = Buffer.from("[earlier output omitted when the command moved to the background]\n");
 
@@ -22,6 +27,8 @@ export interface AdoptRequest {
 	/** Last lines printed before the move, including an unterminated final line. */
 	recentLines: string[];
 	execute: ExecutionAdapter;
+	/** The call's abort signal, so an interrupt that lands during adoption still cancels the job. */
+	signal?: AbortSignal;
 }
 
 export interface ForegroundRequest {
@@ -81,7 +88,7 @@ class Backlog {
  * instead of being killed.
  */
 export async function runForeground(request: ForegroundRequest): Promise<AgentToolResult<unknown>> {
-	const shell = resolveShellOptions(request.context.cwd);
+	const shell = resolveShellOptions(request.context.cwd, {}, request.context.isProjectTrusted?.() ?? false);
 	const local = request.operations ?? createLocalBashOperations({ shellPath: shell.shellPath });
 	const processAbort = new AbortController();
 	const backlog = new Backlog();
@@ -110,12 +117,14 @@ export async function runForeground(request: ForegroundRequest): Promise<AgentTo
 				const timer =
 					request.waitSeconds > 0
 						? setTimeout(() => {
+								// An interrupt that lands at the boundary wins: the run is being cancelled, not moved.
+								if (options.signal?.aborted) return;
 								detached = true;
 								options.signal?.removeEventListener("abort", forwardAbort);
 								// Output that arrives before the background job takes over must not be lost.
 								sink = (data) => backlog.push(data);
 								reject(new Error(DETACHED));
-							}, request.waitSeconds * 1000)
+							}, Math.min(request.waitSeconds, MAX_TIMER_SECONDS) * 1000)
 						: undefined;
 				running.then(
 					(result) => {
@@ -167,7 +176,7 @@ export async function runForeground(request: ForegroundRequest): Promise<AgentTo
 				? setTimeout(() => {
 						timedOut = true;
 						processAbort.abort();
-					}, limitSeconds * 1000)
+					}, Math.min(limitSeconds, MAX_TIMER_SECONDS) * 1000)
 				: undefined;
 		const timeoutError = () => new Error(`timeout:${limitSeconds}`);
 		return running.then(
@@ -183,18 +192,26 @@ export async function runForeground(request: ForegroundRequest): Promise<AgentTo
 		);
 	};
 
+	const recentLines = backlog.recentLines(RECENT_LINES);
 	try {
 		return await request.adopt({
 			command: request.command,
 			title: request.title,
 			waitedSeconds: request.waitSeconds,
-			recentLines: backlog.recentLines(RECENT_LINES),
+			recentLines,
 			execute: adoptExecution,
+			signal: request.signal,
 		});
 	} catch (error) {
 		// Nothing owns the process once adoption fails, so it must not keep running unseen.
 		processAbort.abort();
 		running.catch(() => {});
-		throw error;
+		// The pre-move output only exists in this call, so the error has to carry it.
+		const message = request.signal?.aborted
+			? "Command aborted"
+			: error instanceof Error
+				? error.message
+				: String(error);
+		throw new Error(recentLines.length > 0 ? `${recentLines.join("\n")}\n\n${message}` : message);
 	}
 }

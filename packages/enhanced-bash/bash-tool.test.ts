@@ -3,8 +3,10 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { BashOperations, ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { prepareBashArguments } from "./bash-tool.ts";
+import { type AdoptRequest, type ForegroundRequest, MAX_TIMER_SECONDS, runForeground } from "./foreground.ts";
 import enhancedBash from "./index.ts";
 
 function makeBashTool(): ToolDefinition {
@@ -219,5 +221,94 @@ describe("foreground bash", () => {
 		} finally {
 			await shutdown();
 		}
+	});
+});
+
+describe("foreground move boundary", () => {
+	const context = {
+		cwd: tmpdir(),
+		isProjectTrusted: () => false,
+		sessionManager: { getSessionId: () => "boundary-test", getSessionFile: () => undefined },
+	} as unknown as ExtensionContext;
+
+	/** A command that prints `output` and then ends only when aborted, `abortDelayMs` after the abort. */
+	function hangingOperations(output: string, abortDelayMs = 0): BashOperations {
+		return {
+			exec: (_command, _cwd, { onData, signal }) =>
+				new Promise((_resolve, reject) => {
+					onData(Buffer.from(output));
+					signal?.addEventListener("abort", () => setTimeout(() => reject(new Error("aborted")), abortDelayMs), {
+						once: true,
+					});
+				}),
+		};
+	}
+
+	function request(overrides: Partial<ForegroundRequest>): ForegroundRequest {
+		return {
+			toolCallId: "call",
+			command: "irrelevant",
+			title: "boundary",
+			waitSeconds: 0.1,
+			backgroundTimeoutSeconds: 60,
+			context: context as ForegroundRequest["context"],
+			adopt: async () => ({ content: [{ type: "text", text: "moved" }], details: {} }),
+			...overrides,
+		};
+	}
+
+	it("lets an interrupt that lands at the timeout boundary cancel the command instead of moving it", async () => {
+		const adopt = vi.fn(async (_moved: AdoptRequest) => ({ content: [], details: {} }));
+		const controller = new AbortController();
+		// The abort arrives just before the wait ends, and the process takes longer than that to exit.
+		setTimeout(() => controller.abort(), 60);
+		await expect(
+			runForeground(request({ operations: hangingOperations("partial", 120), signal: controller.signal, adopt })),
+		).rejects.toThrow("aborted");
+		expect(adopt).not.toHaveBeenCalled();
+	});
+
+	it("puts the output printed before the move into the error when the background cannot take the command", async () => {
+		const adopt = async () => {
+			throw new Error("background bash is shutting down");
+		};
+		await expect(
+			runForeground(request({ operations: hangingOperations("line one\nline two"), adopt })),
+		).rejects.toThrow(/line one\nline two\n\nbackground bash is shutting down/);
+	});
+
+	it("reports an interrupt during adoption as an aborted command with the earlier output", async () => {
+		const controller = new AbortController();
+		const adopt = async () => {
+			controller.abort();
+			throw new Error("background bash start was cancelled before job acceptance.");
+		};
+		await expect(
+			runForeground(request({ operations: hangingOperations("before"), signal: controller.signal, adopt })),
+		).rejects.toThrow("before\n\nCommand aborted");
+	});
+
+	it("keeps waiting for a timeout too large for a timer instead of moving the command at once", async () => {
+		const adopt = vi.fn(async (_moved: AdoptRequest) => ({ content: [], details: {} }));
+		const operations: BashOperations = {
+			exec: (_command, _cwd, { onData }) =>
+				new Promise((resolve) =>
+					setTimeout(() => {
+						onData(Buffer.from("done"));
+						resolve({ exitCode: 0 });
+					}, 80),
+				),
+		};
+		const result = await runForeground(request({ operations, waitSeconds: 1e12, adopt }));
+		expect(result.content[0]).toMatchObject({ text: "done" });
+		expect(adopt).not.toHaveBeenCalled();
+		expect(MAX_TIMER_SECONDS * 1000).toBeLessThanOrEqual(2 ** 31 - 1);
+	});
+
+	it("ignores a non-finite timeout", () => {
+		expect(
+			prepareBashArguments({ command: "x", title: "t", timeout: Number.POSITIVE_INFINITY }).timeout,
+		).toBeUndefined();
+		expect(prepareBashArguments({ command: "x", title: "t", timeout: 5 }).timeout).toBe(5);
 	});
 });

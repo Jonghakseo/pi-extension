@@ -35,13 +35,13 @@ Stops a background job by `jobId`. A stopped job is not reported again. A job th
 
 ## Shell and macOS
 
-Commands run in the shell pi would use, with pi's global `shellPath` and `shellCommandPrefix` settings applied. Project-level shell settings are ignored, because an extension cannot tell whether the project is trusted. On macOS with no `shellPath` configured, a Homebrew bash (`/opt/homebrew/bin/bash` or `/usr/local/bin/bash`) replaces the system's bash 3.2, so `mapfile`, `readarray`, and associative arrays work. Set `PI_ENHANCED_BASH_SHELL` to choose a shell explicitly; `/bin/bash` restores pi's default.
+Commands run in the shell pi would use, with pi's global `shellPath` and `shellCommandPrefix` settings applied. Project-level shell settings apply only when pi trusts the project, so a cloned repository cannot choose which binary runs your commands. On macOS with no `shellPath` configured, a Homebrew bash (`/opt/homebrew/bin/bash` or `/usr/local/bin/bash`) replaces the system's bash 3.2, so `mapfile`, `readarray`, and associative arrays work. Set `PI_ENHANCED_BASH_SHELL` to choose a shell explicitly; `/bin/bash` restores pi's default.
 
 On macOS the tool description also lists the GNU habits that fail with BSD tools, such as `sed -i` without a suffix, `timeout`, `grep -P`, and `head -n 0`. When a foreground or background command fails with one of these known BSD errors, the result ends with a `[macOS hint]` line naming the BSD form. Commands are never rewritten.
 
 ## Limits and retention
 
-- Up to four background jobs started with `runInBackground` run at once; more wait in a queue. Set `PI_ENHANCED_BASH_MAX_CONCURRENCY` to change the limit. Commands that move to the background from the foreground are already running and do not wait.
+- Up to four background jobs started with `runInBackground` run at once; more wait in a queue. Set `PI_ENHANCED_BASH_MAX_CONCURRENCY` to change the limit. Commands that move to the background from the foreground do not wait, but each occupies one of these slots while it runs.
 - The background start window is 10 seconds. Set `PI_ENHANCED_BASH_SYNC_WINDOW_MS` to another value up to 60,000, or to `0` to always return immediately.
 - At most 20 active or queued jobs are retained.
 - Job logs are written under the operating system's temporary directory in `pi-enhanced-bash`, kept for up to 24 hours, and share a 1 GiB quota. Each log stops at 20 MiB.

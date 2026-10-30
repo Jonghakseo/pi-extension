@@ -92,6 +92,8 @@ export interface ExecutionJob {
 	timeoutSeconds: number;
 	abortController: AbortController;
 	environment: SessionEnvironment;
+	/** Whether pi trusted the project when the job started, so its shell settings apply like pi's own. */
+	projectTrusted: boolean;
 }
 
 interface ExecutionBridge {
@@ -104,6 +106,7 @@ interface ManagedJob extends BashAsyncJob {
 	logWriter: JobLog;
 	abortController: AbortController;
 	environment: SessionEnvironment;
+	projectTrusted: boolean;
 	requestedCause?: JobTerminalCause;
 	execution?: Promise<void>;
 	executionBridge?: ExecutionBridge;
@@ -218,7 +221,7 @@ export function createBashAsyncOperations(
 
 async function executeWithPi({ job, onData }: ExecutionRequest): Promise<{ exitCode: number | null }> {
 	let executionResult: { exitCode: number | null } | undefined;
-	const shell = resolveShellOptions(job.cwd);
+	const shell = resolveShellOptions(job.cwd, {}, job.projectTrusted);
 	const operations = createBashAsyncOperations(createLocalBashOperations({ shellPath: shell.shellPath }), (data) =>
 		onData(data),
 	);
@@ -366,6 +369,7 @@ export class JobManager {
 			logWriter,
 			abortController: new AbortController(),
 			environment,
+			projectTrusted: input.context.isProjectTrusted?.() ?? false,
 			resolveSettlement,
 			settled,
 			slotAcquired: false,
@@ -584,6 +588,7 @@ export class JobManager {
 			timeoutSeconds: job.timeoutSeconds,
 			abortController: job.abortController,
 			environment: job.environment,
+			projectTrusted: job.projectTrusted,
 		};
 		const bridge: ExecutionBridge = {
 			onData: (data) => this.appendJobData(job, bridge, data),

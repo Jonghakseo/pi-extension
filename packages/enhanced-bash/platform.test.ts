@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { failureHints, platformGuidance, resolveShellOptions, withFailureHints } from "./platform.ts";
 
 describe("shell selection", () => {
@@ -21,6 +21,16 @@ describe("shell selection", () => {
 			shellPath: "/bin/bash",
 			commandPrefix: "shopt -s expand_aliases",
 		});
+	});
+
+	it("reads project shell settings only for a trusted project", () => {
+		const readSettings = vi.fn((_cwd: string, trusted: boolean) => (trusted ? { shellPath: "/project/bash" } : {}));
+		expect(resolve({ platform: "linux", readSettings }).shellPath).toBeUndefined();
+		expect(readSettings).toHaveBeenLastCalledWith("/work", false);
+		expect(resolveShellOptions("/work", { env: {}, platform: "linux", readSettings }, true).shellPath).toBe(
+			"/project/bash",
+		);
+		expect(readSettings).toHaveBeenLastCalledWith("/work", true);
 	});
 
 	it("warns about bash 3.2 only when macOS's own bash is in use", () => {
@@ -50,6 +60,12 @@ describe("BSD failure hints", () => {
 	});
 
 	it("leaves unrelated failures untouched", () => {
-		expect(withFailureHints("npm ERR! missing script: test")).toBe("npm ERR! missing script: test");
+		expect(withFailureHints("npm ERR! missing script: test", "darwin")).toBe("npm ERR! missing script: test");
+	});
+
+	it("adds hints only on macOS", () => {
+		const output = "grep: invalid option -- P";
+		expect(withFailureHints(output, "darwin")).toContain("[macOS hint]");
+		expect(withFailureHints(output, "linux")).toBe(output);
 	});
 });

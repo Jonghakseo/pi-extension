@@ -10,19 +10,19 @@ export interface ShellEnvironment {
 	platform?: NodeJS.Platform;
 	env?: NodeJS.ProcessEnv;
 	exists?: (path: string) => boolean;
-	readSettings?: (cwd: string) => ShellOptions;
+	readSettings?: (cwd: string, projectTrusted: boolean) => ShellOptions;
 }
 
 /** Homebrew installs bash 5 here; macOS's own /bin/bash is 3.2 and lacks mapfile and associative arrays. */
 export const MODERN_BASH_CANDIDATES = ["/opt/homebrew/bin/bash", "/usr/local/bin/bash"];
 
 /**
- * Project settings are ignored on purpose: an extension cannot tell whether the project is trusted, and a
- * project-level shellPath would otherwise run any binary a cloned repository names.
+ * Project settings count only when pi trusts the project, as in pi itself: otherwise a project-level
+ * shellPath would run any binary a cloned repository names.
  */
-function readPiSettings(cwd: string): ShellOptions {
+function readPiSettings(cwd: string, projectTrusted: boolean): ShellOptions {
 	try {
-		const settings = SettingsManager.create(cwd, undefined, { projectTrusted: false });
+		const settings = SettingsManager.create(cwd, undefined, { projectTrusted });
 		return { shellPath: settings.getShellPath(), commandPrefix: settings.getShellCommandPrefix() };
 	} catch {
 		return {};
@@ -33,11 +33,15 @@ function readPiSettings(cwd: string): ShellOptions {
  * Picks the shell the way pi's built-in bash does, except that on macOS a Homebrew bash replaces /bin/bash
  * when nothing is configured. PI_ENHANCED_BASH_SHELL overrides everything, so `/bin/bash` restores pi's choice.
  */
-export function resolveShellOptions(cwd: string, environment: ShellEnvironment = {}): ShellOptions {
+export function resolveShellOptions(
+	cwd: string,
+	environment: ShellEnvironment = {},
+	projectTrusted = false,
+): ShellOptions {
 	const env = environment.env ?? process.env;
 	const platform = environment.platform ?? process.platform;
 	const exists = environment.exists ?? existsSync;
-	const settings = (environment.readSettings ?? readPiSettings)(cwd);
+	const settings = (environment.readSettings ?? readPiSettings)(cwd, projectTrusted);
 	const override = env.PI_ENHANCED_BASH_SHELL?.trim();
 	if (override) return { ...settings, shellPath: override };
 	if (settings.shellPath) return settings;
@@ -112,8 +116,9 @@ export function failureHints(output: string): string[] {
 	return FAILURE_HINTS.filter(({ pattern }) => pattern.test(output)).map(({ hint }) => hint);
 }
 
-/** Appends recognised hints to failed output; output with no known mismatch is returned unchanged. */
-export function withFailureHints(output: string): string {
+/** Appends recognised hints to failed output on macOS; other platforms and unknown failures are returned unchanged. */
+export function withFailureHints(output: string, platform: NodeJS.Platform = process.platform): string {
+	if (platform !== "darwin") return output;
 	const hints = failureHints(output);
 	if (hints.length === 0) return output;
 	return `${output}\n\n[macOS hint] ${hints.join(" ")}`;

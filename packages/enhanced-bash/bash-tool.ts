@@ -70,7 +70,7 @@ export function prepareBashArguments(args: unknown): EnhancedBashParams {
 	const a = args as Record<string, unknown>;
 	const command = typeof a.command === "string" ? a.command : "";
 	const title = typeof a.title === "string" && a.title.length > 0 ? a.title : deriveTitle(command);
-	const timeout = typeof a.timeout === "number" && a.timeout >= 0 ? a.timeout : undefined;
+	const timeout = typeof a.timeout === "number" && Number.isFinite(a.timeout) && a.timeout >= 0 ? a.timeout : undefined;
 	const runInBackground = a.runInBackground === true;
 	return { command, title, timeout, runInBackground };
 }

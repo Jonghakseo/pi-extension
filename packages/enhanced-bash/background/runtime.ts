@@ -42,6 +42,8 @@ export interface AdoptParams {
 	recentLines: string[];
 	timeoutSeconds: number;
 	execute: ExecutionAdapter;
+	/** Abort signal of the call being adopted; aborting it stops the new job. */
+	signal?: AbortSignal;
 }
 
 export interface BackgroundRuntime {
@@ -283,12 +285,19 @@ export function registerBackgroundRuntime(host: ExtensionAPI): BackgroundRuntime
 			context,
 			execute: params.execute,
 			immediate: true,
+			acceptanceSignal: params.signal,
 		});
 		if (!started.ok)
 			throw new Error(
 				`Command outlived its ${params.waitedSeconds}s timeout and was stopped because it could not move to the background: ${started.error}`,
 			);
 		const jobId = started.details.jobId;
+		if (params.signal?.aborted) {
+			// The user interrupted while the job was being accepted; a detached job would wake the agent again.
+			await manager.kill(jobId);
+			acknowledge(jobId);
+			throw new Error("Command aborted");
+		}
 		jobSessions.set(jobId, sessionId);
 		return result(renderAdopted(started.details, params.waitedSeconds, params.recentLines), started.details);
 	};
