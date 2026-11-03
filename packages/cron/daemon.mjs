@@ -762,11 +762,15 @@ async function runSessionJob(job, runLogPath) {
 	return { exitCode: undefined, outcome: result.outcome };
 }
 
+function modelArgs(job) {
+	return job.model ? ["--model", job.model] : [];
+}
+
 function runJobProcess(job, runLogPath) {
 	if (jobScope(job) === "session") return runSessionJob(job, runLogPath);
 	return new Promise((resolve) => {
 		const piBin = resolvePiBinary();
-		const args = ["-p", "--no-session", `@${job.runPromptFile || job.promptFile}`];
+		const args = ["-p", "--no-session", ...modelArgs(job), `@${job.runPromptFile || job.promptFile}`];
 		const child = spawn(piBin, args, {
 			cwd: job.cwd || agentDir,
 			stdio: ["ignore", "pipe", "pipe"],
@@ -799,6 +803,7 @@ function runJobProcess(job, runLogPath) {
 			const content = [
 				`# cron run: ${job.id}`,
 				`startedAt: ${nowIso()}`,
+				`model: ${job.model || "(pi default)"}`,
 				`exitCode: ${exitCode}`,
 				`timedOut: ${timedOut}`,
 				"",

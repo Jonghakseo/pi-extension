@@ -57,8 +57,8 @@ export const CRON_CLI_HELP_TEXT = [
 	"    cron history [--scope <user|project|session>] [--include-prompt]",
 	"",
 	"  Job Management:",
-	"    cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--scope <user|project|session>] [--cwd <path>] [--enabled <true|false>] [--once] [--guard <cmd>] [--guard-mode <exit|changed>] [--guard-timeout <ms>] -- <promptMarkdown>",
-	'    cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [--guard <cmd>|--guard ""] [--guard-mode <exit|changed>] [--guard-timeout <ms>] [-- <promptMarkdown>]',
+	"    cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--scope <user|project|session>] [--cwd <path>] [--enabled <true|false>] [--once] [--guard <cmd>] [--guard-mode <exit|changed>] [--guard-timeout <ms>] [--model <provider/id[:thinking]>] -- <promptMarkdown>",
+	'    cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [--guard <cmd>|--guard ""] [--guard-mode <exit|changed>] [--guard-timeout <ms>] [--model <provider/id[:thinking]>|--model ""] [-- <promptMarkdown>]',
 	"    cron run|enable|disable|remove <id> [--scope <user|project|session>]",
 	"",
 	"  Daemon / launchd:",
@@ -87,6 +87,10 @@ export const CRON_CLI_HELP_TEXT = [
 	"  Run only while a marker file exists (exit-code guard), then drop the guard:",
 	"    cron update nightly-sync --guard 'test -f ~/.sync-pending' --guard-timeout 5000",
 	'    cron update nightly-sync --guard ""',
+	"",
+	"  Pin a model for a headless job (user/project scope), then clear it:",
+	'    cron upsert --name nightly --kind cron --schedule "0 3 * * *" --model neuralwatt/deepseek-v4.1-flash:low -- "# Nightly\\n\\nTask..."',
+	'    cron update nightly --model ""',
 	"",
 	"  Update schedule without changing prompt:",
 	'    cron update daily-release-check --schedule "30 9 * * 1-5"',
@@ -307,6 +311,19 @@ function parseOptions(args: string[], options: { allowPrompt: boolean }): Parsed
 				}
 				if (inlineValue === undefined) i++;
 				params.guard = value;
+				break;
+			}
+			case "model": {
+				// An explicit empty value clears the model on update, so "" is accepted here.
+				const value = inlineValue ?? args[i + 1];
+				if (value === undefined || (inlineValue === undefined && value.startsWith("--"))) {
+					return {
+						error:
+							'❌ --model requires a model id (or "" to clear it)\n\n✓ Example: --model neuralwatt/deepseek-v4.1-flash:low',
+					};
+				}
+				if (inlineValue === undefined) i++;
+				params.model = value;
 				break;
 			}
 			case "guard-mode": {

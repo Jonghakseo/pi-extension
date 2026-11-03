@@ -238,6 +238,47 @@ describe("cron daemon e2e", () => {
 		expect(readFileSync(join(tempAgentDir, "fake-pi-prompt.log"), "utf-8")).toContain("Say hello from cron");
 	});
 
+	it.each([
+		["passes --model to pi and logs it when the job has a model", "x/y:high", true],
+		["passes no --model to pi when the job has no model", undefined, false],
+	])("%s", async (_label, model, expectFlag) => {
+		const fakePi = writeFakePi();
+		writeStore({
+			id: "model-job",
+			name: "Model job",
+			enabled: true,
+			kind: "at",
+			once: true,
+			runAt: new Date(Date.now() - 1000).toISOString(),
+			timezone: "UTC",
+			cwd: tempAgentDir,
+			promptFile: join(tempAgentDir, "cron", "prompts", "model-job.md"),
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+			...(model ? { model } : {}),
+		});
+		const child = spawn(process.execPath, [daemonPath], {
+			cwd: tempAgentDir,
+			stdio: "ignore",
+			env: {
+				...process.env,
+				PI_CODING_AGENT_DIR: tempAgentDir,
+				PI_CRON_PI_BIN: fakePi,
+				PI_CRON_TICK_INTERVAL_MS: "100",
+				PI_CRON_RETRY_LOCK_INTERVAL_MS: "100",
+				PI_CRON_JOB_TIMEOUT_MS: "2000",
+			},
+		});
+		childPid = child.pid;
+
+		const finalStore = await waitFor(readStore, (store) => store.jobs.length === 0 && store.history.length === 1);
+		const argsLog = readFileSync(join(tempAgentDir, "fake-pi-args.log"), "utf-8");
+		if (expectFlag) expect(argsLog).toContain("-p --no-session --model x/y:high @");
+		else expect(argsLog).not.toContain("--model");
+		const runLog = readFileSync(finalStore.history[0].lastRunLog as string, "utf-8");
+		expect(runLog).toContain(expectFlag ? "model: x/y:high" : "model: (pi default)");
+	});
+
 	it("preserves a concurrent extension upsert while the daemon completes a job", async () => {
 		const releasePath = join(tempAgentDir, "release-job");
 		const fakePi = join(tempAgentDir, "fake-pi-wait.sh");

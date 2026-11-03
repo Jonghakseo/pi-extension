@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCronToolCommand } from "./cli.js";
+import { CRON_CLI_HELP_TEXT, parseCronToolCommand } from "./cli.js";
 
 describe("cron CLI parser", () => {
 	it("returns help for an empty cron command", () => {
@@ -45,6 +45,34 @@ describe("cron CLI parser", () => {
 			type: "params",
 			params: { action: "update", id: "daily", schedule: "30 9 * * 1-5", once: false },
 		});
+	});
+
+	it("parses --model on upsert and clears it with an empty value on update", () => {
+		expect(
+			parseCronToolCommand('cron upsert --name n --kind cron --schedule "0 3 * * *" --model a/b:high -- "p"'),
+		).toEqual({
+			type: "params",
+			params: {
+				action: "upsert",
+				name: "n",
+				kind: "cron",
+				schedule: "0 3 * * *",
+				model: "a/b:high",
+				promptMarkdown: "p",
+			},
+		});
+		expect(parseCronToolCommand('cron update daily --model ""')).toEqual({
+			type: "params",
+			params: { action: "update", id: "daily", model: "" },
+		});
+	});
+
+	it("rejects --model without a value and documents it in help", () => {
+		expect(parseCronToolCommand("cron update daily --model")).toMatchObject({ type: "error" });
+		expect(parseCronToolCommand("cron update daily --model --once")).toMatchObject({ type: "error" });
+		const help = parseCronToolCommand("cron help");
+		expect(help).toEqual({ type: "help" });
+		expect(CRON_CLI_HELP_TEXT).toContain("--model <provider/id[:thinking]>");
 	});
 
 	it("parses daemon aliases", () => {
