@@ -67,6 +67,8 @@ interface CronToolParams {
 	guard?: string;
 	guardMode?: CronGuardMode;
 	guardTimeoutMs?: number;
+	/** Empty string clears the model. */
+	model?: string;
 }
 
 const GUARD_CAPABILITY = "guard";
@@ -84,6 +86,22 @@ function checkGuardRuntime(): string | undefined {
 	if (daemon.legacy || !daemon.capabilities?.includes(GUARD_CAPABILITY)) {
 		throw new Error(
 			`The running cron daemon (PID ${daemon.pid}) predates guard support and would run this job on every tick, ignoring the guard. Run \`cron update-runtime\` first, then retry.`,
+		);
+	}
+	return undefined;
+}
+
+const MODEL_CAPABILITY = "model";
+
+/** Older daemons ignore `model` and would run the job on the pi default model, so refuse to set one on them. */
+function checkModelRuntime(): string | undefined {
+	const daemon = getDaemonStatus();
+	if (!daemon.running) {
+		return "⚠ cron daemon is not running. Jobs with a model need a daemon with model support; the daemon started from this package has it. Check `cron status` after it starts.";
+	}
+	if (daemon.legacy || !daemon.capabilities?.includes(MODEL_CAPABILITY)) {
+		throw new Error(
+			`The running cron daemon (PID ${daemon.pid}) predates per-job model support and would ignore --model. Run \`cron update-runtime\` first, then retry.`,
 		);
 	}
 	return undefined;
@@ -237,6 +255,7 @@ function formatJob(job: CronJob, includePrompt = false, historical = false): str
 		`  cwd: ${job.cwd}`,
 		`  promptFile: ${job.promptFile}`,
 	].filter((line): line is string => Boolean(line));
+	if (job.model) lines.push(`  model: ${job.model}`);
 	if (job.guard) {
 		lines.push(
 			`  guard: ${job.guard}`,
@@ -410,6 +429,7 @@ function ensureLaunchdAndDaemon(): string[] {
 
 function upsertFromParams(params: CronToolParams, ctx: ExtensionContext): { job: CronJob; messages: string[] } {
 	let guardWarning: string | undefined;
+	let modelWarning: string | undefined;
 	const job = withStoreTransaction((store) => {
 		const rawRequested = params.id ? store.jobs.find((job) => job.id === params.id) : undefined;
 		const provisionalName = params.name ?? rawRequested?.name ?? params.id;
@@ -444,10 +464,18 @@ function upsertFromParams(params: CronToolParams, ctx: ExtensionContext): { job:
 		}
 		const guardMode = guard ? (params.guardMode ?? existing?.guardMode) : undefined;
 		const guardTimeoutMs = guard ? (params.guardTimeoutMs ?? existing?.guardTimeoutMs) : undefined;
+		if (params.model !== undefined && params.model !== "" && !params.model.trim()) {
+			throw new Error('--model must not be blank. Pass a model id, or "" to clear it.');
+		}
+		const model = params.model === undefined ? existing?.model : params.model.trim() || undefined;
+		if (model && scope === "session") {
+			throw new Error("--model is not supported for --scope session. Session jobs use the session's own model.");
+		}
 		// Guard results only compare against the same command and mode; anything else starts fresh.
 		const guardIdentityChanged = guard !== existing?.guard || (guardMode ?? "exit") !== (existing?.guardMode ?? "exit");
 		// Checked before any prompt write so a refusal leaves the job and its prompt untouched.
 		if (guard && enabled) guardWarning = checkGuardRuntime();
+		if (model && params.model && enabled) modelWarning = checkModelRuntime();
 		const promptFile = promptMarkdown ? writePromptFile(id, promptMarkdown) : existing?.promptFile;
 		if (!promptFile) throw new Error("promptFile could not be resolved");
 		const baseJob: CronJob = {
@@ -473,6 +501,7 @@ function upsertFromParams(params: CronToolParams, ctx: ExtensionContext): { job:
 			lastRunLog: existing?.lastRunLog,
 			disabledReason: enabled ? undefined : existing?.disabledReason,
 			completedAt: enabled ? undefined : existing?.completedAt,
+			model,
 			guard,
 			guardMode,
 			guardTimeoutMs,
@@ -495,6 +524,7 @@ function upsertFromParams(params: CronToolParams, ctx: ExtensionContext): { job:
 	});
 	const messages = ensureLaunchdAndDaemon();
 	if (guardWarning) messages.push(guardWarning);
+	if (modelWarning) messages.push(modelWarning);
 	return { job, messages };
 }
 
@@ -729,6 +759,7 @@ export default function (pi: ExtensionAPI) {
 			"User and project jobs run headlessly and need self-contained promptMarkdown after `--`. Session jobs are delivered to the original session; their archived result means delivery was accepted or queued, not that the task succeeded.",
 			"Scope changes are intentionally rejected. Create a new job in the target scope instead.",
 			"For frequent schedules, add `--guard '<shell cmd>'` so the daemon runs the model only when the check passes (`--guard-mode exit`: exit 0) or prints new output (`--guard-mode changed`). Guard stdout is appended to the run prompt. `--guard \"\"` removes it.",
+			'Pin a model for a user/project job with `--model <provider/id[:thinking]>` (not allowed for session scope); `--model ""` clears it.',
 		],
 		parameters: CronParamsSchema,
 		async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx) {

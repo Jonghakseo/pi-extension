@@ -416,6 +416,73 @@ describe("cron job removal", () => {
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("reminder"), "info");
 	});
 
+	describe("model", () => {
+		const modelUpsert = `cron upsert --name nightly --kind cron --schedule "0 3 * * *" --model x/y:low -- "go"`;
+		const capable = { running: true, pid: 42, runtimeId: "new-runtime", capabilities: ["guard", "model"] };
+
+		it("persists the model, keeps it when omitted, and clears it with an empty value", async () => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue(capable);
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+			const ctx = makeCtx(false);
+			const run = (command: string) => tools.get("cron").execute("c", { command }, undefined, undefined, ctx);
+
+			await run(modelUpsert);
+			expect(findJob("nightly")?.model).toBe("x/y:low");
+			await run('cron update nightly --schedule "0 4 * * *"');
+			expect(findJob("nightly")?.model).toBe("x/y:low");
+			await run('cron update nightly --model ""');
+			expect(findJob("nightly")).not.toHaveProperty("model");
+		});
+
+		it("leaves jobs without a model without a model field", async () => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue(capable);
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+			await tools
+				.get("cron")
+				.execute(
+					"c",
+					{ command: 'cron upsert --name plain --kind cron --schedule "0 3 * * *" -- "go"' },
+					undefined,
+					undefined,
+					makeCtx(false),
+				);
+			expect(findJob("plain")).not.toHaveProperty("model");
+		});
+
+		it("rejects --model for session scope on upsert and update", async () => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue(capable);
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+			const ctx = makeCtx(false);
+			const run = (command: string) => tools.get("cron").execute("c", { command }, undefined, undefined, ctx);
+
+			await expect(
+				run('cron upsert --name nightly --kind cron --schedule "0 3 * * *" --scope session --model x/y -- "go"'),
+			).rejects.toThrow("--scope session");
+			expect(findJob("nightly")).toBeUndefined();
+			await run('cron upsert --name sess --kind cron --schedule "0 3 * * *" --scope session -- "go"');
+			await expect(run("cron update sess --model x/y")).rejects.toThrow("--scope session");
+			expect(findJob("sess")).not.toHaveProperty("model");
+		});
+
+		it.each([
+			["a daemon without capabilities", { running: true, pid: 42, runtimeId: "old-runtime" }],
+			["a daemon without the model capability", { ...capable, capabilities: ["guard"] }],
+			["a legacy pid-only daemon", { running: true, pid: 42, legacy: true }],
+		])("refuses --model while %s is running", async (_label, status) => {
+			daemonClientMocks.getDaemonStatus.mockReturnValue(status);
+			const { pi, tools } = createPi();
+			registerCron(pi as never);
+
+			await expect(
+				tools.get("cron").execute("c", { command: modelUpsert }, undefined, undefined, makeCtx(false)),
+			).rejects.toThrow("cron update-runtime");
+			expect(findJob("nightly")).toBeUndefined();
+		});
+	});
+
 	describe("guard", () => {
 		const guardedUpsert = `cron upsert --name watch --kind cron --schedule "*/10 * * * *" --guard 'echo "PR list"' --guard-mode changed -- "notify"`;
 

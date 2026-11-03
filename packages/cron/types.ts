@@ -42,6 +42,8 @@ export interface CronJob {
 	/** Session prompt transport outcome, not task success. */
 	lastDeliveryOutcome?: SessionDeliveryOutcome;
 	lastDeliveryError?: string;
+	/** Passed verbatim to `pi --model` for headless runs; supports `provider/id[:thinking]`. Absent means the pi default model. */
+	model?: string;
 	/** Shell command run with `/bin/sh -c` before each execution to decide whether the job runs. */
 	guard?: string;
 	/** `exit` (default): run on exit 0. `changed`: run on exit 0 with non-empty stdout that differs from the last run. */
