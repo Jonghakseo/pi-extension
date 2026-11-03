@@ -232,7 +232,11 @@ describe("cron daemon e2e", () => {
 		expect(existsSync(finalJob.lastRunLog as string)).toBe(true);
 
 		const argsLog = readFileSync(join(tempAgentDir, "fake-pi-args.log"), "utf-8");
-		expect(argsLog).toContain("-p --no-session");
+		const runId = (finalJob.lastRunLog as string).match(/([^/]+)\.log$/)?.[1];
+		expect(argsLog).toContain(
+			`-p --session ${join(tempAgentDir, "cron", "runs", "one-shot-test", `${runId}.session.jsonl`)} @`,
+		);
+		expect(argsLog).not.toContain("--no-session");
 		expect(argsLog).not.toContain("--no-extensions");
 		expect(argsLog).toContain("cron/runs/one-shot-test/");
 		expect(readFileSync(join(tempAgentDir, "fake-pi-prompt.log"), "utf-8")).toContain("Say hello from cron");

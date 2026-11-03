@@ -762,11 +762,12 @@ async function runSessionJob(job, runLogPath) {
 	return { exitCode: undefined, outcome: result.outcome };
 }
 
-function runJobProcess(job, runLogPath) {
+function runJobProcess(job, runLogPath, runSessionPath) {
 	if (jobScope(job) === "session") return runSessionJob(job, runLogPath);
 	return new Promise((resolve) => {
 		const piBin = resolvePiBinary();
-		const args = ["-p", "--no-session", `@${job.runPromptFile || job.promptFile}`];
+		// Keep the standard Pi transcript next to the run log so token usage stays readable after the run.
+		const args = ["-p", "--session", runSessionPath, `@${job.runPromptFile || job.promptFile}`];
 		const child = spawn(piBin, args, {
 			cwd: job.cwd || agentDir,
 			stdio: ["ignore", "pipe", "pipe"],
@@ -1041,6 +1042,7 @@ async function executeJob(candidate) {
 	const jobRunsDir = join(runsDir, job.id);
 	mkdirSync(jobRunsDir, { recursive: true });
 	const runLogPath = join(jobRunsDir, `${runId}.log`);
+	const runSessionPath = join(jobRunsDir, `${runId}.session.jsonl`);
 	let guard;
 
 	try {
@@ -1071,7 +1073,7 @@ async function executeJob(candidate) {
 		}
 
 		log("job start", { job: job.id, promptFile: job.promptFile });
-		const result = await runJobProcess(job, runLogPath);
+		const result = await runJobProcess(job, runLogPath, runSessionPath);
 		const finishedAt = new Date();
 		// Session delivery that returns was accepted; headless runs count only on exit 0.
 		const succeeded = jobScope(job) === "session" || result.exitCode === 0;
