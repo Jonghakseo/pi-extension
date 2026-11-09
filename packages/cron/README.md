@@ -70,8 +70,8 @@ cron help
 cron status [--scope <user|project|session>]
 cron list [--scope <user|project|session>] [--include-prompt]       # current jobs only
 cron history [--scope <user|project|session>] [--include-prompt]    # completed one-shot jobs
-cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--scope <user|project|session>] [--cwd <path>] [--enabled <true|false>] [--once] [--guard <cmd>] [--guard-mode <exit|changed>] [--guard-timeout <ms>] -- <promptMarkdown>
-cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [--guard <cmd>|--guard ""] [--guard-mode <exit|changed>] [--guard-timeout <ms>] [-- <promptMarkdown>]
+cron upsert [<id>] --name <name> --kind <cron|at|delay> (--schedule <expr>|--run-at <iso>) [--scope <user|project|session>] [--cwd <path>] [--enabled <true|false>] [--once] [--guard <cmd>] [--guard-mode <exit|changed>] [--guard-timeout <ms>] [--model <provider/id[:thinking]>] -- <promptMarkdown>
+cron update <id> [--scope <user|project|session>] [--name <name>] [--kind <cron|at|delay>] [--schedule <expr>] [--run-at <iso>] [--cwd <path>] [--enabled <true|false>] [--once|--once=false] [--guard <cmd>|--guard ""] [--guard-mode <exit|changed>] [--guard-timeout <ms>] [--model <provider/id[:thinking]>|--model ""] [-- <promptMarkdown>]
 cron run <id> [--scope <user|project|session>]
 cron enable <id> [--scope <user|project|session>]
 cron disable <id> [--scope <user|project|session>]
@@ -117,6 +117,26 @@ For a one-shot session job, history records delivery acceptance or queueing, not
 After the first execution attempt, a one-shot job is atomically removed from the current `jobs` array and appended to the `history` array in `jobs.json`. The archived entry keeps its full metadata, prompt file, exit code, completion timestamp, and run log path. Waiting for a session owner to become ready or finish a handoff does not consume that attempt.
 
 `cron list` and `/cron list` show current jobs only. Use `cron history [--include-prompt]` or `/cron history` to inspect completed one-shot jobs. Existing version 1 stores are migrated in memory, so previously completed one-shot jobs appear in history after upgrading.
+
+## Per-job model
+
+`--model <provider/id[:thinking]>` pins the model for one job. The value is stored on the job (`model` in `jobs.json`) and passed verbatim to `pi --model` for headless runs. There is no global setting.
+
+```text
+cron upsert --name nightly --kind cron --schedule "0 3 * * *" --model neuralwatt/deepseek-v4.1-flash:low -- <prompt>
+cron update nightly --model ""    # clear: back to the pi default model
+```
+
+- Without `--model`, no flag is passed and `pi` uses its default model, as before. Existing jobs are unchanged.
+- `--model` is rejected for `--scope session`; session jobs keep the session's own model.
+- `run` log files start with a `model:` line.
+- Cron refuses `--model` while the running daemon does not advertise the `model` capability; run `cron update-runtime` first.
+
+The daemon spawns the real `pi` CLI with the agent dir (`PI_CODING_AGENT_DIR`), so provider extensions listed in `settings.json` load and can serve the model. The model id is opaque to cron and is not validated at upsert time, because lazily registered providers would not appear in a registry check. Caveats:
+
+1. The provider extension must be installed in the agent dir the daemon uses. If it is removed later, runs fail with pi's "not found" error in the run log.
+2. A provider that lists its models lazily may make pi log `Model ... not found for provider ... Using custom model id.` and still run.
+3. Providers that only register after startup (lazy or deferred) are not available.
 
 ## Guards
 

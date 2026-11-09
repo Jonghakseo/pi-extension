@@ -11,7 +11,7 @@ export const GUARD_DEFAULT_TIMEOUT_MS = 60_000;
 /** Hard cap for a single guard run; the CLI rejects larger values and the daemon clamps stored ones. */
 export const GUARD_MAX_TIMEOUT_MS = 120_000;
 /** Features this daemon runtime understands. Older daemons omit the field entirely. */
-export const DAEMON_CAPABILITIES = Object.freeze(["guard"]);
+export const DAEMON_CAPABILITIES = Object.freeze(["guard", "model"]);
 
 /**
  * Whether this Mac has a network link a job's model request could use. A Mac that just woke has none until Wi-Fi
