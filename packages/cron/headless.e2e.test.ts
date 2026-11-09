@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { CronJob, CronStoreFile } from "./types.ts";
 
+// The daemon holds a due job while the Mac has no Wi-Fi or Ethernet; these tests run jobs whether or not it is online.
+process.env.PI_CRON_NETWORK_CHECK = "off";
+
 const cronDirname = dirname(fileURLToPath(import.meta.url));
 const agentDir = resolve(cronDirname, "..", "..");
 const extensionPath = resolve(cronDirname, "index.ts");

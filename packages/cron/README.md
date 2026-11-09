@@ -34,6 +34,7 @@ The scheduler is macOS-first. On macOS, its LaunchAgent keeps jobs running after
 - Extensions and MCP tools are loaded as in interactive mode so scheduled prompts can call MCP tools (Slack, Jira, etc.).
 - Uses a detached daemon and macOS `launchd` LaunchAgent so jobs continue after Pi exits and after reboot/login.
 - Moves one-shot jobs out of the current job list and into history after their first execution attempt.
+- Holds a due job while the Mac has no Wi-Fi or Ethernet address, as right after a wake before Wi-Fi reconnects, and checks again on every tick. A held job is neither started nor spent. After 15 minutes (`PI_CRON_OFFLINE_DEFER_LIMIT_MS`) it starts anyway, so a job on a local model still runs offline. VPN tunnels do not count as a connection; other platforms are not checked.
 - Removes active job records immediately when `cron remove` or `/cron remove` is called. Their prompt files and existing run logs remain available. LaunchAgent uninstall still requires confirmation unless `cron uninstall-launchd --yes` is used.
 
 ## Files

@@ -9,6 +9,9 @@ import { expect, it } from "vitest";
 import { upsertJob, writePromptFile } from "./store.ts";
 import type { CronJob, CronStoreFile } from "./types.ts";
 
+// The daemon holds a due job while the Mac has no Wi-Fi or Ethernet; these tests run jobs whether or not it is online.
+process.env.PI_CRON_NETWORK_CHECK = "off";
+
 const packageDir = dirname(fileURLToPath(import.meta.url));
 const piBinary = spawnSync("sh", ["-lc", "command -v pi"], { encoding: "utf8" }).stdout?.trim();
 
