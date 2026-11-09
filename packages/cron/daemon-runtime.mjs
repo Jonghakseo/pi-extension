@@ -13,6 +13,28 @@ export const GUARD_MAX_TIMEOUT_MS = 120_000;
 /** Features this daemon runtime understands. Older daemons omit the field entirely. */
 export const DAEMON_CAPABILITIES = Object.freeze(["guard", "model"]);
 
+/**
+ * Whether this Mac has a network link a job's model request could use. A Mac that just woke has none until Wi-Fi
+ * reconnects; a job started then fails before Pi reaches its model, and a one-time job is spent. Only Wi-Fi and
+ * Ethernet (`en*`) count, with an address that is not link-local: VPN tunnels such as Tailscale's keep their address
+ * while the Mac is offline. Other platforms name interfaces differently and always count as connected.
+ */
+export function hasNetworkLink(interfaces, platform = process.platform) {
+	if (platform !== "darwin") return true;
+	for (const [name, addresses] of Object.entries(interfaces)) {
+		if (!/^en\d+$/.test(name)) continue;
+		if ((addresses ?? []).some(isRoutableAddress)) return true;
+	}
+	return false;
+}
+
+function isRoutableAddress(entry) {
+	if (entry.internal) return false;
+	if (entry.family === "IPv4" || entry.family === 4) return !entry.address.startsWith("169.254.");
+	// Link-local (fe80::/10) and unique-local (fc00::/7) addresses do not reach the internet.
+	return !/^(?:fe[89ab]|f[cd])/i.test(entry.address);
+}
+
 export function getDaemonPath() {
 	return join(dirname(fileURLToPath(import.meta.url)), "daemon.mjs");
 }

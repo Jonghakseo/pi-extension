@@ -4,11 +4,12 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
-import { homedir } from "node:os";
+import { homedir, networkInterfaces } from "node:os";
 import { join } from "node:path";
 import {
 	GUARD_DEFAULT_TIMEOUT_MS,
 	GUARD_MAX_TIMEOUT_MS,
+	hasNetworkLink,
 	removeDaemonOwner,
 	writeDaemonOwner,
 } from "./daemon-runtime.mjs";
@@ -45,6 +46,12 @@ const GUARD_PROVENANCE =
 // A deferred session delivery retries on the next tick; reuse its guard result instead of re-running it.
 // The lifetime counts from the first guard run, so reusing a cached result never extends it.
 const GUARD_DEFER_CACHE_MS = positiveInt(process.env.PI_CRON_GUARD_DEFER_CACHE_MS, 120_000);
+// A due job waits this long at most for a network link, so a job on a local model still runs while offline.
+const OFFLINE_DEFER_LIMIT_MS = positiveInt(process.env.PI_CRON_OFFLINE_DEFER_LIMIT_MS, 15 * 60_000);
+// "off" skips the check; "assume-offline" stands in for a Mac without a network in tests.
+const NETWORK_CHECK = process.env.PI_CRON_NETWORK_CHECK || "on";
+// First time each job found no network link in its current wait.
+const offlineSince = new Map();
 
 const running = new Set();
 const guardChildren = new Set();
@@ -766,11 +773,12 @@ function modelArgs(job) {
 	return job.model ? ["--model", job.model] : [];
 }
 
-function runJobProcess(job, runLogPath) {
+function runJobProcess(job, runLogPath, runSessionPath) {
 	if (jobScope(job) === "session") return runSessionJob(job, runLogPath);
 	return new Promise((resolve) => {
 		const piBin = resolvePiBinary();
-		const args = ["-p", "--no-session", ...modelArgs(job), `@${job.runPromptFile || job.promptFile}`];
+		// Keep the standard Pi transcript next to the run log so token usage stays readable after the run.
+		const args = ["-p", "--session", runSessionPath, ...modelArgs(job), `@${job.runPromptFile || job.promptFile}`];
 		const child = spawn(piBin, args, {
 			cwd: job.cwd || agentDir,
 			stdio: ["ignore", "pipe", "pipe"],
@@ -1036,7 +1044,36 @@ function guardCompletionFields(guard, succeeded) {
 	return succeeded && guard.hash ? { ...state, lastGuardHash: guard.hash } : state;
 }
 
+function networkLinkUp() {
+	if (NETWORK_CHECK === "off") return true;
+	if (NETWORK_CHECK === "assume-offline") return false;
+	return hasNetworkLink(networkInterfaces());
+}
+
+/**
+ * True when a due job should wait for the network instead of starting now. It stays due and is checked again on the
+ * next tick, without a claim, a run log or a spent one-time run. After OFFLINE_DEFER_LIMIT_MS it runs anyway.
+ */
+function waitsForNetwork(job) {
+	if (networkLinkUp()) {
+		if (offlineSince.delete(job.id)) log("network back, job starts", { job: job.id });
+		return false;
+	}
+	const now = Date.now();
+	const since = offlineSince.get(job.id);
+	if (since === undefined) {
+		offlineSince.set(job.id, now);
+		log("job waits for the network", { job: job.id });
+		return true;
+	}
+	if (now - since < OFFLINE_DEFER_LIMIT_MS) return true;
+	offlineSince.delete(job.id);
+	log("job starts without a network link", { job: job.id, waitedMs: now - since });
+	return false;
+}
+
 async function executeJob(candidate) {
+	if (waitsForNetwork(candidate)) return;
 	const job = claimDueJob(candidate.id, new Date());
 	if (!job) return;
 	running.add(job.id);
@@ -1046,6 +1083,7 @@ async function executeJob(candidate) {
 	const jobRunsDir = join(runsDir, job.id);
 	mkdirSync(jobRunsDir, { recursive: true });
 	const runLogPath = join(jobRunsDir, `${runId}.log`);
+	const runSessionPath = join(jobRunsDir, `${runId}.session.jsonl`);
 	let guard;
 
 	try {
@@ -1076,7 +1114,7 @@ async function executeJob(candidate) {
 		}
 
 		log("job start", { job: job.id, promptFile: job.promptFile });
-		const result = await runJobProcess(job, runLogPath);
+		const result = await runJobProcess(job, runLogPath, runSessionPath);
 		const finishedAt = new Date();
 		// Session delivery that returns was accepted; headless runs count only on exit 0.
 		const succeeded = jobScope(job) === "session" || result.exitCode === 0;

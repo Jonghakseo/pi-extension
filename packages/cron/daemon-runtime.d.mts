@@ -14,6 +14,17 @@ export interface DaemonRuntimeOwner {
 	capabilities?: string[];
 }
 
+/** One address of `os.networkInterfaces()`. */
+export interface NetworkInterfaceAddress {
+	address: string;
+	family: string | number;
+	internal: boolean;
+}
+
+export function hasNetworkLink(
+	interfaces: Record<string, readonly NetworkInterfaceAddress[] | undefined>,
+	platform?: string,
+): boolean;
 export function getDaemonPath(): string;
 export function daemonRuntimeId(daemonPath?: string): string;
 export function daemonOwnerPath(cronDir: string): string;

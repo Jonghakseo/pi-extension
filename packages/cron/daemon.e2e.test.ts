@@ -24,6 +24,8 @@ import type { CronJob, CronStoreFile } from "./types.js";
 
 const cronDirname = dirname(fileURLToPath(import.meta.url));
 const daemonPath = resolve(cronDirname, "daemon.mjs");
+// The daemon holds a due job while the Mac has no Wi-Fi or Ethernet; these tests run jobs whether or not it is online.
+process.env.PI_CRON_NETWORK_CHECK = "off";
 
 let tempAgentDir: string;
 let childPid: number | undefined;
@@ -232,9 +234,68 @@ describe("cron daemon e2e", () => {
 		expect(existsSync(finalJob.lastRunLog as string)).toBe(true);
 
 		const argsLog = readFileSync(join(tempAgentDir, "fake-pi-args.log"), "utf-8");
-		expect(argsLog).toContain("-p --no-session");
+		const runId = (finalJob.lastRunLog as string).match(/([^/]+)\.log$/)?.[1];
+		expect(argsLog).toContain(
+			`-p --session ${join(tempAgentDir, "cron", "runs", "one-shot-test", `${runId}.session.jsonl`)} @`,
+		);
+		expect(argsLog).not.toContain("--no-session");
 		expect(argsLog).not.toContain("--no-extensions");
 		expect(argsLog).toContain("cron/runs/one-shot-test/");
+		expect(readFileSync(join(tempAgentDir, "fake-pi-prompt.log"), "utf-8")).toContain("Say hello from cron");
+	});
+
+	it("keeps a due job waiting while the Mac has no network, then runs it once the wait limit passes", async () => {
+		const fakePi = writeFakePi();
+		const job: CronJob = {
+			id: "offline-test",
+			name: "Offline test",
+			enabled: true,
+			kind: "at",
+			once: true,
+			runAt: new Date(Date.now() - 1000).toISOString(),
+			timezone: "UTC",
+			cwd: tempAgentDir,
+			promptFile: join(tempAgentDir, "cron", "prompts", "offline-test.md"),
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+		};
+		writeStore(job);
+
+		const child = spawn(process.execPath, [daemonPath], {
+			cwd: tempAgentDir,
+			detached: false,
+			stdio: "ignore",
+			env: {
+				...process.env,
+				PI_CODING_AGENT_DIR: tempAgentDir,
+				PI_CRON_PI_BIN: fakePi,
+				PI_CRON_TICK_INTERVAL_MS: "50",
+				PI_CRON_RETRY_LOCK_INTERVAL_MS: "50",
+				PI_CRON_JOB_TIMEOUT_MS: "2000",
+				PI_CRON_NETWORK_CHECK: "assume-offline",
+				PI_CRON_OFFLINE_DEFER_LIMIT_MS: "1000",
+			},
+		});
+		childPid = child.pid;
+
+		// Several ticks without a network: the one-time job is neither started nor spent.
+		await waitFor(
+			() =>
+				existsSync(join(tempAgentDir, "cron", "daemon.log"))
+					? readFileSync(join(tempAgentDir, "cron", "daemon.log"), "utf-8")
+					: "",
+			(log) => log.includes("job waits for the network"),
+		);
+		await sleep(300);
+		const waiting = readStore();
+		expect(waiting.jobs.map((candidate) => candidate.id)).toEqual(["offline-test"]);
+		expect(waiting.jobs[0].running).toBeFalsy();
+		expect(waiting.history ?? []).toEqual([]);
+		expect(existsSync(join(tempAgentDir, "fake-pi-args.log"))).toBe(false);
+
+		// A model on this Mac needs no internet, so the wait ends at the limit and the job runs.
+		const finalStore = await waitFor(readStore, (store) => store.jobs.length === 0 && store.history.length === 1);
+		expect(finalStore.history[0].lastExitCode).toBe(0);
 		expect(readFileSync(join(tempAgentDir, "fake-pi-prompt.log"), "utf-8")).toContain("Say hello from cron");
 	});
 
@@ -273,7 +334,7 @@ describe("cron daemon e2e", () => {
 
 		const finalStore = await waitFor(readStore, (store) => store.jobs.length === 0 && store.history.length === 1);
 		const argsLog = readFileSync(join(tempAgentDir, "fake-pi-args.log"), "utf-8");
-		if (expectFlag) expect(argsLog).toContain("-p --no-session --model x/y:high @");
+		if (expectFlag) expect(argsLog).toContain("--model x/y:high @");
 		else expect(argsLog).not.toContain("--model");
 		const runLog = readFileSync(finalStore.history[0].lastRunLog as string, "utf-8");
 		expect(runLog).toContain(expectFlag ? "model: x/y:high" : "model: (pi default)");

@@ -9,6 +9,7 @@ import {
 	listPersistentMemories,
 	listTopics,
 	memoryEntryId,
+	memorySaveTime,
 	migrateFromJson,
 	readTopicFile,
 	removeMemory,
@@ -173,13 +174,32 @@ async function executeRecallById(
 ) {
 	const entry = findMemoryInEntries(entries, id, filters);
 	if (!entry) throw new Error(`Memory not found with id and supplied filters: ${id}`);
-	return buildTextResult(`[${entry.scope}/${entry.tier}] ${entry.topic}/${entry.title}\n\n${entry.content}`, {
+	const age = entry.scope === "agent" ? undefined : await memoryAgeNote(entry);
+	const header = `[${entry.scope}/${entry.tier}] ${entry.topic}/${entry.title}`;
+	return buildTextResult(`${header}${age ? `\n${age}` : ""}\n\n${entry.content}`, {
 		kind: "recall-id",
 		scope: entry.scope,
 		tier: entry.tier,
 		topic: entry.topic,
 		title: entry.title,
 	});
+}
+
+const DAY_MS = 86_400_000;
+/** Memories younger than this read without an age note. */
+const AGE_NOTE_MIN_DAYS = 2;
+
+/** How old a persistent memory is, when it is old enough that its facts may have changed. */
+async function memoryAgeNote(entry: SearchResult, now = Date.now()): Promise<string | undefined> {
+	if (entry.scope === "agent") return undefined;
+	const saved = await memorySaveTime(entry.scope, entry.projectId, entry.topic, entry.title, entry.content);
+	if (!saved) return undefined;
+	const days = Math.floor((now - saved.savedAt) / DAY_MS);
+	if (days < AGE_NOTE_MIN_DAYS) return undefined;
+	return (
+		`Saved ${saved.approx ? "at least " : ""}${days} days ago. ` +
+		"It records what was true then: check facts that change (code, versions, prices, people's roles, schedules) against the current source before relying on them."
+	);
 }
 
 function executeRecallQuery(
