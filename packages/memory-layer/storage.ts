@@ -232,6 +232,11 @@ const ENTRY_MARKER_PREFIX = "<!-- @entry: ";
 const ENTRY_MARKER_SUFFIX = " -->";
 const TIER_METADATA_SUFFIX = ".memory-layer-tiers.json";
 const TIER_METADATA_VERSION = 1;
+// Save times live in their own sidecar so the tier sidecar keeps its version-1
+// shape for other readers of the format. Writers that do not know this file
+// leave it stale; stale keys are harmless because entries are keyed by content.
+const TIME_METADATA_SUFFIX = ".memory-layer-times.json";
+const TIME_METADATA_VERSION = 1;
 
 function isMemoryTier(value: unknown): value is MemoryTier {
 	return value === "profile" || value === "log" || value === "note";
@@ -299,6 +304,99 @@ async function readTierMetadata(
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * When an entry was saved. `approx` means the entry predates save-time records:
+ * `savedAt` is then the topic file's modification time from when it was first
+ * seen, so the entry is at least that old.
+ */
+export interface MemorySaveTime {
+	savedAt: number;
+	approx?: true;
+}
+
+type TimeMetadata = {
+	version: typeof TIME_METADATA_VERSION;
+	entries: Record<string, MemorySaveTime>;
+};
+
+function timeMetadataPath(scope: Exclude<MemoryScope, "agent">, projectId: string | undefined, topic: string): string {
+	return path.join(scopeDir(scope, projectId), `${sanitizeTopic(topic)}${TIME_METADATA_SUFFIX}`);
+}
+
+async function readTimeMetadata(
+	scope: Exclude<MemoryScope, "agent">,
+	projectId: string | undefined,
+	topic: string,
+): Promise<Record<string, MemorySaveTime>> {
+	try {
+		const parsed = JSON.parse(await fs.readFile(timeMetadataPath(scope, projectId, topic), "utf8")) as Record<
+			string,
+			unknown
+		>;
+		if (parsed.version !== TIME_METADATA_VERSION || !parsed.entries || typeof parsed.entries !== "object") return {};
+		const entries: Record<string, MemorySaveTime> = {};
+		for (const [key, value] of Object.entries(parsed.entries as Record<string, unknown>)) {
+			const record = value as Record<string, unknown> | null;
+			if (!record || typeof record.savedAt !== "number" || !Number.isFinite(record.savedAt)) continue;
+			entries[key] = record.approx === true ? { savedAt: record.savedAt, approx: true } : { savedAt: record.savedAt };
+		}
+		return entries;
+	} catch {
+		return {};
+	}
+}
+
+async function fileModifiedAt(filePath: string): Promise<number | undefined> {
+	try {
+		return (await fs.stat(filePath)).mtimeMs;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Save times for the entries a write keeps. Known entries keep their time, the
+ * entry this write saved gets `now`, and entries with no record get the topic
+ * file's modification time from before the write as a lower bound, so the
+ * rewrite does not make them look new.
+ */
+function buildTimeMetadata(
+	entries: TopicEntry[],
+	previous: Record<string, MemorySaveTime>,
+	previousFileModifiedAt: number | undefined,
+	saved: { key: string; at: number } | undefined,
+): TimeMetadata {
+	const metadata: TimeMetadata = { version: TIME_METADATA_VERSION, entries: {} };
+	for (const entry of entries) {
+		const key = tierMetadataEntryKey(entry);
+		if (metadata.entries[key]) continue;
+		const known = previous[key];
+		if (known) metadata.entries[key] = known;
+		else if (saved?.key === key) metadata.entries[key] = { savedAt: saved.at };
+		else if (previousFileModifiedAt !== undefined)
+			metadata.entries[key] = { savedAt: previousFileModifiedAt, approx: true };
+	}
+	return metadata;
+}
+
+/**
+ * When a persistent memory was saved, or the earliest it can have been saved
+ * (`approx`) when it predates save-time records. Undefined when the topic file
+ * is gone.
+ */
+export async function memorySaveTime(
+	scope: Exclude<MemoryScope, "agent">,
+	projectId: string | undefined,
+	topic: string,
+	title: string,
+	content: string,
+): Promise<MemorySaveTime | undefined> {
+	const known = (await readTimeMetadata(scope, projectId, topic))[tierMetadataEntryKey({ title, content })];
+	if (known) return known;
+	const modifiedAt = await fileModifiedAt(topicPath(scope, projectId, sanitizeTopic(topic)));
+	return modifiedAt === undefined ? undefined : { savedAt: modifiedAt, approx: true };
 }
 
 function applyTierMetadata(entries: TopicEntry[], metadata: TierMetadata | null): TopicEntry[] {
@@ -467,6 +565,7 @@ export async function saveMemory(
 	await withScopeLock(scope, projectId, async () => {
 		// Topic Markdown intentionally stays compatible with the 0.3.3 writer.
 		const raw = await readOrEmpty(tFp);
+		const previousModifiedAt = raw ? await fileModifiedAt(tFp) : undefined;
 		const parsed = raw ? parseTopicFile(raw) : { heading: topicHeading, entries: [] };
 		const entries = applyTierMetadata(parsed.entries, await readTierMetadata(scope, projectId, safeTopic));
 		if (preserveLegacyDuplicates) {
@@ -479,8 +578,13 @@ export async function saveMemory(
 			if (matches.length === 1) entries[matches[0]] = { title, content, tier };
 			else entries.push({ title, content, tier });
 		}
+		const times = buildTimeMetadata(entries, await readTimeMetadata(scope, projectId, safeTopic), previousModifiedAt, {
+			key: tierMetadataEntryKey({ title, content }),
+			at: Date.now(),
+		});
 		await atomicWrite(tFp, buildTopicFile(parsed.heading, entries));
 		await atomicWrite(tierMetadataPath(scope, projectId, safeTopic), `${JSON.stringify(buildTierMetadata(entries))}\n`);
+		await atomicWrite(timeMetadataPath(scope, projectId, safeTopic), `${JSON.stringify(times)}\n`);
 
 		// Rebuild instead of trusting an index an older writer may have rewritten.
 		await rebuildIndex(scope, projectId);
@@ -515,12 +619,20 @@ export async function removeMemory(
 		if (entries.length === 0) {
 			await fs.unlink(tFp).catch(() => {});
 			await fs.unlink(tierMetadataPath(scope, projectId, safeTopic)).catch(() => {});
+			await fs.unlink(timeMetadataPath(scope, projectId, safeTopic)).catch(() => {});
 		} else {
+			const times = buildTimeMetadata(
+				entries,
+				await readTimeMetadata(scope, projectId, safeTopic),
+				await fileModifiedAt(tFp),
+				undefined,
+			);
 			await atomicWrite(tFp, buildTopicFile(parsed.heading, entries));
 			await atomicWrite(
 				tierMetadataPath(scope, projectId, safeTopic),
 				`${JSON.stringify(buildTierMetadata(entries))}\n`,
 			);
+			await atomicWrite(timeMetadataPath(scope, projectId, safeTopic), `${JSON.stringify(times)}\n`);
 		}
 
 		// Rebuild instead of trusting an index an older writer may have rewritten.

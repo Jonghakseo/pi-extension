@@ -108,6 +108,42 @@ describe("registered memory tools", () => {
 		expect((await listPersistentMemories(projectId)).filter((entry) => entry.title === "Shared title")).toEqual([]);
 	});
 
+	it("says how old a recalled memory is once its facts may have changed", async () => {
+		const dayMs = 86_400_000;
+		const harness = createHarness(SessionManager.create(cwd, sessionDir));
+		// A memory written before save times were recorded: only its topic file's age is known.
+		const topicPath = path.join(testHome, ".pi", "memory", "user", "general.md");
+		await fs.mkdir(path.dirname(topicPath), { recursive: true });
+		const marker = Buffer.from("Legacy rule").toString("base64");
+		await fs.writeFile(topicPath, `# General\n\n<!-- @entry: ${marker} -->\nold fact\n`, "utf8");
+		const monthAgo = new Date(Date.now() - 30 * dayMs);
+		await fs.utimes(topicPath, monthAgo, monthAgo);
+
+		// Saving another memory into the same topic must not make the old one look new.
+		await harness.execute("memory_remember", {
+			scope: "user",
+			topic: "general",
+			title: "Fresh rule",
+			content: "new fact",
+		});
+		const legacyId = memoryEntryId("user", undefined, "general", "Legacy rule", "old fact");
+		const freshId = memoryEntryId("user", undefined, "general", "Fresh rule", "new fact");
+		const recall = async (id: string) => resultText(await harness.execute("memory_recall", { id }));
+
+		expect(await recall(freshId)).not.toContain("Saved");
+		expect(await recall(legacyId)).toContain("Saved at least 30 days ago.");
+
+		vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 10 * dayMs });
+		try {
+			const fresh = await recall(freshId);
+			expect(fresh).toContain("Saved 10 days ago.");
+			expect(fresh).toContain("new fact");
+			expect(await recall(legacyId)).toContain("Saved at least 40 days ago.");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("removes only the selected duplicate by ID", async () => {
 		const harness = createHarness(SessionManager.create(cwd, sessionDir));
 		const topicPath = path.join(testHome, ".pi", "memory", "user", "general.md");
