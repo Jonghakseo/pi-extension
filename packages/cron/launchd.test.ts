@@ -7,6 +7,7 @@ import {
 	getLaunchdPlistPath,
 	getLaunchdStatus,
 	installLaunchAgent,
+	resolveAssociatedBundleIdentifier,
 	uninstallLaunchAgent,
 } from "./launchd.js";
 
@@ -86,6 +87,24 @@ describe("launchd helpers", () => {
 		const calls = readFileSync(join(tempDir, "launchctl.log"), "utf-8");
 		expect(calls).toContain("bootstrap");
 		expect(calls).toContain("kickstart -k");
+	});
+
+	it.skipIf(process.platform !== "darwin")("names the app that contains the daemon's Node", () => {
+		const contents = join(tempDir, "Some App.app", "Contents");
+		mkdirSync(join(contents, "Resources", "runtime", "bin"), { recursive: true });
+		writeFileSync(
+			join(contents, "Info.plist"),
+			`<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.some-app</string></dict></plist>
+`,
+		);
+
+		expect(resolveAssociatedBundleIdentifier(join(contents, "Resources", "runtime", "bin", "node"))).toBe(
+			"com.example.some-app",
+		);
+		// A Node outside any app (Homebrew, nvm) has no app to name.
+		expect(resolveAssociatedBundleIdentifier("/opt/homebrew/bin/node")).toBeUndefined();
+		expect(resolveAssociatedBundleIdentifier(join(tempDir, "Missing.app", "Contents", "bin", "node"))).toBeUndefined();
 	});
 
 	it("uninstalls the LaunchAgent plist", () => {

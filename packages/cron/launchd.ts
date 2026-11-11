@@ -53,7 +53,38 @@ function resolvePiBinary(): string {
 	return found || "pi";
 }
 
+/**
+ * The bundle identifier of the app that contains `executablePath`, if any.
+ *
+ * macOS announces a new LaunchAgent with a notice. Without an associated app it
+ * names the signer of the program ('Software from "<developer name>" can run in
+ * the background'), which the user may never have heard of. When the Node that
+ * runs the daemon ships inside an app, naming that app in
+ * `AssociatedBundleIdentifiers` makes the notice and the Login Items list say
+ * the app's name instead.
+ */
+export function resolveAssociatedBundleIdentifier(executablePath: string): string | undefined {
+	const match = /^(.*?\.app)\/Contents\//.exec(executablePath);
+	if (!match) return undefined;
+	const infoPlist = join(match[1], "Contents", "Info.plist");
+	if (!existsSync(infoPlist)) return undefined;
+	const result = spawnSync("/usr/bin/plutil", ["-extract", "CFBundleIdentifier", "raw", "-o", "-", infoPlist], {
+		encoding: "utf-8",
+	});
+	if (result.status !== 0) return undefined;
+	const identifier = result.stdout.trim();
+	return /^[A-Za-z0-9.-]+$/.test(identifier) ? identifier : undefined;
+}
+
 function renderPlist(): string {
+	const associatedBundleIdentifier = resolveAssociatedBundleIdentifier(process.execPath);
+	const associatedBundle = associatedBundleIdentifier
+		? `
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		${plistString(associatedBundleIdentifier)}
+	</array>`
+		: "";
 	const pathValue = process.env.PATH || "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 	const piBin = resolvePiBinary();
 
@@ -67,7 +98,7 @@ function renderPlist(): string {
 	<array>
 		${plistString(process.execPath)}
 		${plistString(getDaemonPath())}
-	</array>
+	</array>${associatedBundle}
 	<key>WorkingDirectory</key>
 	${plistString(getAgentDir())}
 	<key>RunAtLoad</key>
